@@ -11,8 +11,9 @@ out/
 # Scratch space
 tmp/
 
-# Downloaded datasets
+# Downloaded datasets and native dependencies
 data/
+third_party/
 
 # Model binaries (small test fixtures are allowed)
 *.onnx

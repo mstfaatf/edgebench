@@ -8,6 +8,15 @@ The torch check exports a pretrained MobileNetV2 to ONNX. Later checks reuse
 that model: the onnx checker, the ONNX Runtime CPU session, the PyTorch vs ONNX
 Runtime output comparison, and (if available) a QNN execution provider session.
 
+Everything runs in a single environment: onnxruntime-qnn 2.x is a plugin
+execution provider that installs alongside the stock onnxruntime package.
+TensorFlow and tf2onnx are optional; they have no native win-arm64 wheels and
+are only reported if present.
+
+Unlike other EdgeBench scripts, this one does not exit on a non-native
+(emulated x64) interpreter. It reports the platform status so the problem is
+visible in the output.
+
 Usage:
     python scripts/check_env.py
     python scripts/check_env.py --json results.json
@@ -28,13 +37,14 @@ import importlib.util
 import json
 import platform
 import sys
-import sysconfig
 import time
 import traceback
 import warnings
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
+
+from common.platform_guard import explain, platform_status
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -116,20 +126,20 @@ def dist_version(name: str) -> str | None:
 
 
 def system_info() -> dict[str, Any]:
-    build_platform = sysconfig.get_platform()
+    status = platform_status()
     return {
         "os": windows_version(),
         "cpu": cpu_name(),
         "python_version": platform.python_version(),
         "python_build": sys.version.replace("\n", " "),
         # platform.machine() reports the host OS architecture, even for an
-        # emulated x64 interpreter. sysconfig.get_platform() reports what the
-        # interpreter itself was built for.
-        "platform_machine": platform.machine(),
+        # emulated x64 interpreter. interpreter_platform (sysconfig) reports
+        # what the interpreter itself was built for.
+        "platform_machine": status.host_machine,
         "platform_architecture": list(platform.architecture()),
-        "interpreter_platform": build_platform,
-        "native_arm64": build_platform == "win-arm64",
-        "executable": sys.executable,
+        "interpreter_platform": status.interpreter_platform,
+        "native_arm64": status.is_native_arm64,
+        "executable": status.executable,
         "pip_version": dist_version("pip"),
     }
 
@@ -211,7 +221,7 @@ def check_torch(torch):
 
     tmp_dir: Path = shared["tmp_dir"]
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    onnx_path = tmp_dir / "mobilenet_v2.onnx"
+    onnx_path = tmp_dir / "mobilenetv2.onnx"
 
     weights = torchvision.models.MobileNet_V2_Weights.DEFAULT
     model = torchvision.models.mobilenet_v2(weights=weights).eval()
@@ -434,11 +444,22 @@ def check_qnn(_):
     return "; ".join(notes), extra
 
 
-def onnxruntime_dist() -> str | None:
-    for name in ("onnxruntime-qnn", "onnxruntime"):
-        if dist_version(name):
-            return name
-    return None
+def check_onnxruntime_qnn(qnn):
+    lib = Path(qnn.get_library_path())
+    htp = Path(qnn.get_qnn_htp_path())
+    missing = [p.name for p in (lib, htp) if not p.is_file()]
+    if missing:
+        raise FileNotFoundError(f"missing from package: {', '.join(missing)}")
+    sdk = getattr(qnn.build_and_package_info, "qnn_version", "unknown")
+    return f"plugin EP library present ({lib.name}, {htp.name}); QNN SDK {sdk}", {"qnn_sdk": sdk}
+
+
+# Modules that are not expected to be installable on win-arm64. Their absence
+# is reported but is not a problem.
+OPTIONAL = {
+    "tensorflow": "optional: no native win-arm64 wheel; Keras models are trained and converted off-device",
+    "tf2onnx": "optional: requires tensorflow",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -448,8 +469,6 @@ def onnxruntime_dist() -> str | None:
 def run_all(tmp_dir: Path) -> list[CheckResult]:
     shared.clear()
     shared["tmp_dir"] = tmp_dir
-    ort_dist = onnxruntime_dist()
-    ort_label = f"onnxruntime ({ort_dist})" if ort_dist else "onnxruntime"
 
     # Order matters: torch produces the model that onnx/onnxruntime/QNN consume.
     plan = [
@@ -458,7 +477,8 @@ def run_all(tmp_dir: Path) -> list[CheckResult]:
         ("torch", "torch", check_torch, None),
         ("torchvision", "torchvision", check_torchvision, None),
         ("onnx", "onnx", check_onnx, None),
-        (ort_label, "onnxruntime", check_onnxruntime, ort_dist),
+        ("onnxruntime", "onnxruntime", check_onnxruntime, "onnxruntime"),
+        ("onnxruntime-qnn", "onnxruntime_qnn", check_onnxruntime_qnn, "onnxruntime-qnn"),
         ("torch vs onnxruntime CPU", None, check_cross, None),
         ("timm", "timm", check_timm, None),
         ("tensorflow", "tensorflow", check_tensorflow, None),
@@ -468,7 +488,10 @@ def run_all(tmp_dir: Path) -> list[CheckResult]:
     results = []
     for name, module, func, dist in plan:
         print(f"  running: {name} ...", flush=True)
-        results.append(run_check(name, module, func, dist))
+        result = run_check(name, module, func, dist)
+        if result.status == NOT_INSTALLED and name in OPTIONAL:
+            result.detail = OPTIONAL[name]
+        results.append(result)
     return results
 
 
@@ -478,10 +501,9 @@ def print_report(info: dict[str, Any], results: list[CheckResult]) -> None:
     for key, value in info.items():
         print(f"  {key:<22} {value}")
     if not info["native_arm64"]:
-        print(
-            "\n  WARNING: this interpreter is not a native win-arm64 build. "
-            "Results will not reflect native ARM64 behaviour."
-        )
+        print("\n  WARNING: results below do not reflect native ARM64 behaviour.")
+        for line in explain(platform_status()).splitlines():
+            print(f"  {line}")
 
     print("\nChecks")
     print("-" * 60)

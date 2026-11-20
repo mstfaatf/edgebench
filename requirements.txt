@@ -1,0 +1,57 @@
+# EdgeBench Python environment for Windows on Arm (native win-arm64, Python 3.12).
+#
+# Install into a venv created with a native ARM64 interpreter (see docs/setup.md):
+#   .\.venv\Scripts\python.exe -m pip install --only-binary=:all: -r requirements.txt
+#
+# torch and torchvision have no win-arm64 wheels on PyPI; the official builds
+# come from the PyTorch package index. Both are pinned exactly (including the
+# local version label) so pip can never fall back to the unrelated, ancient
+# pure-Python torchvision releases on PyPI.
+#
+# TensorFlow and tf2onnx are intentionally absent: neither works natively on
+# win-arm64. Keras models are trained and converted off-device.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# Direct dependencies
+numpy==2.5.5
+pandas==3.1.1
+onnx==1.23.2
+onnxruntime==1.32.0        # keep in sync with scripts/fetch_deps.ps1
+onnxruntime-qnn==2.8.0     # QNN plugin execution provider (QNN SDK 2.52.0)
+torch==2.13.0+cpu
+torchvision==0.28.0+8fb8771
+timm==1.0.31
+
+# Transitive dependencies
+anyio==4.16.0
+click==8.5.1
+colorama==0.4.6
+coloredlogs==15.0.1
+filelock==4.2.12
+flatbuffers==25.12.19
+fsspec==2026.9.0
+h11==0.16.0
+hf-xet==1.8.0
+httpcore2==2.16.2
+httpx2==2.16.2
+huggingface_hub==2.4.0
+humanfriendly==10.0
+idna==3.20
+Jinja2==3.1.6
+MarkupSafe==3.0.4
+ml_dtypes==0.7.0
+mpmath==1.3.0
+networkx==3.7
+packaging==26.3
+pillow==13.0.0
+protobuf==7.36.2
+pyreadline3==3.5.6
+python-dateutil==4.0.0
+PyYAML==6.0.3
+safetensors==0.8.0
+setuptools==84.2.1
+sympy==1.14.0
+tqdm==4.70.1
+truststore==0.10.5
+typing_extensions==4.16.0
+tzdata==2026.6
