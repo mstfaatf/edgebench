@@ -95,7 +95,7 @@ the NPU. See [feasibility.md](feasibility.md) for reference results.
   The ARM64 build tools component provides the ARM64-hosted compiler
   (`VC\Tools\MSVC\<ver>\bin\Hostarm64\arm64\cl.exe`). Without it, the
   `arm64-release` preset fails to configure.
-- CMake 3.24 or newer. The copy bundled with Visual Studio works:
+- CMake 3.25 or newer. The copy bundled with Visual Studio works:
   `C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe`.
   It is on `PATH` in a *Developer PowerShell for VS 2022*.
 
@@ -113,9 +113,29 @@ not committed):
 | ONNX Runtime 1.32.0 (headers, win-arm64 `onnxruntime.dll`/`.lib`) | NuGet `Microsoft.ML.OnnxRuntime` | `third_party/onnxruntime/` |
 | QNN execution provider 2.8.0 (plugin EP + QNN SDK 2.52.0 backends) | GitHub release `onnxruntime/onnxruntime-qnn`, `onnxruntime-qnn-2.8.0-win-arm64.zip` | `third_party/onnxruntime-qnn/` |
 
-The script is safe to re-run. Use `-Force` to re-extract.
+The script is safe to re-run. Use `-Force` to re-extract. CMake finds these
+packages through `cmake/FindOnnxRuntime.cmake`; to use a different location,
+set `OnnxRuntime_ROOT` / `QnnEp_ROOT` when configuring.
 
-### 2. Build `ort_probe`
+### 2. Build the engine and run the tests
+
+From the repository root:
+
+```powershell
+cmake --preset arm64-release          # or arm64-debug
+cmake --build --preset arm64-release
+ctest --preset arm64-release
+.\build\arm64-release\bin\Release\edgebench.exe --version
+```
+
+The presets use the Visual Studio 2022 generator with the ARM64-hosted toolset,
+so they work from any shell. Configuration fails with a clear message if the
+compiler does not target native ARM64. GoogleTest is downloaded at configure
+time (pinned by SHA256). Executables are placed in
+`build/<preset>/bin/<Config>/`, together with the ONNX Runtime and QNN runtime
+DLLs. Project code is compiled with `/W4 /WX`.
+
+### 3. Build `ort_probe`
 
 `tools/ort_probe` is a small diagnostic that checks ONNX Runtime and the QNN EP
 from native C++:
@@ -131,7 +151,7 @@ so it works from any shell. Output goes to
 `build/ort_probe/arm64-release/Release/`. ONNX Runtime and all QNN runtime files
 are copied next to `ort_probe.exe`.
 
-### 3. Run it
+### 4. Run `ort_probe`
 
 ```powershell
 # Exports tmp\mobilenetv2.onnx if missing, then runs CPU and NPU in Python

@@ -1,0 +1,45 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "arm64-base",
+      "hidden": true,
+      "description": "Native ARM64 build using the ARM64-hosted MSVC toolset. Works from any shell.",
+      "generator": "Visual Studio 17 2022",
+      "architecture": { "value": "ARM64", "strategy": "set" },
+      "toolset": { "value": "host=ARM64", "strategy": "set" },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "arm64-release",
+      "displayName": "Windows ARM64 Release",
+      "inherits": "arm64-base",
+      "binaryDir": "${sourceDir}/build/arm64-release"
+    },
+    {
+      "name": "arm64-debug",
+      "displayName": "Windows ARM64 Debug",
+      "inherits": "arm64-base",
+      "binaryDir": "${sourceDir}/build/arm64-debug"
+    }
+  ],
+  "buildPresets": [
+    { "name": "arm64-release", "configurePreset": "arm64-release", "configuration": "Release" },
+    { "name": "arm64-debug", "configurePreset": "arm64-debug", "configuration": "Debug" }
+  ],
+  "testPresets": [
+    {
+      "name": "arm64-release",
+      "configurePreset": "arm64-release",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "arm64-debug",
+      "configurePreset": "arm64-debug",
+      "configuration": "Debug",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

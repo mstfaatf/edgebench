@@ -1,0 +1,56 @@
+# Normalize line endings in the repository; check out text files with the
+# endings below regardless of core.autocrlf.
+* text=auto
+
+# Source, build files, scripts and docs: LF
+*.c             text eol=lf
+*.cc            text eol=lf
+*.cpp           text eol=lf
+*.h             text eol=lf
+*.hpp           text eol=lf
+*.in            text eol=lf
+*.cmake         text eol=lf
+CMakeLists.txt  text eol=lf
+*.py            text eol=lf
+*.sh            text eol=lf
+*.js            text eol=lf
+*.jsx           text eol=lf
+*.ts            text eol=lf
+*.tsx           text eol=lf
+*.css           text eol=lf
+*.html          text eol=lf
+*.json          text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.toml          text eol=lf
+*.md            text eol=lf
+*.txt           text eol=lf
+*.csv           text eol=lf
+.gitattributes  text eol=lf
+.gitignore      text eol=lf
+.editorconfig   text eol=lf
+.clang-format   text eol=lf
+LICENSE         text eol=lf
+
+# Windows scripts: CRLF
+*.ps1           text eol=crlf
+*.psm1          text eol=crlf
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+
+# Binary files
+*.onnx          binary
+*.npy           binary
+*.npz           binary
+*.bin           binary
+*.pt            binary
+*.pth           binary
+*.h5            binary
+*.keras         binary
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.webp          binary
+*.ico           binary
+*.pdf           binary
