@@ -36,12 +36,13 @@ performance numbers at this stage.
 | `engine/` | C++ benchmarking engine (`edgebench_core` library, `edgebench` CLI, tests) |
 | `ml/` | Python model preparation: PyTorch, TensorFlow/Keras (trained off-device), export, quantization, validation |
 | `models/` | Locally produced model files (not committed) |
-| `benchmarks/` | Benchmark configurations and results |
+| `benchmarks/` | Benchmark configurations and results (`results/published/` is committed, `results/local/` is not) |
+| `schemas/` | JSON Schema for benchmark result files ([format spec](docs/results-schema.md)) |
 | `dashboard/` | Static results dashboard |
 | `scripts/` | Environment check and dependency fetch scripts |
 | `tools/` | Standalone diagnostics, e.g. `ort_probe` for ONNX Runtime + QNN |
 | `cmake/` | Shared CMake modules |
-| `docs/` | Setup guide and environment feasibility notes |
+| `docs/` | Setup guide, results format, environment feasibility notes |
 
 ## Getting started
 

@@ -2,6 +2,7 @@
 .venv*/
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # C++ build output (all CMake presets build under build/)
 build/
@@ -26,3 +27,6 @@ third_party/
 *.keras
 *.bin
 !**/tests/fixtures/**
+
+# Scratch benchmark results (published runs live in benchmarks/results/published/)
+benchmarks/results/local/

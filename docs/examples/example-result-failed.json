@@ -1,0 +1,145 @@
+{
+  "schema_version": "1.0.0",
+  "run_id": "00000000-0000-0000-0000-000000000000",
+  "timestamp_utc": "2000-01-01T00:00:00Z",
+  "label": "Illustrative example: failed run (session creation rejected in strict mode)",
+  "status": "failed",
+  "error": {
+    "stage": "session_creation",
+    "message": "Illustrative example: session creation failed because not every node could be assigned to the requested execution provider and CPU fallback is disabled.",
+    "code": "ORT_FAIL"
+  },
+  "warnings": [
+    {
+      "code": "illustrative_example",
+      "message": "Illustrative example, not a real measurement. All values are placeholders.",
+      "path": null
+    }
+  ],
+  "tool": {
+    "name": "edgebench",
+    "version": "0.1.0",
+    "git_commit": null,
+    "git_dirty": null,
+    "build_type": "Release",
+    "compiler": "Example Compiler 0.0"
+  },
+  "system": {
+    "os": {
+      "name": "Windows 11",
+      "version": "Example",
+      "build": "00000.0",
+      "architecture": "arm64"
+    },
+    "process_architecture": "arm64",
+    "cpu": {
+      "name": "Example ARM64 CPU",
+      "physical_cores": null,
+      "logical_processors": 8
+    },
+    "memory_total_bytes": 1000000000,
+    "device": {
+      "manufacturer": null,
+      "model": null
+    },
+    "power": {
+      "source": null,
+      "power_mode": null
+    }
+  },
+  "runtime": {
+    "onnxruntime": {
+      "version": "0.0.0",
+      "library_path": "C:\\example\\edgebench\\onnxruntime.dll"
+    },
+    "execution_provider": {
+      "name": "QNNExecutionProvider",
+      "version": "0.0.0",
+      "library_path": "C:\\example\\edgebench\\onnxruntime_providers_qnn.dll"
+    },
+    "qnn": {
+      "sdk_version": "0.0.0",
+      "backend": "htp",
+      "backend_path": "C:\\example\\edgebench\\QnnHtp.dll"
+    },
+    "ep_device": {
+      "ep_name": "QNNExecutionProvider",
+      "ep_vendor": "Example Vendor",
+      "device_type": "NPU",
+      "vendor": null,
+      "vendor_id": null,
+      "device_id": null,
+      "driver_version": null
+    }
+  },
+  "model": {
+    "name": "example_model",
+    "file_name": "example_model.onnx",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "size_bytes": 1000000,
+    "opset": 17,
+    "ir_version": 8,
+    "stored_precision": "int8",
+    "inputs": [
+      { "name": "input", "dtype": "float32", "shape": ["batch", 3, 224, 224] }
+    ],
+    "outputs": [
+      { "name": "output", "dtype": "float32", "shape": ["batch", 1000] }
+    ],
+    "source": {
+      "library": "custom",
+      "identifier": null,
+      "export_tool": null
+    },
+    "quantization": {
+      "method": "static",
+      "format": "qdq",
+      "activation_dtype": "uint8",
+      "weight_dtype": "uint8",
+      "calibration": {
+        "dataset": "example-calibration-set",
+        "sample_count": 100
+      },
+      "tool": "Example Quantizer 0.0"
+    },
+    "precision_notes": null
+  },
+  "config": {
+    "requested": {
+      "execution_provider": "QNNExecutionProvider",
+      "device_type": "NPU",
+      "compute_precision": null
+    },
+    "strict_mode": true,
+    "batch_size": 1,
+    "input": {
+      "kind": "random",
+      "constant_value": null,
+      "seed": 0,
+      "dataset": null
+    },
+    "warmup_iterations": 10,
+    "measured_iterations": 100,
+    "trials": 3,
+    "run_api": "sync",
+    "ort_execution_mode": "sequential",
+    "intra_op_threads": null,
+    "inter_op_threads": null,
+    "graph_optimization_level": "enable_all",
+    "ep_options": {
+      "backend_path": "QnnHtp.dll"
+    },
+    "session_config": {
+      "session.disable_cpu_ep_fallback": "1"
+    },
+    "ep_context_cache": {
+      "enabled": false,
+      "cache_file": null
+    }
+  },
+  "execution": null,
+  "timing": null,
+  "memory": null,
+  "accuracy": null,
+  "raw": null
+}

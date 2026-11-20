@@ -1,0 +1,222 @@
+{
+  "schema_version": "1.0.0",
+  "run_id": "00000000-0000-0000-0000-000000000000",
+  "timestamp_utc": "2000-01-01T00:00:00Z",
+  "label": "Illustrative example: MobileNetV2 FP32 on the QNN EP (NPU)",
+  "status": "success",
+  "error": null,
+  "warnings": [
+    {
+      "code": "illustrative_example",
+      "message": "Illustrative example, not a real measurement. All values are placeholders.",
+      "path": null
+    },
+    {
+      "code": "value_unavailable",
+      "message": "NPU driver version could not be determined.",
+      "path": "/runtime/ep_device/driver_version"
+    }
+  ],
+  "tool": {
+    "name": "edgebench",
+    "version": "0.1.0",
+    "git_commit": "0000000000000000000000000000000000000000",
+    "git_dirty": false,
+    "build_type": "Release",
+    "compiler": "Example Compiler 0.0"
+  },
+  "system": {
+    "os": {
+      "name": "Windows 11",
+      "version": "Example",
+      "build": "00000.0",
+      "architecture": "arm64"
+    },
+    "process_architecture": "arm64",
+    "cpu": {
+      "name": "Example ARM64 CPU",
+      "physical_cores": 8,
+      "logical_processors": 8
+    },
+    "memory_total_bytes": 1000000000,
+    "device": {
+      "manufacturer": "Example Manufacturer",
+      "model": "Example Laptop"
+    },
+    "power": {
+      "source": "ac",
+      "power_mode": null
+    }
+  },
+  "runtime": {
+    "onnxruntime": {
+      "version": "0.0.0",
+      "library_path": "C:\\example\\edgebench\\onnxruntime.dll"
+    },
+    "execution_provider": {
+      "name": "QNNExecutionProvider",
+      "version": "0.0.0",
+      "library_path": "C:\\example\\edgebench\\onnxruntime_providers_qnn.dll"
+    },
+    "qnn": {
+      "sdk_version": "0.0.0",
+      "backend": "htp",
+      "backend_path": "C:\\example\\edgebench\\QnnHtp.dll"
+    },
+    "ep_device": {
+      "ep_name": "QNNExecutionProvider",
+      "ep_vendor": "Example Vendor",
+      "device_type": "NPU",
+      "vendor": null,
+      "vendor_id": null,
+      "device_id": null,
+      "driver_version": null
+    }
+  },
+  "model": {
+    "name": "mobilenet_v2",
+    "file_name": "mobilenetv2.onnx",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "size_bytes": 1000000,
+    "opset": 17,
+    "ir_version": 8,
+    "stored_precision": "fp32",
+    "inputs": [
+      { "name": "input", "dtype": "float32", "shape": [1, 3, 224, 224] }
+    ],
+    "outputs": [
+      { "name": "logits", "dtype": "float32", "shape": [1, 1000] }
+    ],
+    "source": {
+      "library": "torchvision",
+      "identifier": "mobilenet_v2/IMAGENET1K_V2",
+      "export_tool": "torch.onnx 0.0.0"
+    },
+    "quantization": {
+      "method": "none",
+      "format": null,
+      "activation_dtype": null,
+      "weight_dtype": null,
+      "calibration": null,
+      "tool": null
+    },
+    "precision_notes": "FP32 model. The NPU backend may compute FP32 graphs at reduced precision internally, so outputs are not expected to match the CPU EP exactly."
+  },
+  "config": {
+    "requested": {
+      "execution_provider": "QNNExecutionProvider",
+      "device_type": "NPU",
+      "compute_precision": null
+    },
+    "strict_mode": true,
+    "batch_size": 1,
+    "input": {
+      "kind": "constant",
+      "constant_value": 0.5,
+      "seed": null,
+      "dataset": null
+    },
+    "warmup_iterations": 10,
+    "measured_iterations": 100,
+    "trials": 3,
+    "run_api": "sync",
+    "ort_execution_mode": "sequential",
+    "intra_op_threads": null,
+    "inter_op_threads": null,
+    "graph_optimization_level": "enable_all",
+    "ep_options": {
+      "backend_path": "QnnHtp.dll"
+    },
+    "session_config": {
+      "session.disable_cpu_ep_fallback": "1"
+    },
+    "ep_context_cache": {
+      "enabled": false,
+      "cache_file": null
+    }
+  },
+  "execution": {
+    "full_device_execution_verified": true,
+    "verification_method": "strict_session",
+    "verification_details": "CPU fallback disabled and the session was created successfully, so every node was assigned to the QNN EP.",
+    "node_assignment": null
+  },
+  "timing": {
+    "timer": {
+      "source": "std::chrono::steady_clock",
+      "resolution_ns": 100
+    },
+    "percentile_method": "nearest_rank",
+    "session_init": {
+      "session_create_ms": 1000.0,
+      "ep_context_state": "cold"
+    },
+    "first_inference_ms": 10.0,
+    "trials": [
+      {
+        "trial_index": 0,
+        "stats": {
+          "count": 100,
+          "mean_ms": 1.0, "p50_ms": 1.0, "p95_ms": 1.5, "p99_ms": 2.0, "stddev_ms": 0.1,
+          "min_ms": 0.5, "max_ms": 2.5,
+          "inferences_per_sec": 1000.0, "items_per_sec": 1000.0
+        }
+      },
+      {
+        "trial_index": 1,
+        "stats": {
+          "count": 100,
+          "mean_ms": 1.0, "p50_ms": 1.0, "p95_ms": 1.5, "p99_ms": 2.0, "stddev_ms": 0.1,
+          "min_ms": 0.5, "max_ms": 2.5,
+          "inferences_per_sec": 1000.0, "items_per_sec": 1000.0
+        }
+      },
+      {
+        "trial_index": 2,
+        "stats": {
+          "count": 100,
+          "mean_ms": 1.0, "p50_ms": 1.0, "p95_ms": 1.5, "p99_ms": 2.0, "stddev_ms": 0.1,
+          "min_ms": 0.5, "max_ms": 2.5,
+          "inferences_per_sec": 1000.0, "items_per_sec": 1000.0
+        }
+      }
+    ],
+    "aggregate": {
+      "stats": {
+        "count": 300,
+        "mean_ms": 1.0, "p50_ms": 1.0, "p95_ms": 1.5, "p99_ms": 2.0, "stddev_ms": 0.1,
+        "min_ms": 0.5, "max_ms": 2.5,
+        "inferences_per_sec": 1000.0, "items_per_sec": 1000.0
+      },
+      "trial_variation": {
+        "trial_mean_min_ms": 1.0,
+        "trial_mean_max_ms": 1.0,
+        "trial_mean_stddev_ms": 0.0,
+        "trial_mean_cv_ratio": 0.0
+      }
+    }
+  },
+  "memory": {
+    "scope": "process",
+    "peak_working_set_bytes": 100000000,
+    "peak_private_bytes": 100000000,
+    "source": "GetProcessMemoryInfo"
+  },
+  "accuracy": {
+    "dataset": "example-dataset",
+    "sample_count": 100,
+    "metrics": [
+      { "name": "top1_accuracy_ratio", "value": 0.5 }
+    ],
+    "reference_agreement": {
+      "reference_run_id": "00000000-0000-0000-0000-000000000001",
+      "top1_agreement_ratio": 1.0,
+      "sample_count": 100
+    }
+  },
+  "raw": {
+    "latencies_file": "example-result.latencies.csv",
+    "format": "csv",
+    "sha256": null
+  }
+}

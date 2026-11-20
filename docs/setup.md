@@ -82,6 +82,19 @@ Every check should report `PASS`, except `tensorflow` and `tf2onnx`, which
 report `NOT INSTALLED` (optional). The QNN check confirms that a model runs on
 the NPU. See [feasibility.md](feasibility.md) for reference results.
 
+### 5. Run the Python tests
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest
+```
+
+Tests live in `scripts/tests/` (configured in `pyproject.toml`). To validate
+benchmark result files against the [results schema](results-schema.md):
+
+```powershell
+.\.venv\Scripts\python.exe scripts\validate_results.py benchmarks\results\published
+```
+
 ## Building the C++ tools
 
 ### Prerequisites
