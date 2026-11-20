@@ -28,7 +28,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # Invoke-WebRequest is much faster without the progress bar
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-# Keep the onnxruntime version in sync with requirements.txt.
+# Keep the onnxruntime version in sync with requirements.txt and CMakeLists.txt.
 $OrtVersion = '1.32.0'
 $QnnVersion = '2.8.0'
 

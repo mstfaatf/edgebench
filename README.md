@@ -47,7 +47,8 @@ performance numbers at this stage.
 ## Getting started
 
 See [docs/setup.md](docs/setup.md) for the Python environment, native
-dependencies, and building the C++ code. In short:
+dependencies, and building the C++ code. In short, from the repository root in
+a *Developer PowerShell for VS 2022* (which puts `cmake` on `PATH`):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\fetch_deps.ps1

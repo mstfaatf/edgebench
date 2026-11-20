@@ -38,8 +38,18 @@ The ARM64 build is the one tagged `-arm64`. Confirm it with `sysconfig`:
 > `sysconfig.get_platform()`, which reports what the interpreter was built for:
 > `win-arm64` (native) or `win-amd64` (emulated x64).
 >
-> EdgeBench scripts check this with `scripts/common/platform_guard.py` and
-> refuse to run on a non-native interpreter.
+> EdgeBench checks this with `scripts/common/platform_guard.py`. The check is
+> scoped by what a script does:
+>
+> | Kind of script | Behaviour on a non-native interpreter | Examples |
+> |---|---|---|
+> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `tools/ort_probe/reference.py` |
+> | Environment diagnostic | Runs and reports the problem prominently | `scripts/check_env.py` |
+> | Platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/validate_results.py` and its tests |
+>
+> Results from emulated or non-Snapdragon machines would be mislabeled, so only
+> the first kind is blocked. Tooling that just reads or checks files must keep
+> working on Linux/x64 CI runners and on contributors' other machines.
 
 ### 2. Create the virtual environment
 
@@ -108,9 +118,25 @@ benchmark result files against the [results schema](results-schema.md):
   The ARM64 build tools component provides the ARM64-hosted compiler
   (`VC\Tools\MSVC\<ver>\bin\Hostarm64\arm64\cl.exe`). Without it, the
   `arm64-release` preset fails to configure.
-- CMake 3.25 or newer. The copy bundled with Visual Studio works:
-  `C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe`.
-  It is on `PATH` in a *Developer PowerShell for VS 2022*.
+- CMake 3.25 or newer. The copy bundled with Visual Studio (the *C++ CMake
+  tools for Windows* component) is enough.
+
+### 0. Open a shell with CMake on `PATH`
+
+The bundled `cmake` and `ctest` are **not** on `PATH` in a regular PowerShell.
+Use a *Developer PowerShell for VS 2022* (Start menu), or load it into an
+existing PowerShell session:
+
+```powershell
+# Adjust "Community" to your edition (e.g. BuildTools, Professional)
+& 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Launch-VsDevShell.ps1' -Arch arm64 -SkipAutomaticLocation
+cmake --version   # should print 3.25 or newer
+```
+
+The script may print `'vswhere.exe' is not recognized`; this is harmless.
+`-SkipAutomaticLocation` keeps the current directory. A standalone CMake
+(ARM64 build from cmake.org) on `PATH` works too. All commands below are run
+from the repository root in this shell.
 
 ### 1. Fetch native dependencies
 
@@ -132,8 +158,6 @@ set `OnnxRuntime_ROOT` / `QnnEp_ROOT` when configuring.
 
 ### 2. Build the engine and run the tests
 
-From the repository root:
-
 ```powershell
 cmake --preset arm64-release          # or arm64-debug
 cmake --build --preset arm64-release
@@ -142,8 +166,9 @@ ctest --preset arm64-release
 ```
 
 The presets use the Visual Studio 2022 generator with the ARM64-hosted toolset,
-so they work from any shell. Configuration fails with a clear message if the
-compiler does not target native ARM64. GoogleTest is downloaded at configure
+so no `vcvarsall`/ARM64 compiler environment is needed, only `cmake` on `PATH`.
+Configuration fails with a clear message if the compiler does not target
+native ARM64. GoogleTest is downloaded at configure
 time (pinned by SHA256). Executables are placed in
 `build/<preset>/bin/<Config>/`, together with the ONNX Runtime and QNN runtime
 DLLs. Project code is compiled with `/W4 /WX`.
@@ -151,20 +176,23 @@ DLLs. Project code is compiled with `/W4 /WX`.
 ### 3. Build `ort_probe`
 
 `tools/ort_probe` is a small diagnostic that checks ONNX Runtime and the QNN EP
-from native C++:
+from native C++. It is a separate CMake project with its own presets, so it is
+configured from its own directory:
 
 ```powershell
-cd tools\ort_probe
+Push-Location tools\ort_probe
 cmake --preset arm64-release
 cmake --build --preset arm64-release
+Pop-Location   # back to the repository root
 ```
 
-The preset uses the Visual Studio 2022 generator with the ARM64-hosted toolset,
-so it works from any shell. Output goes to
-`build/ort_probe/arm64-release/Release/`. ONNX Runtime and all QNN runtime files
+Output goes to `build/ort_probe/arm64-release/Release/` (under the repository
+root). ONNX Runtime and all QNN runtime files
 are copied next to `ort_probe.exe`.
 
 ### 4. Run `ort_probe`
+
+From the repository root:
 
 ```powershell
 # Exports tmp\mobilenetv2.onnx if missing, then runs CPU and NPU in Python

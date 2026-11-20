@@ -16,7 +16,7 @@
 numpy==2.5.5
 pandas==3.1.1
 onnx==1.23.2
-onnxruntime==1.32.0        # keep in sync with scripts/fetch_deps.ps1
+onnxruntime==1.32.0        # keep in sync with scripts/fetch_deps.ps1 and CMakeLists.txt
 onnxruntime-qnn==2.8.0     # QNN plugin execution provider (QNN SDK 2.52.0)
 torch==2.13.0+cpu
 torchvision==0.28.0+8fb8771

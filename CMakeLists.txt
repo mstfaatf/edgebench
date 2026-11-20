@@ -19,7 +19,9 @@ include(RequireNativeArm64)
 # only need to be copied once.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
-find_package(OnnxRuntime 1.32.0 REQUIRED COMPONENTS QNN)
+# Must match the onnxruntime version in requirements.txt (and scripts/fetch_deps.ps1),
+# so the C++ engine and the Python tooling run the same ONNX Runtime.
+find_package(OnnxRuntime 1.32.0 EXACT REQUIRED COMPONENTS QNN)
 message(STATUS "ONNX Runtime ${OnnxRuntime_VERSION}: ${OnnxRuntime_ROOT}")
 
 if(EDGEBENCH_BUILD_TESTS)

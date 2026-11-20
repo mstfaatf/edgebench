@@ -11,6 +11,9 @@ Usage:
 
 Directories are searched recursively for *.json files. Exits with status 1 if
 any file fails, 2 on usage errors.
+
+Platform-independent: needs only Python 3.10+ and jsonschema, so result files
+can be validated on any OS or CPU architecture (e.g. Linux CI runners).
 """
 
 from __future__ import annotations
@@ -27,8 +30,6 @@ from typing import Any, Iterable
 
 import jsonschema
 from jsonschema.exceptions import best_match
-
-from common.platform_guard import NonNativeInterpreterError, require_native_arm64
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_PATH = REPO_ROOT / "schemas" / "benchmark-result.schema.json"
@@ -289,12 +290,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("paths", nargs="+", type=Path, metavar="FILE_OR_DIR")
     parser.add_argument("--schema", type=Path, default=SCHEMA_PATH, help="schema file (default: %(default)s)")
     args = parser.parse_args(argv)
-
-    try:
-        require_native_arm64()
-    except NonNativeInterpreterError as exc:
-        print(exc, file=sys.stderr)
-        return 2
 
     try:
         files = collect_files(args.paths)

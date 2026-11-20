@@ -7,10 +7,26 @@ it reports the host OS architecture (``ARM64``) even inside an emulated x64
 interpreter. ``sysconfig.get_platform()`` reports what the interpreter itself
 was built for, and is what this module checks.
 
-Typical use at the top of a script::
+When to use it:
 
-    from common.platform_guard import require_native_arm64
-    require_native_arm64()
+- **Guard** (call ``require_native_arm64()`` and exit on failure): scripts that
+  run models, load ONNX Runtime, or measure anything about the machine, e.g.
+  ``tools/ort_probe/reference.py``. Their output is only meaningful natively.
+- **Report only**: ``scripts/check_env.py`` is a diagnostic; it prints the
+  platform status via ``platform_status()`` / ``explain()`` instead of exiting.
+- **No guard**: platform-independent tooling such as
+  ``scripts/validate_results.py``, which must run anywhere (Linux/x64 CI,
+  contributors on other machines). Such scripts must not import this module.
+
+Typical use in a guarded script::
+
+    from common.platform_guard import NonNativeInterpreterError, require_native_arm64
+
+    try:
+        require_native_arm64()
+    except NonNativeInterpreterError as exc:
+        print(exc, file=sys.stderr)
+        sys.exit(2)
 """
 
 from __future__ import annotations
