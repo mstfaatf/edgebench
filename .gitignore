@@ -1,0 +1,24 @@
+# Python
+.venv*/
+__pycache__/
+*.pyc
+
+# C++ build output
+build/
+out/
+.vs/
+
+# Scratch space
+tmp/
+
+# Downloaded datasets
+data/
+
+# Model binaries (small test fixtures are allowed)
+*.onnx
+*.pt
+*.pth
+*.h5
+*.keras
+*.bin
+!tests/fixtures/**
