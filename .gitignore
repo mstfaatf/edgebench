@@ -19,6 +19,9 @@ tmp/
 data/
 third_party/
 
+# Generated caches (e.g. QNN EP context binaries; device- and SDK-specific)
+cache/
+
 # Locally produced models and their sidecars (only the README is committed)
 models/*
 !models/README.md

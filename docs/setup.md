@@ -43,7 +43,7 @@ The ARM64 build is the one tagged `-arm64`. Confirm it with `sysconfig`:
 >
 > | Kind of script | Behaviour on a non-native interpreter | Examples |
 > |---|---|---|
-> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `tools/ort_probe/reference.py`, `scripts/export_mobilenetv2.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py` |
+> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `tools/ort_probe/reference.py`, `scripts/export_mobilenetv2.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py` |
 > | Environment diagnostic | Runs and reports the problem prominently | `scripts/check_env.py` |
 > | Platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/validate_results.py` and its tests |
 >
@@ -109,8 +109,8 @@ benchmark result files against the [results schema](results-schema.md):
 
 These steps produce the evaluation data and the MobileNetV2 models used by the
 benchmarks. Run them from the repository root, in order. Nothing they produce
-is committed: `data/`, model files (`*.onnx`) and `benchmarks/results/local/`
-are gitignored.
+is committed: `data/`, `models/` (except its README), `cache/` and
+`benchmarks/results/local/` are gitignored.
 
 ### 1. Download Imagenette and build the splits
 
@@ -163,16 +163,25 @@ the model's SHA256.
 
 Static INT8 quantization in QDQ format for the QNN HTP (NPU) backend, using
 ONNX Runtime's QNN helpers (`qnn_preprocess_model`, `get_qnn_qdq_config`,
-`quantize`) calibrated on the `calibration` split. Produces:
+`quantize`) calibrated on the `calibration` split. All variants use uint8
+activations and MinMax calibration:
 
-| Model | Configuration |
+| Model | Weights |
 |---|---|
-| `mobilenetv2_int8qdq_b1.onnx` | Helper defaults: uint8 activations and weights, per-tensor, MinMax calibration |
-| `mobilenetv2_int8qdq_pc_b1.onnx` | Same, with per-channel weights |
+| `mobilenetv2_int8qdq_b1.onnx` | Helper defaults: uint8, per-tensor |
+| `mobilenetv2_int8qdq_pc_b1.onnx` | uint8, per-channel |
+| `mobilenetv2_int8qdq_pc_s8w_b1.onnx` | int8 symmetric, per-channel |
+
+The quantizer leaves unused QuantizeLinear/DequantizeLinear chains on the
+constants of the `Clip` (ReLU6) nodes it folds away. The script prunes nodes
+whose outputs nothing consumes, and initializers nothing reads, until nothing
+changes. It then checks that the pruned model gives bit-identical CPU outputs
+to the unpruned one on the `eval` split. The unpruned models are kept in
+`models/mobilenetv2/unpruned/`.
 
 Each model gets a JSON sidecar recording the source model, calibration data,
-the configuration applied, a summary of the quantized graph, the ONNX Runtime
-version, and the model's SHA256.
+the configuration applied, the pruning result, a summary of the quantized
+graph, the ONNX Runtime version, and the model's SHA256.
 
 ### 4. Check accuracy on the CPU
 
@@ -180,11 +189,28 @@ version, and the model's SHA256.
 .\.venv\Scripts\python.exe scripts\eval_cpu.py
 ```
 
-Runs all three models on the `eval` split with the CPU execution provider and
-prints top-1 accuracy (over all 1000 classes, and restricted to the 10
-Imagenette classes) and each INT8 model's top-1 agreement with FP32. The
-summary is saved to
+Runs the FP32 model and the three INT8 models on the `eval` split with the CPU
+execution provider and prints top-1 accuracy (over all 1000 classes, and
+restricted to the 10 Imagenette classes) and each INT8 model's top-1 agreement
+with FP32. The summary is saved to
 `benchmarks/results/local/feasibility/cpu_accuracy_mobilenetv2.json`.
+
+### 5. Check the models on the NPU
+
+```powershell
+.\.venv\Scripts\python.exe scripts\npu_check.py
+```
+
+Runs the INT8 models, and the FP32 model with FP16 precision on HTP, on the
+NPU through the QNN execution provider with CPU fallback disabled. It checks
+that every node is placed on and executed by the QNN EP, compares accuracy
+with the CPU, and measures session creation (with and without an EP context
+cache) and single-image latency as a sanity check. Run it plugged in. Takes a
+few minutes. The summary goes to
+`benchmarks/results/local/feasibility/npu_check_mobilenetv2.json`, with session
+logs and profiles in `npu_check_logs/` next to it. EP context caches are written
+to `cache/qnn/` (not committed; they are specific to the device and the QNN SDK
+version). Results are discussed in [feasibility.md](feasibility.md).
 
 ## Building the C++ tools
 

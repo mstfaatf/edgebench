@@ -33,6 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from common import accuracy as acc  # noqa: E402
 from common.platform_guard import NonNativeInterpreterError, require_native_arm64  # noqa: E402
 from common.preprocess import (  # noqa: E402
     IMAGENETTE_ROOT,
@@ -40,9 +41,7 @@ from common.preprocess import (  # noqa: E402
     REPO_ROOT,
     SPLITS_DIR,
     load_image,
-    load_imagenette_classes,
     read_split,
-    wnid_of,
 )
 
 MODEL_DIR = REPO_ROOT / "models" / "mobilenetv2"
@@ -50,7 +49,8 @@ REFERENCE = "fp32"
 MODELS = {
     "fp32": "mobilenetv2_fp32_b1.onnx",
     "int8_qdq_per_tensor": "mobilenetv2_int8qdq_b1.onnx",
-    "int8_qdq_per_channel": "mobilenetv2_int8qdq_pc_b1.onnx",
+    "int8_qdq_per_channel_u8w": "mobilenetv2_int8qdq_pc_b1.onnx",
+    "int8_qdq_per_channel_s8w": "mobilenetv2_int8qdq_pc_s8w_b1.onnx",
 }
 EVAL_SPLIT = "eval"
 DEFAULT_OUTPUT = (
@@ -82,43 +82,27 @@ def main() -> int:
               "run scripts/export_mobilenetv2.py and scripts/quantize_qnn.py first", file=sys.stderr)
         return 1
 
-    classes = load_imagenette_classes()
-    class_indices = np.array([c.imagenet_index for c in classes])
-    wnid_to_index = {c.wnid: c.imagenet_index for c in classes}
     images = read_split(EVAL_SPLIT)
-    labels = np.array([wnid_to_index[wnid_of(p)] for p in images])
-    from_imagenet_val = sum(Path(p).name.startswith("ILSVRC2012_val_") for p in images)
+    labels = acc.labels_for(images)
+    from_imagenet_val = labels.from_imagenet_val
 
     print(f"preprocessing {len(images)} eval images")
     inputs = [load_image(IMAGENETTE_ROOT / p) for p in images]
 
-    preds_1000: dict[str, np.ndarray] = {}
-    preds_10: dict[str, np.ndarray] = {}
+    logits: dict[str, np.ndarray] = {}
     results: dict[str, dict] = {}
     for key, filename in MODELS.items():
         path = MODEL_DIR / filename
         session = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
         input_name = session.get_inputs()[0].name
-        logits = np.stack([session.run(None, {input_name: x})[0][0] for x in inputs])
-        preds_1000[key] = logits.argmax(axis=1)
-        preds_10[key] = class_indices[logits[:, class_indices].argmax(axis=1)]
-        results[key] = {
-            "model": filename,
-            "sha256": sha256_of(path),
-            "top1_1000": float(np.mean(preds_1000[key] == labels)),
-            "top1_imagenette10": float(np.mean(preds_10[key] == labels)),
-            "correct_1000": int(np.sum(preds_1000[key] == labels)),
-            "correct_imagenette10": int(np.sum(preds_10[key] == labels)),
-        }
+        logits[key] = np.stack([session.run(None, {input_name: x})[0][0] for x in inputs])
+        results[key] = {"model": filename, "sha256": sha256_of(path),
+                        **acc.accuracy(logits[key], labels)}
 
     for key, r in results.items():
-        if key == REFERENCE:
-            r["agreement_with_fp32"] = None
-            continue
-        r["agreement_with_fp32"] = {
-            "top1_1000": float(np.mean(preds_1000[key] == preds_1000[REFERENCE])),
-            "top1_imagenette10": float(np.mean(preds_10[key] == preds_10[REFERENCE])),
-        }
+        r["agreement_with_fp32"] = (
+            None if key == REFERENCE else acc.agreement(logits[key], logits[REFERENCE], labels)
+        )
 
     summary = {
         "created_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -133,16 +117,10 @@ def main() -> int:
             "split_file_sha256": sha256_of(SPLITS_DIR / f"{EVAL_SPLIT}.txt"),
             "count": len(images),
             "images_from_imagenet_val": from_imagenet_val,
-            "note": "Most Imagenette val images come from the ImageNet-1k train set, so absolute "
-                    "accuracy is optimistic for ImageNet-pretrained weights; FP32 vs INT8 "
-                    "comparisons are unaffected.",
+            "note": acc.DATASET_NOTE,
         },
         "preprocessing": PREPROCESS_DESCRIPTION,
-        "metrics": {
-            "top1_1000": "argmax over all 1000 ImageNet logits equals the label",
-            "top1_imagenette10": "argmax over the 10 Imagenette class logits equals the label",
-            "agreement_with_fp32": "fraction of images whose predicted class matches the FP32 model",
-        },
+        "metrics": acc.METRIC_DEFINITIONS,
         "results": results,
     }
 
@@ -150,12 +128,12 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
 
-    print(f"\n{'model':<22} {'top1/1000':>10} {'top1/10':>9} {'agree/1000':>11} {'agree/10':>9}")
+    print(f"\n{'model':<26} {'top1/1000':>10} {'top1/10':>9} {'agree/1000':>11} {'agree/10':>9}")
     for key, r in results.items():
         agree = r["agreement_with_fp32"]
         a1000 = f"{agree['top1_1000']:.4f}" if agree else "-"
         a10 = f"{agree['top1_imagenette10']:.4f}" if agree else "-"
-        print(f"{key:<22} {r['top1_1000']:>10.4f} {r['top1_imagenette10']:>9.4f} {a1000:>11} {a10:>9}")
+        print(f"{key:<26} {r['top1_1000']:>10.4f} {r['top1_imagenette10']:>9.4f} {a1000:>11} {a10:>9}")
     print(f"\n{from_imagenet_val} of {len(images)} eval images are from ImageNet val "
           "(the rest are ImageNet train images)")
     print(f"wrote {out}")
