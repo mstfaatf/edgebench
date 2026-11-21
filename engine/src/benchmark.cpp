@@ -72,6 +72,8 @@ Result<TrialResult> run_trial(Provider& provider, const RunConfig& config, const
     trial.trial_index = st.trial_index;
     trial.sequence = st.sequence;
     trial.session_create_ms = session->session_create_ms();
+    trial.session_create_working_set_delta_bytes =
+        session->session_create_working_set_delta_bytes();
 
     if (st.sequence == 0) {
         // Snapshot while a session is alive: EP libraries can be unloaded with it.
@@ -163,6 +165,12 @@ std::string fmt_opt(const std::optional<double>& v) {
 
 }  // namespace
 
+std::chrono::milliseconds idle_before_trial(const RunConfig& config, int sequence) {
+    if (config.cooldown_ms > 0)
+        return std::chrono::milliseconds(config.cooldown_ms);
+    return sequence == 0 ? std::chrono::milliseconds(1000) : std::chrono::milliseconds(0);
+}
+
 std::string generated_input_description(const RunConfig& config) {
     const std::string data = config.input == InputKind::random
                                  ? "random values in [0, 1) from SplitMix64 (seed " +
@@ -200,6 +208,8 @@ Result<BenchmarkResult> run_benchmark(Runtime& runtime, Provider& provider, cons
     const Result<OnnxGraphSummary> graph = inspect_onnx_file(r.model.file.path);
 
     r.system = query_system_info();
+    const PowerState power_at_start = query_power_state();
+    r.system.power = power_at_start;
     r.runtime.onnxruntime = runtime.load_result();
     r.runtime.provider = provider.describe();
     try {
@@ -211,9 +221,16 @@ Result<BenchmarkResult> run_benchmark(Runtime& runtime, Provider& provider, cons
 
     std::vector<std::vector<std::byte>> reference_outputs;
     for (const ScheduledTrial& st : schedule_trials(1, config.trials)) {
-        if (st.sequence > 0 && config.cooldown_ms > 0) {
-            report("cooldown " + std::to_string(config.cooldown_ms) + " ms");
-            std::this_thread::sleep_for(std::chrono::milliseconds(config.cooldown_ms));
+        // Every trial, the first included, starts after the same idle period, so
+        // session creation always meets the CPU in the same power state.
+        std::optional<LoadSample> idle;
+        if (const std::chrono::milliseconds wait = idle_before_trial(config, st.sequence);
+            wait.count() > 0) {
+            report("idle " + std::to_string(wait.count()) + " ms before " +
+                   trial_label(st.trial_index, config.trials) + " (sampling background CPU load)");
+            idle = sample_cpu_load(wait);
+            if (st.sequence == 0)
+                r.system.load = idle;
         }
         report(trial_label(st.trial_index, config.trials) + ": creating session, " +
                std::to_string(config.warmup) + " warm-up + " + std::to_string(config.iterations) +
@@ -234,8 +251,28 @@ Result<BenchmarkResult> run_benchmark(Runtime& runtime, Provider& provider, cons
                    !d) {
             return d.error();
         }
+        trial.value().idle_before = idle;
         r.timing.session_init.cold_ms.push_back(trial.value().session_create_ms);
         r.timing.trials.push_back(std::move(trial).value());
+    }
+
+    // Process memory after the last trial's session was released.
+    const ProcessMemory memory = query_process_memory();
+    r.memory.peak_working_set_bytes = memory.peak_working_set_bytes;
+    r.memory.peak_private_bytes = memory.peak_private_bytes;
+    r.memory.working_set_after_last_trial_bytes = memory.working_set_bytes;
+    {
+        std::vector<double> deltas;
+        for (const TrialResult& trial : r.timing.trials) {
+            if (trial.session_create_working_set_delta_bytes)
+                deltas.push_back(
+                    static_cast<double>(*trial.session_create_working_set_delta_bytes));
+        }
+        if (!deltas.empty()) {
+            std::sort(deltas.begin(), deltas.end());
+            r.memory.session_create_working_set_delta_bytes =
+                static_cast<std::int64_t>(nearest_rank(deltas, 50));
+        }
     }
 
     // Placement last, in its own verbose session, so it cannot warm a timed session.
@@ -256,6 +293,39 @@ Result<BenchmarkResult> run_benchmark(Runtime& runtime, Provider& provider, cons
                                   std::to_string(p.total_nodes) + " nodes are not on " +
                                   requested_ep,
                               std::string("/execution/node_assignment")});
+    }
+
+    // Power state at the end: anything that changed makes the run suspect.
+    r.power_at_end = query_power_state();
+    if (const std::vector<std::string> changed = power_changes(power_at_start, r.power_at_end);
+        !changed.empty()) {
+        std::string fields;
+        for (const std::string& f : changed)
+            fields += (fields.empty() ? "" : ", ") + f;
+        r.warnings.push_back({"power_state_changed",
+                              "The power state changed during the run (" + fields +
+                                  "); the result records the state at the start.",
+                              std::string("/system/power")});
+    }
+
+    // Background load: the highest idle sample.
+    {
+        double highest = -1.0;
+        std::string when;
+        for (const TrialResult& trial : r.timing.trials) {
+            if (trial.idle_before && trial.idle_before->cpu_utilization_ratio > highest) {
+                highest = trial.idle_before->cpu_utilization_ratio;
+                when = "before " + trial_label(trial.trial_index, config.trials);
+            }
+        }
+        if (highest > kHighBackgroundLoad) {
+            r.warnings.push_back({"background_cpu_load_high",
+                                  "Background CPU load reached " + fmt(highest * 100.0, 1) + "% (" +
+                                      when +
+                                      "); other processes may have distorted the "
+                                      "measurement.",
+                                  std::string("/system/load")});
+        }
     }
 
     // Model metadata from the file.
@@ -283,11 +353,26 @@ Result<BenchmarkResult> run_benchmark(Runtime& runtime, Provider& provider, cons
     t.aggregate =
         AggregateResult{compute_stats(pooled, r.batch_size), compute_trial_variation(means)};
 
-    // Values this build does not measure yet.
-    add_unavailable(r, "/system/power/source", "The power source is not recorded yet.");
-    add_unavailable(r, "/system/power/power_mode", "The Windows power mode is not recorded yet.");
-    add_unavailable(r, "/system/load", "Background CPU load is not sampled yet.");
-    add_unavailable(r, "/memory", "Process memory is not recorded yet.");
+    // Values that could not be determined.
+    if (!power_at_start.source)
+        add_unavailable(r, "/system/power/source", "The power source could not be determined.");
+    if (!power_at_start.power_mode) {
+        add_unavailable(r, "/system/power/power_mode", "The Windows power mode could not be read.");
+    } else if (!power_at_start.power_mode_known) {
+        r.warnings.push_back({"unknown_power_mode",
+                              "The power mode overlay " + *power_at_start.power_mode +
+                                  " is not a known Windows power mode; it is recorded as its GUID.",
+                              std::string("/system/power/power_mode")});
+    }
+    if (!power_at_start.power_plan)
+        add_unavailable(r, "/system/power/power_plan", "The active power plan could not be read.");
+    if (!power_at_start.battery_saver)
+        add_unavailable(r, "/system/power/battery_saver",
+                        "The battery saver state could not be read.");
+    if (!r.memory.session_create_working_set_delta_bytes) {
+        add_unavailable(r, "/memory/session_create_working_set_delta_bytes",
+                        "The process working set could not be read.");
+    }
     if (r.runtime.provider.ep_device && !r.runtime.provider.ep_device->driver_version) {
         add_unavailable(r, "/runtime/ep_device/driver_version",
                         "The device driver version could not be determined.");
@@ -320,7 +405,49 @@ std::string format_summary(const BenchmarkResult& r) {
         out << " " << fmt(ms, 1);
     out << "  (median " << fmt(t.session_init.session_create_ms, 1) << ")\n";
     out << "First run   " << (t.first_inference_ms ? fmt(*t.first_inference_ms, 3) + " ms" : "-")
-        << " (first warm-up iteration of trial 1)\n\n";
+        << " (first warm-up iteration of trial 1)\n";
+
+    if (r.system.power) {
+        const PowerState& pw = *r.system.power;
+        out << "Power       " << pw.source.value_or("source unknown") << ", mode "
+            << pw.power_mode.value_or("unknown") << ", plan " << pw.power_plan.value_or("unknown")
+            << ", battery saver "
+            << (pw.battery_saver ? (*pw.battery_saver ? "on" : "off") : "unknown");
+        if (pw.battery_percent)
+            out << ", battery " << *pw.battery_percent << "%";
+        out << "\n";
+    }
+    out << "CPU load    pre-run "
+        << (r.system.load ? fmt(r.system.load->cpu_utilization_ratio * 100.0, 1) + "% over " +
+                                fmt(r.system.load->sample_window_s, 1) + " s"
+                          : std::string("-"));
+    {
+        std::optional<double> highest;
+        int highest_trial = 0;
+        for (const TrialResult& trial : t.trials) {
+            if (trial.sequence > 0 && trial.idle_before &&
+                (!highest || trial.idle_before->cpu_utilization_ratio > *highest)) {
+                highest = trial.idle_before->cpu_utilization_ratio;
+                highest_trial = trial.trial_index;
+            }
+        }
+        if (highest) {
+            out << ", highest cooldown " << fmt(*highest * 100.0, 1) << "% (before trial "
+                << highest_trial + 1 << ")";
+        }
+    }
+    out << "\n";
+    auto mib = [](double bytes) { return fmt(bytes / (1024.0 * 1024.0), 1) + " MiB"; };
+    out << "Memory      working set "
+        << mib(static_cast<double>(r.memory.working_set_after_last_trial_bytes))
+        << " after the last trial, peak "
+        << mib(static_cast<double>(r.memory.peak_working_set_bytes)) << ", session-create delta "
+        << (r.memory.session_create_working_set_delta_bytes
+                ? (*r.memory.session_create_working_set_delta_bytes >= 0 ? "+" : "") +
+                      mib(static_cast<double>(*r.memory.session_create_working_set_delta_bytes)) +
+                      " (median)"
+                : std::string("-"))
+        << " (process only)\n\n";
 
     char line[160];
     std::snprintf(line, sizeof(line), "%-10s %10s %10s %10s %10s %10s %10s %12s\n", "ms", "mean",

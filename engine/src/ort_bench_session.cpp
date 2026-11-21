@@ -4,6 +4,7 @@
 
 #include "edgebench/input_fill.hpp"
 #include "edgebench/ort_loader.hpp"
+#include "edgebench/system_info.hpp"
 
 namespace edgebench {
 
@@ -60,12 +61,18 @@ Result<std::unique_ptr<OrtBenchSession>> OrtBenchSession::create(Ort::Env& env,
                                                                  const RunConfig& config) {
     std::unique_ptr<OrtBenchSession> s;
     try {
+        // Working set read just outside the clock reads, so it is not timed.
+        const ProcessMemory before = query_process_memory();
         const auto t0 = std::chrono::steady_clock::now();
         Ort::Session session(env, model.c_str(), options);
-        const double ms =
-            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
-                .count();
+        const auto t1 = std::chrono::steady_clock::now();
+        const ProcessMemory after = query_process_memory();
+        const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
         s.reset(new OrtBenchSession(std::move(session), config.binding, ms));
+        if (before.working_set_bytes > 0 && after.working_set_bytes > 0) {
+            s->create_ws_delta_ = static_cast<std::int64_t>(after.working_set_bytes) -
+                                  static_cast<std::int64_t>(before.working_set_bytes);
+        }
     } catch (const Ort::Exception& e) {
         return ort_error("session_creation_failed", "creating a session for " + path_to_utf8(model),
                          e.GetOrtErrorCode(), e.what());

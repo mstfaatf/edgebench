@@ -2,6 +2,7 @@
 
 #include <onnxruntime_cxx_api.h>
 
+#include <chrono>
 #include <cstdio>
 #include <exception>
 #include <sstream>
@@ -53,6 +54,30 @@ DoctorReport run_doctor() {
     DoctorReport r;
     r.build = build_info();
     r.system = query_system_info();
+    r.system.power = query_power_state();
+    r.system.load = sample_cpu_load(std::chrono::seconds(1));
+    const PowerState& power = *r.system.power;
+    if (power.source == "battery") {
+        r.warnings.push_back(
+            "running on battery power, which can throttle the CPU and NPU. "
+            "Plug in before benchmarking.");
+    }
+    if (power.battery_saver.value_or(false)) {
+        r.warnings.push_back(
+            "battery saver is on, which limits performance. Turn it off "
+            "before benchmarking.");
+    }
+    if (r.system.load->cpu_utilization_ratio > 0.10) {
+        char pct[16];
+        std::snprintf(pct, sizeof(pct), "%.1f%%", r.system.load->cpu_utilization_ratio * 100.0);
+        r.warnings.push_back(std::string("background CPU load is ") + pct +
+                             " (over 10%), which distorts CPU timings. Close background apps "
+                             "before benchmarking.");
+    }
+    if (power.power_mode && !power.power_mode_known) {
+        r.warnings.push_back("the power mode overlay " + *power.power_mode +
+                             " is not a known Windows power mode.");
+    }
     r.bundle_dir = executable_dir();
     if (r.system.emulated()) {
         r.warnings.push_back(
@@ -138,6 +163,31 @@ std::string format_text(const DoctorReport& r) {
             ? gib(*s.memory_total_bytes) + " (" + std::to_string(*s.memory_total_bytes) + " bytes)"
             : "(unknown)");
     row(out, "device", or_unknown(s.device.manufacturer) + " / " + or_unknown(s.device.model));
+
+    out << "\nPower\n";
+    if (s.power) {
+        const PowerState& p = *s.power;
+        row(out, "source", p.source.value_or("(unknown)"));
+        row(out, "battery",
+            p.battery_percent ? std::to_string(*p.battery_percent) + "%"
+                              : std::string("(no battery or unknown)"));
+        row(out, "battery saver",
+            p.battery_saver ? (*p.battery_saver ? "on" : "off") : "(unknown)");
+        row(out, "power plan",
+            p.power_plan.value_or("(unknown)") +
+                (p.power_plan_guid ? " (" + *p.power_plan_guid + ")" : std::string()));
+        row(out, "power mode",
+            p.power_mode ? *p.power_mode + (p.power_mode_known && p.power_mode_guid
+                                                ? " (overlay " + *p.power_mode_guid + ")"
+                                                : std::string(" (unknown overlay)"))
+                         : std::string("(unknown)"));
+    }
+    if (s.load) {
+        char load[64];
+        std::snprintf(load, sizeof(load), "%.1f%% over %.1f s",
+                      s.load->cpu_utilization_ratio * 100.0, s.load->sample_window_s);
+        row(out, "background CPU", load);
+    }
 
     out << "\nONNX Runtime\n";
     const OrtLoadResult& ort = r.onnxruntime;

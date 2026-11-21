@@ -111,13 +111,15 @@ json to_schema_json(const eb::BenchmarkResult& r) {
     for (const eb::ResultWarning& w : r.warnings)
         warnings.push_back({{"code", w.code}, {"message", w.message}, {"path", opt(w.path)}});
 
-    json system = eb::to_json(r.system);
-    system["power"] = {{"source", nullptr},
-                       {"power_mode", nullptr},
-                       {"power_plan", nullptr},
-                       {"battery_percent", nullptr},
-                       {"battery_saver", nullptr}};
-    system["load"] = nullptr;
+    const json system = eb::to_json(r.system);  // includes power and load
+    const eb::MemoryResult& mem = r.memory;
+    const json memory = {
+        {"scope", mem.scope},
+        {"peak_working_set_bytes", mem.peak_working_set_bytes},
+        {"peak_private_bytes", mem.peak_private_bytes},
+        {"source", mem.source},
+        {"session_create_working_set_delta_bytes", opt(mem.session_create_working_set_delta_bytes)},
+    };
 
     const eb::ProviderDescription& p = r.runtime.provider;
     json ep_device = nullptr;
@@ -259,7 +261,7 @@ json to_schema_json(const eb::BenchmarkResult& r) {
               {"trial_mean_stddev_ms", opt(tv.trial_mean_stddev_ms)},
               {"trial_mean_cv_ratio", opt(tv.trial_mean_cv_ratio)}}}}},
           {"accelerator", nullptr}}},
-        {"memory", nullptr},
+        {"memory", memory},
         {"accuracy", nullptr},
         {"raw", nullptr},
     };
@@ -337,6 +339,79 @@ TEST(Benchmark, InMemoryResultValidatesAgainstTheSchema) {
         kSourceDir);
     EXPECT_EQ(v.exit_code, 0u) << v.output;
     EXPECT_NE(v.out.find("1 passed, 0 failed, 0 with warnings"), std::string::npos) << v.output;
+
+    // Only fields that are null for a real reason carry value_unavailable warnings.
+    for (const eb::ResultWarning& w : result.value().warnings) {
+        if (w.code == "value_unavailable")
+            EXPECT_EQ(w.path, "/runtime/ep_device/driver_version") << w.message;
+        else  // the machine's state may legitimately trigger these
+            EXPECT_TRUE(w.code == "background_cpu_load_high" || w.code == "power_state_changed")
+                << w.code << ": " << w.message;
+    }
+}
+
+TEST(Benchmark, RecordsPowerLoadAndMemory) {
+    const eb::RunConfig c = short_run(kFixtures / "fixed_float32.onnx");  // cooldown 0
+    RecordingProvider provider = make_provider(c);
+    auto result = eb::run_benchmark(runtime(), provider, c);
+    ASSERT_TRUE(result.ok()) << result.error().message;
+    const eb::BenchmarkResult& r = result.value();
+
+    ASSERT_TRUE(r.system.power.has_value());
+    EXPECT_TRUE(r.system.power->source.has_value());
+    EXPECT_TRUE(r.system.power->power_mode.has_value());
+    EXPECT_TRUE(r.system.power->power_plan.has_value());
+    EXPECT_TRUE(r.system.power->battery_saver.has_value());
+
+    // With --cooldown-ms 0 the pre-run sample is a fixed 1 s window.
+    ASSERT_TRUE(r.system.load.has_value());
+    EXPECT_NEAR(r.system.load->sample_window_s, 1.0, 0.25);
+    EXPECT_GE(r.system.load->cpu_utilization_ratio, 0.0);
+    EXPECT_LE(r.system.load->cpu_utilization_ratio, 1.0);
+    ASSERT_EQ(r.timing.trials.size(), 2u);
+    EXPECT_TRUE(r.timing.trials[0].idle_before.has_value());
+    EXPECT_FALSE(r.timing.trials[1].idle_before.has_value());  // no cooldown between trials
+
+    EXPECT_EQ(r.memory.scope, "process");
+    EXPECT_GT(r.memory.peak_working_set_bytes, 0u);
+    EXPECT_GT(r.memory.peak_private_bytes, 0u);
+    EXPECT_GT(r.memory.working_set_after_last_trial_bytes, 0u);
+    EXPECT_LE(r.memory.working_set_after_last_trial_bytes, r.memory.peak_working_set_bytes);
+    EXPECT_TRUE(r.memory.session_create_working_set_delta_bytes.has_value());
+    for (const eb::TrialResult& trial : r.timing.trials)
+        EXPECT_TRUE(trial.session_create_working_set_delta_bytes.has_value());
+
+    const std::string summary = eb::format_summary(r);
+    EXPECT_NE(summary.find("\nPower       "), std::string::npos) << summary;
+    EXPECT_NE(summary.find("\nCPU load    pre-run "), std::string::npos) << summary;
+    EXPECT_NE(summary.find("\nMemory      working set "), std::string::npos) << summary;
+}
+
+TEST(Benchmark, IdlesBeforeEveryTrialIncludingTheFirst) {
+    eb::RunConfig c = short_run(kFixtures / "fixed_float32.onnx");
+    c.cooldown_ms = 50;
+    RecordingProvider provider = make_provider(c);
+    std::vector<std::string> progress;
+    auto result = eb::run_benchmark(runtime(), provider, c,
+                                    [&progress](std::string_view m) { progress.emplace_back(m); });
+    ASSERT_TRUE(result.ok()) << result.error().message;
+
+    // The timeline: idle, trial 1, idle, trial 2, placement.
+    ASSERT_EQ(progress.size(), 5u);
+    EXPECT_EQ(progress[0].rfind("idle 50 ms before trial 1 of 2", 0), 0u) << progress[0];
+    EXPECT_EQ(progress[1].rfind("trial 1 of 2: creating session", 0), 0u) << progress[1];
+    EXPECT_EQ(progress[2].rfind("idle 50 ms before trial 2 of 2", 0), 0u) << progress[2];
+    EXPECT_EQ(progress[3].rfind("trial 2 of 2: creating session", 0), 0u) << progress[3];
+    EXPECT_EQ(progress[4], "recording node placement");
+
+    const eb::BenchmarkResult& r = result.value();
+    for (const eb::TrialResult& trial : r.timing.trials) {
+        ASSERT_TRUE(trial.idle_before.has_value());
+        EXPECT_GE(trial.idle_before->sample_window_s, 0.045);
+    }
+    // system.load is the sample before trial 1.
+    EXPECT_EQ(r.system.load->cpu_utilization_ratio,
+              r.timing.trials[0].idle_before->cpu_utilization_ratio);
 }
 
 TEST(Benchmark, NonFiniteOutputStopsTheRun) {

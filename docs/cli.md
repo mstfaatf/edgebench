@@ -48,7 +48,9 @@ All validation problems are reported together, one per line, as
 
 A run consists of `--trials` trials. Each trial:
 
-1. waits `--cooldown-ms` (before every trial except the first);
+1. idles for `--cooldown-ms` while sampling system-wide CPU load (before
+   **every** trial, including the first; with `--cooldown-ms 0`, a fixed 1 s
+   idle before the first trial only);
 2. creates a **new session** (the creation time of the `Ort::Session` alone,
    without input generation, binding setup or model hashing, goes into
    `timing.session_init.cold_ms`, one value per trial);
@@ -61,13 +63,36 @@ A run consists of `--trials` trials. Each trial:
 6. checks that every output value is finite, compares the final outputs with
    trial 1's, and releases the session.
 
-After the last trial, node placement is recorded in a separate session with
-verbose logging (see [`--dry-run`](#--dry-run)); doing it last means it cannot
-warm up any timed session.
+After the last trial, the process memory is read, node placement is recorded
+in a separate session with verbose logging (see [`--dry-run`](#--dry-run);
+doing it last means it cannot warm up any timed session), and the power state
+is read again.
+
+**Why the first trial idles too.** Session creation is much slower right after
+the CPU has been idle, because the CPU drops to a lower power state: on the
+reference machine a session took about 50 ms after a 2 s pause, against about
+16 ms when trials ran back to back. Without the initial idle, the first trial
+(which follows model hashing, a busy period) was created about twice as fast as
+the others, and `cold_ms` mixed the two states. Starting every trial after the
+same pause removes that systematic difference; session creation times still
+vary from trial to trial. The idle period doubles as the background-load
+sample.
+
+**System state.** The run records, at its start, the power source, Windows power
+mode, power plan, battery charge and battery saver (`system.power`), and the
+background CPU load of the idle period before trial 1 (`system.load`). The power
+state is read again at the end; if the source, mode, plan or battery saver
+changed, the result gets a `power_state_changed` warning. If any idle sample
+shows more than 10% CPU utilization, the result gets a
+`background_cpu_load_high` warning with the highest value and when it occurred.
+The working set is read just before and just after each session's constructor
+(outside the timed bracket) for `memory.session_create_working_set_delta_bytes`,
+the median over trials; `memory.peak_working_set_bytes` and
+`peak_private_bytes` are read after the last trial.
 
 Not timed: model hashing, session creation (measured separately), input
 generation, binding setup, warm-up iterations after the first, output checks,
-and cooldowns. Inputs are generated once per session before the first
+memory and power readings, and idle periods. Inputs are generated once per session before the first
 iteration (see [Input data](#input-data)); there is no image decoding, resizing
 or normalization in a run.
 
@@ -95,36 +120,43 @@ every round; with the single configuration of `run` the order is simply trial
 
 ### Output
 
-Progress (`trial 1 of 3: ...`, `cooldown 2000 ms`, `recording node placement`)
-and warnings go to stderr; the summary goes to stdout. Times are milliseconds.
-For FP32 MobileNetV2 with the defaults on a Surface Laptop 7 (plugged in,
-*Balanced* power mode):
+Progress (`idle 2000 ms before trial 1 of 3 ...`, `trial 1 of 3: ...`,
+`recording node placement`) and warnings go to stderr; the summary goes to
+stdout. Times are milliseconds. For FP32 MobileNetV2 with the defaults on a
+Surface Laptop 7 (plugged in, *Balanced* power mode, with an editor and a
+terminal open):
 
 ```text
 Model       mobilenetv2_fp32_b1.onnx (fp32, 13992263 bytes, sha256 163fa832dc77)
 Provider    CPUExecutionProvider, 4 intra-op threads, binding iobinding_preallocated, graph optimization enable_all
 Trials      3 x 200 measured iterations (20 warm-up, 2000 ms cooldown), batch size 1
 Input       random
-Session     create ms: 21.7 50.2 48.1  (median 48.1)
-First run   7.005 ms (first warm-up iteration of trial 1)
+Session     create ms: 58.9 22.3 57.5  (median 57.5)
+First run   6.854 ms (first warm-up iteration of trial 1)
+Power       ac, mode Balanced, plan Balanced, battery saver off, battery 80%
+CPU load    pre-run 5.1% over 2.0 s, highest cooldown 7.4% (before trial 2)
+Memory      working set 37.7 MiB after the last trial, peak 64.1 MiB, session-create delta +21.0 MiB (median) (process only)
 
 ms               mean        p50        p95        p99        min        max inferences/s
-trial 1        4.0445     3.9595     4.6094     4.8339     3.5801     5.3162        247.3
-trial 2        3.9776     3.8939     4.5425     4.8205     3.5677     5.5284        251.4
-trial 3        4.0434     3.9115     4.7777     5.1508     3.5848     5.5991        247.3
-aggregate      4.0218     3.9300     4.6420     4.9964     3.5677     5.5991        248.6
+trial 1        3.9743     3.9131     4.4830     4.8493     3.5862     5.0992        251.6
+trial 2        4.1811     3.9320     4.5574     6.1728     3.5681    37.6502        239.2
+trial 3        4.0761     3.9642     4.6493     4.9814     3.6605     6.9566        245.3
+aggregate      4.0772     3.9428     4.5840     5.0992     3.5681    37.6502        245.3
 
-Trial means 3.9776 .. 4.0445 ms, CV 0.95%
+Trial means 3.9743 .. 4.1811 ms, CV 2.54%
 Placement   55 nodes: CPUExecutionProvider 55 (all on the requested EP)
 ```
 
-- `Session`: creation time of each trial's session, and their median. Session
-  creation is sensitive to the CPU's idle state: after a 2 s cooldown it took
-  about 50 ms on this machine, against about 16 ms when trials ran back to back
-  (and about 22 ms for the first trial, which follows model hashing). The cooldown
-  lets the CPU settle between trials; warm-up absorbs the effect before the
-  measured iterations.
+- `Session`: creation time of each trial's session, and their median.
 - `First run`: trial 1's first warm-up iteration.
+- `Power`: power source, Windows power mode, power plan, battery saver and
+  battery charge at the start of the run.
+- `CPU load`: system-wide CPU utilization during the idle period before trial 1
+  (`system.load`), and the highest value seen during the cooldowns.
+- `Memory`: the process working set after the last trial's session was
+  released, its peak, and the median change of the working set across session
+  creation. Process memory only; memory used by drivers or on an accelerator is
+  not included.
 - One row per trial, then `aggregate` over all measured iterations pooled.
 - `Trial means`: range of the trial means and their coefficient of variation.
 - `Placement`: node count per execution provider after graph optimization.
@@ -339,6 +371,12 @@ Checks everything a benchmark depends on and reports it:
 
 - **Build**: edgebench version, git commit and whether the tree had uncommitted
   changes at build time, build type, compiler, results schema version.
+- **Power**: power source, battery charge, battery saver, power plan (name and
+  GUID) and Windows power mode (name and overlay GUID; an unknown overlay is
+  shown as its GUID), plus system-wide CPU load sampled over 1 s. Doctor warns,
+  without changing the exit code, when the machine runs on battery, battery
+  saver is on, or the background load is above 10%, because each of them
+  distorts benchmarks. It never changes a power setting.
 - **System**: OS name, version and build; OS and process architecture; CPU name,
   physical cores and logical processors; total physical memory; device
   manufacturer and model. An x64 (or ARM64EC) build running under emulation on
@@ -367,7 +405,7 @@ Sample output (Surface Laptop 7, development build):
 ```text
 Build
   edgebench          0.1.0
-  git commit         338e6266e7f863b182747b3ee6ca248820a1ca5a (dirty)
+  git commit         ee9fffbb54e7e9574f513f4a4737c5c18555dd91 (dirty)
   build type         Release
   compiler           MSVC 19.42.34435.0
   results schema     1.1.0
@@ -381,6 +419,14 @@ System
   cores              10 physical, 10 logical
   memory             15.6 GiB (16757260288 bytes)
   device             Microsoft Corporation / Microsoft Surface Laptop, 7th Edition
+
+Power
+  source             ac
+  battery            80%
+  battery saver      off
+  power plan         Balanced (381b4222-f694-41f0-9685-ff5bb260df2e)
+  power mode         Balanced (overlay 00000000-0000-0000-0000-000000000000)
+  background CPU     5.7% over 1.0 s
 
 ONNX Runtime
   required           1.32.0 (C API 32)

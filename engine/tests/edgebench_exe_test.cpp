@@ -129,6 +129,15 @@ TEST(Doctor, JsonOutputParses) {
     EXPECT_EQ(j.at("system").at("process_architecture"),
               j.at("system").at("os").at("architecture"));
     EXPECT_EQ(j.at("process_emulated"), false);
+    const json& power = j.at("system").at("power");
+    for (const char* key :
+         {"source", "power_mode", "power_plan", "battery_percent", "battery_saver"})
+        EXPECT_TRUE(power.contains(key)) << key;
+    EXPECT_FALSE(power.at("power_mode").is_null());
+    EXPECT_FALSE(power.at("power_plan").is_null());
+    const json& load = j.at("system").at("load");
+    EXPECT_NEAR(load.at("sample_window_s").get<double>(), 1.0, 0.25);
+    EXPECT_GE(load.at("cpu_utilization_ratio").get<double>(), 0.0);
     EXPECT_FALSE(j.at("system").at("os").at("name").get<std::string>().empty());
 }
 
@@ -357,11 +366,16 @@ TEST(Cli, RunBenchmarksTheFixture) {
     EXPECT_TRUE(contains(r.out, "\ntrial 2 ")) << describe(r);
     EXPECT_TRUE(contains(r.out, "2 x 10 measured iterations")) << describe(r);
     EXPECT_TRUE(contains(r.out, "CPUExecutionProvider")) << describe(r);
-    EXPECT_FALSE(contains(r.out, "trial 1 of 2")) << describe(r);
+    EXPECT_FALSE(contains(r.out, "trial 1 of 2: creating session")) << describe(r);
     EXPECT_TRUE(contains(r.err, "trial 1 of 2")) << describe(r);
     EXPECT_TRUE(contains(r.err, "trial 2 of 2")) << describe(r);
     EXPECT_TRUE(contains(r.err, "recording node placement")) << describe(r);
-    EXPECT_FALSE(contains(r.err, "cooldown")) << describe(r);  // --cooldown-ms 0
+    // --cooldown-ms 0: a 1 s idle sample before trial 1 only.
+    EXPECT_TRUE(contains(r.err, "idle 1000 ms before trial 1 of 2")) << describe(r);
+    EXPECT_FALSE(contains(r.err, "before trial 2 of 2")) << describe(r);
+    EXPECT_TRUE(contains(r.out, "\nPower       ")) << describe(r);
+    EXPECT_TRUE(contains(r.out, "\nCPU load    pre-run ")) << describe(r);
+    EXPECT_TRUE(contains(r.out, "\nMemory      working set ")) << describe(r);
 }
 
 TEST(Cli, RunStopsOnNonFiniteOutput) {

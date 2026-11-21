@@ -35,6 +35,9 @@ public:
     Result<void> run_once() override;
     TensorView output(std::size_t index) const override;
     double session_create_ms() const override { return create_ms_; }
+    std::optional<std::int64_t> session_create_working_set_delta_bytes() const override {
+        return create_ws_delta_;
+    }
 
 private:
     OrtBenchSession(Ort::Session session, RunBinding binding, double create_ms);
@@ -43,6 +46,7 @@ private:
     Ort::Session session_;
     RunBinding binding_mode_;
     double create_ms_;
+    std::optional<std::int64_t> create_ws_delta_;
 
     std::vector<TensorInfo> inputs_, outputs_;
     std::vector<std::string> input_names_, output_names_;

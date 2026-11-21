@@ -87,19 +87,25 @@ session that is timed.
 
 ```text
 hash + inspect model file            (not timed; warms the file cache for every trial)
+read power state
 for each trial (scheduler order):
-    cooldown (not before the first trial)
-    provider.create_session()        -> cold_ms[trial]
+    idle --cooldown-ms (1 s before the first trial if 0), sampling CPU load
+    provider.create_session()        -> cold_ms[trial], working-set delta
     warm-up 1 (timed)                -> first_inference_ms (trial 0)
     warm-up 2..n (untimed)
     measured iterations              -> one latency per run_once()
     finite check, compare outputs with trial 0, release the session
+read process memory
 provider.record_placement()          (after every timed session)
+read power state again               -> power_state_changed warning
 statistics: per trial, pooled aggregate, trial variation
 ```
 
 Every trial gets a fresh session, so session creation is measured once per
-trial and no trial inherits another's warm state. Placement runs last for the
+trial and no trial inherits another's warm state. Every trial, the first
+included, starts after the same idle period, because session creation is
+slower when the CPU has just been idle: idling only between trials made the
+first trial systematically faster to create. Placement runs last for the
 same reason: its verbose session must not warm anything before a timed session
 is created.
 
@@ -147,6 +153,9 @@ The timing, statistics and export code only use `Provider::describe()` and the
   files and buffers, also for cache keys.
 - `tensor_info.hpp`: tensor metadata, shape and dtype checks, non-finite checks.
 - `placement.hpp`: parsing ONNX Runtime's node placement log.
-- `system_info.hpp`: OS, CPU, memory, device and architecture queries.
+- `system_info.hpp`: OS, CPU, memory, device and architecture queries; power
+  state (GetSystemPowerStatus, PowerGetActiveScheme, PowerGetEffectiveOverlayScheme),
+  background CPU load (GetSystemTimes deltas) and process memory
+  (GetProcessMemoryInfo). The decoding and arithmetic are pure functions.
 - `run_config.hpp`, `cli.hpp`: the run configuration and command-line parsing.
 - `dry_run.hpp`: `run --dry-run`.

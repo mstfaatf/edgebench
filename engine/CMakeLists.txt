@@ -55,7 +55,7 @@ target_compile_definitions(edgebench_core PRIVATE EDGEBENCH_BUILD_TYPE="$<CONFIG
 # nlohmann/json appears in public headers; CLI11 is used only inside cli.cpp.
 target_link_libraries(edgebench_core
   PUBLIC OnnxRuntime::OnnxRuntime nlohmann_json::nlohmann_json
-  PRIVATE CLI11::CLI11 bcrypt)
+  PRIVATE CLI11::CLI11 bcrypt powrprof)
 edgebench_set_warnings(edgebench_core)
 
 # --- CLI --------------------------------------------------------------------
@@ -79,6 +79,7 @@ if(EDGEBENCH_BUILD_TESTS)
     tests/exit_codes_test.cpp
     tests/module_paths_test.cpp
     tests/run_config_test.cpp
+    tests/system_state_test.cpp
     tests/timing_test.cpp
     tests/version_test.cpp)
   target_link_libraries(edgebench_tests PRIVATE edgebench_core GTest::gtest_main)

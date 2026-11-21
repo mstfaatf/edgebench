@@ -7,6 +7,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -43,6 +44,10 @@ public:
 
     /// Wall-clock time to create this session, in milliseconds.
     virtual double session_create_ms() const = 0;
+
+    /// Change of the process working set across session creation, measured on the
+    /// same bracket as session_create_ms() (process memory only). Null if unknown.
+    virtual std::optional<std::int64_t> session_create_working_set_delta_bytes() const = 0;
 };
 
 }  // namespace edgebench

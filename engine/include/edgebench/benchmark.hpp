@@ -2,11 +2,11 @@
 //
 // BenchmarkResult mirrors the results schema 1.1.0 (docs/results-schema.md):
 // each member corresponds to a schema block, and every value that the schema
-// records is kept here, including the raw per-iteration latencies. Blocks that
-// are not measured yet (system power and load, memory, accuracy) are absent or
-// null, and the result carries value_unavailable warnings for them.
+// records is kept here, including the raw per-iteration latencies and the
+// per-trial idle samples. Accuracy is not measured by `run` (null).
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -68,10 +68,25 @@ struct SessionInitResult {
 struct TrialResult {
     int trial_index = 0;
     int sequence = 0;  // position in the overall trial order (scheduler)
+    /// Background CPU load sampled during the idle period before this trial
+    /// (null if there was none: --cooldown-ms 0 after the first trial).
+    std::optional<LoadSample> idle_before;
     double session_create_ms = 0;
+    std::optional<std::int64_t> session_create_working_set_delta_bytes;
     std::optional<double> first_inference_ms;  // first warm-up iteration; null without warm-up
     LatencyStats stats;
     std::vector<double> latencies_ms;  // every measured iteration, in order
+};
+
+/// memory: process memory only (the schema's scope "process").
+struct MemoryResult {
+    std::string scope = "process";
+    std::uint64_t peak_working_set_bytes = 0;  // after the last trial
+    std::uint64_t peak_private_bytes = 0;
+    std::string source = "GetProcessMemoryInfo";
+    /// Nearest-rank median of the per-trial deltas (null if none was measured).
+    std::optional<std::int64_t> session_create_working_set_delta_bytes;
+    std::uint64_t working_set_after_last_trial_bytes = 0;  // not in the schema; for the summary
 };
 
 struct AggregateResult {
@@ -100,7 +115,8 @@ struct BenchmarkResult {
 
     std::string tool_version;
     BuildInfo tool;
-    SystemInfo system;  // OS, CPU, memory, device; power and load are not queried yet
+    SystemInfo system;        // power: at the start of the run; load: the pre-run idle sample
+    PowerState power_at_end;  // compared with system.power for the power_state_changed warning
     RuntimeResult runtime;
     ModelResult model;
 
@@ -110,18 +126,23 @@ struct BenchmarkResult {
 
     ExecutionResult execution;
     TimingResult timing;
+    MemoryResult memory;
 };
 
-/// Receives progress messages ("trial 1 of 3", "cooldown 2000 ms").
+/// Receives progress messages ("idle 2000 ms before trial 1 of 3", "trial 1 of 3: ...").
 using ProgressFn = std::function<void(std::string_view)>;
 
 /// Runs the benchmark described by `config` with `provider`:
 ///
-/// for every trial (scheduler order): sleep --cooldown-ms (not before the first),
-/// create a fresh session (timed: cold_ms), time the first warm-up iteration, run
-/// the other warm-up iterations, time each measured iteration (run_once() only),
-/// check that every output value is finite and matches trial 0, release the
-/// session. After the last trial, record node placement in a separate session.
+/// record the power state; for every trial (scheduler order): idle for
+/// --cooldown-ms while sampling background CPU load (before the first trial too,
+/// for 1 s if the cooldown is 0, so every trial starts from the same idle state),
+/// create a fresh session (timed: cold_ms; working-set delta), time the first
+/// warm-up iteration, run the other warm-up iterations, time each measured
+/// iteration (run_once() only), check that every output value is finite and
+/// matches trial 0, release the session. After the last trial, read the process
+/// memory, record node placement in a separate session, and compare the power
+/// state with the one at the start.
 ///
 /// Errors: run_once() failures are ort_runtime_error naming trial and iteration;
 /// non-finite outputs, and outputs whose top-1 differs from trial 0, are
@@ -134,5 +155,12 @@ std::string format_summary(const BenchmarkResult& result);
 
 /// config.input.preprocessing for generated inputs.
 std::string generated_input_description(const RunConfig& config);
+
+/// Idle period before each trial: --cooldown-ms, or 1 s if the cooldown is 0
+/// (then only before the first trial).
+std::chrono::milliseconds idle_before_trial(const RunConfig& config, int sequence);
+
+/// Background CPU load above which a run gets a background_cpu_load_high warning.
+inline constexpr double kHighBackgroundLoad = 0.10;
 
 }  // namespace edgebench
