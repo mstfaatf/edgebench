@@ -1,122 +1,12 @@
 #include "ort_support.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <cstdio>
 #include <cstring>
-
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
-// windows.h first
-#include <psapi.h>
-#endif
 
 namespace fs = std::filesystem;
 
 namespace probe {
-
-// --------------------------------------------------------------------------- DLLs
-
-#ifdef _WIN32
-namespace {
-
-fs::path ModuleFileName(HMODULE module) {
-    std::wstring buf(MAX_PATH, L'\0');
-    DWORD n = 0;
-    while ((n = GetModuleFileNameW(module, buf.data(), static_cast<DWORD>(buf.size()))) ==
-           buf.size()) {
-        buf.resize(buf.size() * 2);
-    }
-    buf.resize(n);
-    return fs::path(buf);
-}
-
-std::string Lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return s;
-}
-
-}  // namespace
-
-fs::path ExecutableDir() {
-    return ModuleFileName(nullptr).parent_path();
-}
-
-std::string LoadBundledOnnxRuntime(const fs::path& exe_dir) {
-    const fs::path dll = exe_dir / "onnxruntime.dll";
-    if (!fs::is_regular_file(dll))
-        return dll.string() + " not found (the build copies it next to the executable)";
-    // Full path, and resolve the DLL's own dependencies from its directory first.
-    HMODULE module = LoadLibraryExW(
-        dll.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-    if (!module)
-        return "LoadLibraryExW(" + dll.string() + ") failed, error " +
-               std::to_string(GetLastError());
-    using GetApiBaseFn = const OrtApiBase*(ORT_API_CALL*)();
-    auto get_api_base = reinterpret_cast<GetApiBaseFn>(GetProcAddress(module, "OrtGetApiBase"));
-    if (!get_api_base)
-        return dll.string() + " does not export OrtGetApiBase";
-    const OrtApiBase* base = get_api_base();
-    const OrtApi* api = base->GetApi(ORT_API_VERSION);
-    if (!api) {
-        return dll.string() + " is ONNX Runtime " + base->GetVersionString() +
-               ", which does not provide C API version " + std::to_string(ORT_API_VERSION);
-    }
-    Ort::InitApi(api);
-    return {};
-}
-
-fs::path LoadedModulePath(const char* module_name) {
-    HMODULE module = GetModuleHandleA(module_name);
-    return module ? ModuleFileName(module) : fs::path();
-}
-
-std::vector<fs::path> LoadedOrtAndQnnModules() {
-    HANDLE process = GetCurrentProcess();
-    std::vector<HMODULE> modules(1024);
-    DWORD needed = 0;
-    while (true) {
-        const auto bytes = static_cast<DWORD>(modules.size() * sizeof(HMODULE));
-        if (!K32EnumProcessModules(process, modules.data(), bytes, &needed))
-            return {};
-        if (needed <= bytes)
-            break;
-        modules.resize(needed / sizeof(HMODULE));
-    }
-    modules.resize(needed / sizeof(HMODULE));
-    std::vector<fs::path> out;
-    for (HMODULE m : modules) {
-        fs::path p = ModuleFileName(m);
-        const std::string name = Lower(p.filename().string());
-        if (name.find("onnxruntime") != std::string::npos || name.find("qnn") != std::string::npos)
-            out.push_back(p);
-    }
-    std::sort(out.begin(), out.end());
-    return out;
-}
-#else
-fs::path ExecutableDir() {
-    return fs::canonical("/proc/self/exe").parent_path();
-}
-std::string LoadBundledOnnxRuntime(const fs::path&) {
-    Ort::InitApi();
-    return {};
-}
-fs::path LoadedModulePath(const char*) {
-    return {};
-}
-std::vector<fs::path> LoadedOrtAndQnnModules() {
-    return {};
-}
-#endif
-
-bool SameFile(const fs::path& a, const fs::path& b) {
-    std::error_code ec;
-    return !a.empty() && !b.empty() && fs::equivalent(a, b, ec) && !ec;
-}
 
 // --------------------------------------------------------------------------- devices
 

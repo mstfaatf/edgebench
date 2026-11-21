@@ -578,8 +578,8 @@ because it performs the same as s8w and adds nothing.
 1. **Load ONNX Runtime explicitly.** Delay-load `onnxruntime.dll`, build with
    `ORT_API_MANUAL_INIT`, load the bundled DLL by full path, check
    `GetApi(ORT_API_VERSION)` before `Ort::InitApi`, and refuse to run with any
-   other copy. This applies to `edgebench.exe` as well; today it has the same
-   static-initialization exposure as the original probe.
+   other copy. `edgebench.exe` and `ort_probe` share one implementation of
+   this (`engine/src/ort_loader.cpp`).
 2. **Record the path of every loaded ORT and QNN module** (ORT core, providers
    shared library, QNN plugin EP, QNN backend, stub and system libraries), and
    fail if any is not the bundled copy.

@@ -16,13 +16,14 @@
 //
 // onnxruntime.dll is delay-loaded and the ORT C++ API is initialized manually
 // (ORT_API_MANUAL_INIT), so the first thing main() does is load the copy next to
-// the executable by full path; see LoadBundledOnnxRuntime().
+// the executable by full path and verify it; see edgebench::load_onnxruntime().
 //
 // Run with --help for the options. Exit codes: 0 ok, 1 check failed, 2 usage,
 // 3 ONNX Runtime error.
 
 #include <onnxruntime_cxx_api.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -33,6 +34,7 @@
 #include <string>
 #include <vector>
 
+#include "edgebench/ort_loader.hpp"
 #include "ort_support.hpp"
 #include "probe_util.hpp"
 
@@ -76,11 +78,17 @@ struct Report {
     bool failed = false;
 };
 
-void WritePathList(JsonWriter& j, const std::vector<fs::path>& paths) {
+void WriteModuleList(JsonWriter& j, const std::vector<edgebench::LoadedModule>& modules) {
     j.BeginArray();
-    for (const fs::path& p : paths)
-        j.String(p.string());
+    for (const edgebench::LoadedModule& m : modules)
+        j.String(m.path.string());
     j.EndArray();
+}
+
+bool SameFile(const fs::path& a, const fs::path& b) {
+    return !a.empty() && !b.empty() &&
+           edgebench::is_same_path(edgebench::resolve_path(a).native(),
+                                   edgebench::resolve_path(b).native());
 }
 
 void WriteStats(JsonWriter& j, const LatencyStats& s) {
@@ -143,7 +151,7 @@ std::vector<std::vector<float>> RunInputs(ModelRunner& runner, RunMode mode,
 int RunProbe(const Options& o) {
     Report report;
     JsonWriter& j = report.json;
-    const fs::path exe_dir = ExecutableDir();
+    const fs::path exe_dir = edgebench::executable_dir();
     const fs::path model = fs::absolute(o.model);
     if (!fs::is_regular_file(model)) {
         std::fprintf(stderr, "model not found: %s\n", model.string().c_str());
@@ -192,7 +200,7 @@ int RunProbe(const Options& o) {
 
     // ---------------------------------------------------------------- DLL check
     Section("ONNX Runtime DLL");
-    const fs::path ort_dll = LoadedModulePath("onnxruntime.dll");
+    const fs::path ort_dll = edgebench::loaded_module_path(L"onnxruntime.dll");
     const fs::path bundled = exe_dir / "onnxruntime.dll";
     const bool ort_dll_ok = SameFile(ort_dll, bundled);
     std::printf("  version:  %s\n  loaded:   %s\n  expected: %s  -> %s\n",
@@ -306,16 +314,19 @@ int RunProbe(const Options& o) {
     }
 
     // Snapshot while a session is alive: the HTP backend DLLs are unloaded with it.
-    const std::vector<fs::path> modules = LoadedOrtAndQnnModules();
-    bool modules_bundled = true;
+    const std::vector<edgebench::LoadedModule> modules = edgebench::list_ort_modules();
+    const std::vector<edgebench::LoadedModule> outside =
+        edgebench::find_modules_outside(modules, exe_dir);
+    const bool modules_bundled = outside.empty();
     std::printf("  loaded ONNX Runtime / QNN modules:\n");
-    for (const fs::path& m : modules) {
-        const bool here = SameFile(m.parent_path(), exe_dir);
-        modules_bundled &= here;
-        std::printf("    %s%s\n", m.string().c_str(), here ? "" : "   <-- NOT next to the exe");
+    for (const edgebench::LoadedModule& m : modules) {
+        const bool here = std::none_of(outside.begin(), outside.end(),
+                                       [&m](const auto& x) { return x.path == m.path; });
+        std::printf("    %s%s\n", m.path.string().c_str(),
+                    here ? "" : "   <-- NOT next to the exe");
     }
     j.Key("loaded_modules");
-    WritePathList(j, modules);
+    WriteModuleList(j, modules);
     j.Key("all_modules_next_to_exe").Bool(modules_bundled).EndObject();  // dll_check
     report.failed |= !modules_bundled;
 
@@ -539,10 +550,12 @@ int main(int argc, char** argv) {
     }
     const Options& o = parsed.options;
     // Load onnxruntime.dll from next to the executable before any ONNX Runtime call.
-    const std::string load_error = LoadBundledOnnxRuntime(ExecutableDir());
-    if (!load_error.empty()) {
-        std::fprintf(stderr, "cannot use the bundled ONNX Runtime: %s\n", load_error.c_str());
-        WriteErrorJson(o, "dll_load", -1, load_error);
+    const edgebench::OrtLoadResult load = edgebench::load_onnxruntime();
+    if (!load.ok()) {
+        const std::string kind(edgebench::to_string(load.error_kind));
+        std::fprintf(stderr, "cannot use the bundled ONNX Runtime (%s): %s\n", kind.c_str(),
+                     load.message.c_str());
+        WriteErrorJson(o, "dll_load", -1, kind + ": " + load.message);
         return kExitCheckFailed;
     }
     try {

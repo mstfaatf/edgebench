@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include "edgebench/ort_loader.hpp"
+
 // EDGEBENCH_EXPECTED_VERSION and EDGEBENCH_EXPECTED_ORT_VERSION are passed in by
 // CMake from the project version and the ONNX Runtime package found at configure time.
 
@@ -11,8 +13,11 @@ TEST(Version, MatchesCMakeProjectVersion) {
     EXPECT_EQ(v, EDGEBENCH_EXPECTED_VERSION);
 }
 
-TEST(Version, ReportsLoadedOnnxRuntimeVersion) {
-    const std::string ort = edgebench::onnxruntime_version();
-    ASSERT_FALSE(ort.empty());
-    EXPECT_EQ(ort, EDGEBENCH_EXPECTED_ORT_VERSION);
+TEST(Version, ExpectedOnnxRuntimeVersionMatchesPackage) {
+    EXPECT_EQ(edgebench::expected_onnxruntime_version(), EDGEBENCH_EXPECTED_ORT_VERSION);
+    EXPECT_TRUE(edgebench::parse_version(edgebench::expected_onnxruntime_version()).has_value());
+}
+
+TEST(Version, ExpectedApiVersionComesFromHeaders) {
+    EXPECT_GT(edgebench::expected_onnxruntime_api_version(), 0);
 }

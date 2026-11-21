@@ -320,8 +320,14 @@ set `OnnxRuntime_ROOT` / `QnnEp_ROOT` when configuring.
 cmake --preset arm64-release          # or arm64-debug
 cmake --build --preset arm64-release
 ctest --preset arm64-release
-.\build\arm64-release\bin\Release\edgebench.exe --version
+.\build\arm64-release\bin\Release\edgebench.exe
 ```
+
+`edgebench.exe` loads the bundled ONNX Runtime and prints its version, C API
+version and location (see [How the executables find ONNX Runtime](#how-the-executables-find-onnx-runtime)).
+Tests carry a CTest label: `unit` tests need no ONNX Runtime DLLs; `ort_bundle`
+tests load the bundled DLLs and run `edgebench.exe` with a missing, wrong, or
+damaged `onnxruntime.dll`. To run only the unit tests: `ctest --preset arm64-release -L unit`.
 
 The presets use the Visual Studio 2022 generator with the ARM64-hosted toolset,
 so no `vcvarsall`/ARM64 compiler environment is needed, only `cmake` on `PATH`.
@@ -333,6 +339,36 @@ DLLs. Project code (engine and tools) is compiled with `/W4 /WX`. If the
 repository is checked out under `%TEMP%`, MSBuild prints warning MSB8029 about
 intermediate directories in a temporary folder; it is harmless, but a checkout
 elsewhere avoids it.
+
+### How the executables find ONNX Runtime
+
+Windows ships an unrelated, older `onnxruntime.dll` in `System32` (1.17.1 on
+current Windows 11), and the normal DLL search order can pick it up. So
+`edgebench.exe`, `ort_probe.exe` and the tests never let Windows choose:
+
+1. Every target linking ONNX Runtime is built with `ORT_API_MANUAL_INIT` and
+   delay-loads `onnxruntime.dll` (set on the `OnnxRuntime::OnnxRuntime` target in
+   `cmake/FindOnnxRuntime.cmake`), so nothing touches ONNX Runtime before `main()`.
+2. At startup the program loads `onnxruntime.dll` from **its own directory**
+   (from the executable's path, not the current directory or `PATH`) by absolute
+   path, checks that it reports the ONNX Runtime version the build expects
+   (`EDGEBENCH_ONNXRUNTIME_VERSION` in `CMakeLists.txt`, 1.32.0) and provides the
+   C API version of the headers, and only then initializes the C++ API.
+3. After creating sessions, `ort_probe` also checks that every loaded ONNX
+   Runtime / QNN DLL (`onnxruntime*.dll`, `Qnn*.dll`) comes from that directory.
+
+The build copies the bundled DLLs next to the executables. If loading fails,
+`edgebench.exe` prints the error kind and exits with code 4 (`ort_probe` exits
+with 1):
+
+| Error | Meaning | Fix |
+|---|---|---|
+| `dll_not_found` | No `onnxruntime.dll` next to the executable, or a DLL it depends on is missing | Rebuild, or copy `onnxruntime.dll` and `onnxruntime_providers_shared.dll` from `third_party/onnxruntime/lib` next to the `.exe` |
+| `load_failed` | The file exists but Windows cannot load it (wrong architecture, damaged) | Re-run `scripts\fetch_deps.ps1 -Force` and rebuild |
+| `entry_point_missing` | The DLL is not ONNX Runtime (no `OrtGetApiBase` export) | Replace it with the bundled copy |
+| `version_mismatch` | A different ONNX Runtime version, e.g. a copy of the one in `System32` | Replace it with the bundled copy |
+| `api_version_unsupported` | Right version, but the headers and the DLL come from different packages | Re-run `scripts\fetch_deps.ps1 -Force` and rebuild |
+| `foreign_module_loaded` | An `onnxruntime.dll` from another directory was already loaded into the process | Find what loads it first (e.g. an injected DLL); do not copy ONNX Runtime into `PATH` or `System32` |
 
 ### 3. Run `ort_probe`
 
@@ -368,9 +404,9 @@ To compare C++ with Python on identical inputs, write reference tensors first
 
 The probe exits with 0 if everything passed, 1 if a check failed (comparison,
 DLL check, device selection), 2 on a usage error, and 3 on an ONNX Runtime error
-(the error code and message are printed). It loads `onnxruntime.dll` from its own
-directory by full path before any ONNX Runtime call and refuses to run with any
-other copy. Windows ships an unrelated, older `onnxruntime.dll` in `System32`.
+(the error code and message are printed). It loads ONNX Runtime the same way as
+`edgebench.exe` (see [How the executables find ONNX Runtime](#how-the-executables-find-onnx-runtime))
+and refuses to run with any other copy.
 
 `scripts\npu_overhead.py` uses the probe to compare C++ and Python NPU latency
 and to split it into accelerator time and host-side overhead. It reads the

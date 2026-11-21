@@ -1,5 +1,6 @@
-// ONNX Runtime + QNN plugin EP plumbing for ort_probe: loaded-DLL checks, EP
-// device selection, session options, and a runner for plain Run / IoBinding.
+// ONNX Runtime + QNN plugin EP plumbing for ort_probe: EP device selection,
+// session options, and a runner for plain Run / IoBinding. Loading ONNX Runtime
+// and checking the loaded DLLs is done by edgebench_core (edgebench/ort_loader.hpp).
 #pragma once
 
 #include <onnxruntime_cxx_api.h>
@@ -23,21 +24,6 @@ inline constexpr const char* kQnnHtpBackend = "QnnHtp.dll";
 struct DeviceSelectionError : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
-
-// --------------------------------------------------------------------------- DLLs
-
-std::filesystem::path ExecutableDir();
-
-// Loads <exe_dir>/onnxruntime.dll by full path and initializes the ORT C++ API
-// from it (the target is built with ORT_API_MANUAL_INIT and delay-loads
-// onnxruntime.dll, so nothing touches ONNX Runtime before this call). Returns an
-// error message, or an empty string on success. Must be called before any Ort:: API.
-std::string LoadBundledOnnxRuntime(const std::filesystem::path& exe_dir);
-// Full path of a loaded module, or empty if the module is not loaded.
-std::filesystem::path LoadedModulePath(const char* module_name);
-// Full paths of every loaded module whose file name contains "onnxruntime" or "qnn".
-std::vector<std::filesystem::path> LoadedOrtAndQnnModules();
-bool SameFile(const std::filesystem::path& a, const std::filesystem::path& b);
 
 // --------------------------------------------------------------------------- devices
 

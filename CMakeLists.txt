@@ -21,9 +21,12 @@ include(EdgeBenchWarnings)
 # only need to be copied once.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
-# Must match the onnxruntime version in requirements.txt (and scripts/fetch_deps.ps1),
-# so the C++ engine and the Python tooling run the same ONNX Runtime.
-find_package(OnnxRuntime 1.32.0 EXACT REQUIRED COMPONENTS QNN)
+# The ONNX Runtime version the C++ code is built against and accepts at run time
+# (generated into engine/src/version_config.hpp). Must match the onnxruntime
+# version in requirements.txt (and scripts/fetch_deps.ps1), so the C++ engine and
+# the Python tooling run the same ONNX Runtime.
+set(EDGEBENCH_ONNXRUNTIME_VERSION 1.32.0)
+find_package(OnnxRuntime ${EDGEBENCH_ONNXRUNTIME_VERSION} EXACT REQUIRED COMPONENTS QNN)
 message(STATUS "ONNX Runtime ${OnnxRuntime_VERSION}: ${OnnxRuntime_ROOT}")
 
 if(EDGEBENCH_BUILD_TESTS)

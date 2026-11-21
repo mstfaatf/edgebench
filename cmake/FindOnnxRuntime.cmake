@@ -12,7 +12,9 @@
 #   QnnEp_ROOT         QNN EP package root         (default: <repo>/third_party/onnxruntime-qnn)
 #
 # Results:
-#   OnnxRuntime::OnnxRuntime     imported shared library target
+#   OnnxRuntime::OnnxRuntime     imported shared library target. Everything linking it
+#                                is compiled with ORT_API_MANUAL_INIT and, with MSVC,
+#                                delay-loads onnxruntime.dll (see below).
 #   OnnxRuntime_FOUND, OnnxRuntime_QNN_FOUND
 #   OnnxRuntime_VERSION          e.g. 1.32.0 (from the package's .fetched marker, if present)
 #   OnnxRuntime_RUNTIME_FILES    DLLs that must sit next to an executable using ONNX Runtime
@@ -79,6 +81,23 @@ if(OnnxRuntime_FOUND)
       IMPORTED_LOCATION "${OnnxRuntime_DLL}"
       IMPORTED_IMPLIB "${OnnxRuntime_IMPLIB}"
       INTERFACE_INCLUDE_DIRECTORIES "${OnnxRuntime_INCLUDE_DIR}")
+    # Explicit loading, for every consumer: the C++ API must not initialize itself
+    # during static initialization (ORT_API_MANUAL_INIT), and onnxruntime.dll must
+    # not be loaded by the normal DLL search order at process start (/DELAYLOAD).
+    # The program loads the bundled copy by full path and verifies it first
+    # (edgebench::load_onnxruntime() in engine/src/ort_loader.cpp). Setting this on
+    # the imported target keeps every translation unit in a binary consistent.
+    set_property(TARGET OnnxRuntime::OnnxRuntime APPEND PROPERTY
+      INTERFACE_COMPILE_DEFINITIONS ORT_API_MANUAL_INIT)
+    if(MSVC)
+      # Binaries that reach ONNX Runtime only through the loader's GetProcAddress
+      # have no imports from onnxruntime.dll, so the linker reports LNK4199 for
+      # them; the delay-load is still wanted as a safety net for any direct import.
+      set_property(TARGET OnnxRuntime::OnnxRuntime APPEND PROPERTY
+        INTERFACE_LINK_OPTIONS "/DELAYLOAD:onnxruntime.dll" "/IGNORE:4199")
+      set_property(TARGET OnnxRuntime::OnnxRuntime APPEND PROPERTY
+        INTERFACE_LINK_LIBRARIES delayimp)
+    endif()
   endif()
 endif()
 
