@@ -43,7 +43,7 @@ The ARM64 build is the one tagged `-arm64`. Confirm it with `sysconfig`:
 >
 > | Kind of script | Behaviour on a non-native interpreter | Examples |
 > |---|---|---|
-> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `tools/ort_probe/reference.py`, `scripts/export_mobilenetv2.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `tools/qnn_rejection_check.py` |
+> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `tools/ort_probe/reference.py`, `scripts/export_mobilenetv2.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `scripts/npu_overhead.py`, `tools/qnn_rejection_check.py`, `tools/ort_probe/make_reference.py` |
 > | Environment diagnostic | Runs and reports the problem prominently | `scripts/check_env.py` |
 > | Platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/validate_results.py` and its tests |
 >
@@ -308,39 +308,47 @@ Configuration fails with a clear message if the compiler does not target
 native ARM64. GoogleTest is downloaded at configure
 time (pinned by SHA256). Executables are placed in
 `build/<preset>/bin/<Config>/`, together with the ONNX Runtime and QNN runtime
-DLLs. Project code is compiled with `/W4 /WX`.
+DLLs. Project code (engine and tools) is compiled with `/W4 /WX`.
 
-### 3. Build `ort_probe`
+### 3. Run `ort_probe`
 
-`tools/ort_probe` is a small diagnostic that checks ONNX Runtime and the QNN EP
-from native C++. It is a separate CMake project with its own presets, so it is
-configured from its own directory:
-
-```powershell
-Push-Location tools\ort_probe
-cmake --preset arm64-release
-cmake --build --preset arm64-release
-Pop-Location   # back to the repository root
-```
-
-Output goes to `build/ort_probe/arm64-release/Release/` (under the repository
-root). ONNX Runtime and all QNN runtime files
-are copied next to `ort_probe.exe`.
-
-### 4. Run `ort_probe`
-
-From the repository root:
+`tools/ort_probe` is a diagnostic that runs a model with ONNX Runtime from
+native C++, on the CPU EP or on the NPU through the QNN plugin EP. It is built by
+the root project (option `EDGEBENCH_BUILD_TOOLS`, on by default) into
+`build/<preset>/bin/<Config>/ort_probe.exe`, next to the ONNX Runtime and QNN
+runtime files. Its unit tests (`ort_probe_tests`) run with `ctest`. See
+`ort_probe.exe --help` for all options. Typical runs, from the repository root:
 
 ```powershell
-# Exports tmp\mobilenetv2.onnx if missing, then runs CPU and NPU in Python
-.\.venv\Scripts\python.exe tools\ort_probe\reference.py
+$probe = '.\build\arm64-release\bin\Release\ort_probe.exe'
 
-# Same model, same input, from C++
-.\build\ort_probe\arm64-release\Release\ort_probe.exe tmp\mobilenetv2.onnx
+# Per-channel s8w INT8 on the NPU, strict mode, with an EP context cache
+& $probe --model models\mobilenetv2\mobilenetv2_int8qdq_pc_s8w_b1.onnx --target npu `
+         --ep-context on --context-file cache\qnn\cpp_s8w_ctx.onnx --init-reps 3 --runs 200
+
+# CPU EP; the intra-op thread count is always explicit (default 4) and printed
+& $probe --model models\mobilenetv2\mobilenetv2_fp32_b1.onnx --target cpu --threads 4
 ```
 
-Both tools fill the input with `0.5` and print the top-1 index and first five
-outputs for the CPU EP and the QNN EP on the NPU (with CPU fallback disabled),
-so their output can be compared line by line. `ort_probe` also prints which
-`onnxruntime.dll` it loaded. Windows ships its own copy in `System32`, and the
-path should point at the copy next to the executable.
+To compare C++ with Python on identical inputs, write reference tensors first
+(10 preprocessed eval images and Python outputs for `cpu_fp32`, `cpu_s8w`,
+`npu_s8w`, `npu_fp16`, into `data/ort_probe_reference/`, not committed), then
+point the probe at them:
+
+```powershell
+.\.venv\Scripts\python.exe tools\ort_probe\make_reference.py
+& $probe --model models\mobilenetv2\mobilenetv2_int8qdq_pc_s8w_b1.onnx --target npu `
+         --reference-dir data\ort_probe_reference --reference-config npu_s8w
+```
+
+The probe exits with 0 if everything passed, 1 if a check failed (comparison,
+DLL check, device selection), 2 on a usage error, and 3 on an ONNX Runtime error
+(the error code and message are printed). It loads `onnxruntime.dll` from its own
+directory by full path before any ONNX Runtime call and refuses to run with any
+other copy. Windows ships an unrelated, older `onnxruntime.dll` in `System32`.
+
+`scripts\npu_overhead.py` uses the probe to compare C++ and Python NPU latency
+and to split it into accelerator time and host-side overhead.
+
+`tools\ort_probe\reference.py` is a quick Python check with an input filled
+with 0.5; `ort_probe --fill 0.5` runs the same input from C++.

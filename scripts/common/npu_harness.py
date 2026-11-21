@@ -42,6 +42,7 @@ import onnxruntime_qnn
 from common import accuracy as acc
 from common import ort_qnn
 from common.preprocess import IMAGENETTE_ROOT, REPO_ROOT, load_image, normalize, read_split
+from common.qnn_log import parse_qnn_profile_csv
 
 HTP_PERFORMANCE_MODE = "burst"
 DLL_FILTER = re.compile(r"onnxruntime|qnn", re.IGNORECASE)
@@ -532,9 +533,6 @@ class NpuHarness:
         Detailed profiling slows execution down, so use the numbers for where time goes
         (shares between ops, accelerator time), not for latency.
         """
-        import csv
-        import statistics
-
         csv_path = self.log_dir / f"{cfg.key}_qnn_profile.csv"
         csv_path.unlink(missing_ok=True)
         prof_cfg = RunConfig(cfg.key, "npu", cfg.model, cfg.adapter, {
@@ -547,28 +545,16 @@ class NpuHarness:
         session = None
         gc.collect()
 
-        backend: dict[tuple, list] = {}
-        ops: dict[str, list] = {}
-        with csv_path.open(encoding="utf-8", errors="replace", newline="") as f:
-            for row in csv.DictReader(f):
-                if row["Message"] == "NODE":
-                    ops.setdefault(row["Event Identifier"], []).append(float(row["Time"]))
-                elif row["Message"] == "BACKEND" and row["Event Level"] == "ROOT":
-                    backend.setdefault((row["Event Identifier"], row["Unit of Measurement"]),
-                                       []).append(float(row["Time"]))
-        med = {k: statistics.median(v) for k, v in ops.items()}
+        prof = parse_qnn_profile_csv(csv_path.read_text(encoding="utf-8", errors="replace"))
+        med = prof["op_cycles_median"]
         total = sum(med.values())
-
-        def backend_median(name: str, unit: str) -> float | None:
-            v = backend.get((name, unit))
-            return statistics.median(v) if v else None
 
         return {
             "runs": runs,
             "profile_file": csv_path.name,
-            "accelerator_execute_us_median": backend_median("Accelerator (execute) time", "US"),
-            "accelerator_execute_cycles_median": backend_median(
-                "Accelerator (execute) time (cycles)", "CYCLES"),
+            "accelerator_execute_us_median": prof["accelerator_execute_us"],
+            "execute_us_medians": {k: v for k, v in prof.items()
+                                   if k.endswith("_us")},
             "htp_op_count": len(med),
             "htp_op_cycles_total": total,
             "top_ops": [{"op": k.split(":OpId")[0], "cycles": v,

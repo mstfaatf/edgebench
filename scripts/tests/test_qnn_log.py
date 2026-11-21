@@ -76,3 +76,26 @@ def test_lines_without_pass_markers_still_count():
     r = parse_placement_log(log)
     assert r.qnn_passes[0]["passed_nodes"] == 5
     assert r.all_on_qnn
+
+
+def test_parse_qnn_profile_csv():
+    from common.qnn_log import parse_qnn_profile_csv
+
+    header = "Msg Timestamp,Message,Time,Unit of Measurement,Timing Source,Event Level,Event Identifier\n"
+    rows = []
+    for accel, qnn_exec in [(270, 400), (280, 420), (275, 410)]:
+        rows += [f"0,BACKEND,{accel},US,BACKEND,ROOT,Accelerator (execute) time\n",
+                 f"0,BACKEND,{accel + 15},US,BACKEND,ROOT,QNN accelerator (execute) time\n",
+                 f"0,BACKEND,{accel + 25},US,BACKEND,ROOT,RPC (execute) time\n",
+                 f"0,EXECUTE,{qnn_exec},US,BACKEND,ROOT,QNN (execute) time\n",
+                 "0,BACKEND,700000,CYCLES,BACKEND,ROOT,Accelerator (execute) time (cycles)\n",
+                 "0,NODE,1000,CYCLES,BACKEND,SUB-EVENT,conv_1:OpId_3 (cycles)\n"]
+    rows.append("0,FINALIZE,157485,US,BACKEND,ROOT,QNN (finalize) time\n")
+    r = parse_qnn_profile_csv(header + "".join(rows))
+    assert r["inferences"] == 3
+    assert r["accelerator_execute_us"] == 275
+    assert r["qnn_accelerator_execute_us"] == 290
+    assert r["rpc_execute_us"] == 300
+    assert r["qnn_execute_us"] == 410
+    assert r["accelerator_execute_excluding_wait_us"] is None
+    assert r["op_cycles_median"] == {"conv_1:OpId_3 (cycles)": 1000}

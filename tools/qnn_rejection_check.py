@@ -18,8 +18,11 @@ expectation holds, 1 otherwise, 2 on a non-native interpreter.
 ``--save-fixtures DIR`` writes trimmed copies of both logs (only the lines the
 parser reads, without file system paths) for ``scripts/tests/test_ort_qnn.py``.
 
+``--write-model PATH`` only writes the model (e.g. for ``ort_probe``) and exits.
+
 Usage:
     python tools/qnn_rejection_check.py [--save-fixtures scripts/tests/fixtures/qnn_logs]
+    python tools/qnn_rejection_check.py --write-model tmp/relu_det_relu.onnx
 """
 
 from __future__ import annotations
@@ -81,7 +84,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--save-fixtures", type=Path, default=None,
                         help="directory for trimmed log fixtures")
+    parser.add_argument("--write-model", type=Path, default=None,
+                        help="only write the Relu -> Det -> Relu model to this path and exit "
+                             "(e.g. to run it through ort_probe)")
     args = parser.parse_args()
+
+    if args.write_model:
+        args.write_model.parent.mkdir(parents=True, exist_ok=True)
+        build_model(args.write_model)
+        print(f"wrote {args.write_model}")
+        return 0
 
     try:
         require_native_arm64()

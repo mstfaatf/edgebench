@@ -41,7 +41,7 @@ performance numbers at this stage.
 | `schemas/` | JSON Schema for benchmark result files ([format spec](docs/results-schema.md)) |
 | `dashboard/` | Static results dashboard |
 | `scripts/` | Environment check, dependency fetch, dataset download, MobileNetV2 export/quantization/evaluation, NPU checks, Qualcomm AI Hub baseline comparison, result validation |
-| `tools/` | Standalone diagnostics: `ort_probe` (ONNX Runtime + QNN from C++), `qnn_rejection_check.py` (QNN EP rejection detection) |
+| `tools/` | Diagnostics: `ort_probe` (C++ ONNX Runtime + QNN EP runner: strict NPU, EP context, C++ vs Python comparison, latency), `qnn_rejection_check.py` (QNN EP rejection detection) |
 | `cmake/` | Shared CMake modules |
 | `docs/` | Setup guide (incl. data and model preparation), results format, feasibility notes |
 

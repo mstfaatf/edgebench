@@ -87,7 +87,7 @@ and works in both Python and C++. The old bundled-EP NuGet package
 
 ### ort_probe results
 
-`tools/ort_probe` (C++17, ONNX Runtime C++ API) registers the QNN plugin with
+`tools/ort_probe` (C++, ONNX Runtime C++ API; see also [C++ path](#c-path)) registers the QNN plugin with
 `Ort::Env::RegisterExecutionProviderLibrary`, enumerates devices with
 `Ort::Env::GetEpDevices`, and attaches the NPU device with
 `Ort::SessionOptions::AppendExecutionProvider_V2` and
@@ -449,6 +449,211 @@ in line with the 0.50 ms measured here on an X Plus.
   placement and quantization scheme. It is faster on the NPU and loses less
   accuracy to quantization. Per-channel s8w is the default INT8 recipe from here on.
 
+## C++ path
+
+`tools/ort_probe` runs the same models from native C++ with the ONNX Runtime
+1.32.0 NuGet package and the QNN plugin EP 2.8.0 (`scripts/fetch_deps.ps1`), using
+the same session settings as the Python harness. Results below were collected on
+2026-11-20, plugged in, Windows power mode *Balanced*.
+
+### Device selection
+
+The probe registers `onnxruntime_providers_qnn.dll` (full path next to the
+executable) with `Ort::Env::RegisterExecutionProviderLibrary`, lists
+`Ort::Env::GetEpDevices()`, and attaches the session with
+`Ort::SessionOptions::AppendExecutionProvider_V2` to the single QNN EP device
+whose `Device().Type()` is `OrtHardwareDeviceType_NPU`. It fails if there is
+not exactly one. Devices seen from C++, identical to Python:
+
+| EP | EP vendor | Type | Vendor ID | Device ID | Metadata |
+|---|---|---|---|---|---|
+| CPUExecutionProvider | Microsoft | CPU | 0x4d4f4351 ("QCOM") | 0x7 | Description = Snapdragon(R) X 10-core X1P64100 @ 3.42 GHz |
+| QNNExecutionProvider | Qualcomm | NPU | 0x4d4f4351 | 0x41304430 | LUID = 70553 |
+| QNNExecutionProvider | Qualcomm | GPU | 0x4d4f4351 | 0x36334330 | Adreno(TM) X1-85, DXGI adapter 0, LUID = 68962 |
+
+The hardware vendor string is empty for both QNN devices; only the numeric
+vendor ID is set.
+
+### Which onnxruntime.dll is loaded
+
+Windows 11 ships an unrelated `onnxruntime.dll` in `C:\Windows\System32` (a
+forwarder to the OS's own ONNX Runtime, version 1.17.1 here). It is not a
+KnownDLL, so the loader's standard search order, which checks the
+application directory first, finds the copy the build places next to the
+executable. That alone is not a guarantee one can rely on, and a missing copy
+fails badly. With only `ort_probe.exe` in a directory, the loader picks up
+the System32 copy, and the ONNX Runtime C++ API (which by default initializes
+itself during static initialization) asks it for C API version 32. ORT 1.17
+answers "The requested API version [32] is not available, only API versions
+[1, 17] are supported", and the process crashes with an access violation
+before `main()` runs.
+
+The probe therefore:
+
+1. **delay-loads** `onnxruntime.dll` (`/DELAYLOAD:onnxruntime.dll`) and builds with
+   `ORT_API_MANUAL_INIT`, so nothing touches ONNX Runtime before `main()`;
+2. loads `<exe dir>\onnxruntime.dll` **by full path** with
+   `LoadLibraryExW(..., LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS)`.
+   Later delay-load resolution finds this already-loaded module by name;
+3. checks that `OrtGetApiBase()->GetApi(ORT_API_VERSION)` succeeds before calling
+   `Ort::InitApi(api)`, and otherwise exits with a clear message;
+4. after creating the session, asserts that the loaded `onnxruntime.dll` is the
+   one next to the executable and lists every loaded ONNX Runtime / QNN module.
+
+Verified outcomes:
+
+| Situation | Result |
+|---|---|
+| Normal build output, run from the repository root, from `%TEMP%`, from `C:\`, and with `C:\Windows\System32` as working directory (PowerShell and cmd) | Bundled `onnxruntime.dll` loaded, check OK |
+| `ort_probe.exe` alone in a directory | "onnxruntime.dll not found (the build copies it next to the executable)", exit 1 |
+| System32's `onnxruntime.dll` copied next to the executable | "...is ONNX Runtime 1.17.1, which does not provide C API version 32", exit 1 (no crash) |
+
+With an NPU session alive (built from an EP context model), the loaded modules
+are, all from the executable's directory: `onnxruntime.dll`,
+`onnxruntime_providers_shared.dll`, `onnxruntime_providers_qnn.dll`,
+`QnnHtp.dll`, `QnnHtpV73Stub.dll`, `QnnSystem.dll`. `QnnHtpPrepare.dll` is only
+needed when a session compiles the graph; sessions created from a context binary
+do not load it.
+
+### C++ vs Python outputs
+
+`tools/ort_probe/make_reference.py` writes 10 preprocessed eval images (the
+first of each class) and the Python outputs for four configurations; the probe
+reads the same input tensors (no image decoding in C++) and compares. CPU
+sessions use 4 intra-op threads in both languages. Each Python configuration was
+also run in a second, independent session to measure run-to-run variation.
+
+| Config | Python repeat variation | C++ vs Python max abs diff (Run / IoBinding) | Tolerance | Top-1 match |
+|---|---|---|---|---|
+| CPU FP32 | 0 | 0 / 0 | 1e-5 | 10/10 |
+| CPU INT8 s8w | 0 | 0 / 0 | 1e-5 | 10/10 |
+| NPU INT8 s8w, strict | 0 | 0 / 0 | 0 | 10/10 |
+| NPU FP16, strict | 0 | 0 / 0 | 0 | 10/10 |
+
+The outputs are bit-identical. NPU execution is deterministic run to run and
+across sessions, so the NPU tolerance is 0. C++ IoBinding with preallocated
+buffers gives the same outputs as `Session::Run`.
+
+### EP context cache
+
+Same model, strict mode, median of 3 session creations:
+
+| Config | Cold (compile) | EP context generation | From cached context | Cached = uncached outputs |
+|---|---|---|---|---|
+| NPU INT8 s8w | 2139 ms | 2005 ms | 277 ms | yes (bit-identical) |
+| NPU FP16 | 2073 ms | 2277 ms | 323 ms | yes (bit-identical) |
+
+Context models are interchangeable between the two bindings: Python loads the
+one generated by the C++ probe (all Python NPU timings in the overhead breakdown
+below use it), and the probe loads one generated by the Python harness and still
+matches Python's outputs exactly. A context binary is tied to the device and the
+QNN SDK version, not to the language binding.
+
+### Strict-mode failure
+
+The `Relu → Det → Relu` model from `tools/qnn_rejection_check.py --write-model`:
+
+- **strict on**: session creation throws `Ort::Exception`; the probe prints
+  `ONNX Runtime error 1 (ORT_FAIL): This session contains graph nodes that are
+  assigned to the default CPU EP, but fallback to CPU EP has been explicitly
+  disabled by the user.`, writes the code and message to its JSON summary, and
+  exits with 3. No crash.
+- **strict off**: the session is created (Det on the CPU EP, the Relus on QNN),
+  runs, and matches a CPU-only run (max abs diff 4.7e-10).
+
+### Overhead breakdown on the NPU
+
+`scripts/npu_overhead.py`: per-channel s8w INT8, strict, cached EP context (the
+same context model for every mode), `htp_performance_mode=burst`, one fixed
+input. 20 warmup + 200 timed runs, 3 rounds with the order rotated each round,
+5 s cooldown, CPU and NPU, C++ and Python interleaved. **Sanity check, not a
+benchmark.** Latency is model execution only (the `Run` call); preprocessing is
+not timed.
+
+Accelerator time per inference comes from separate runs with the QNN profiler
+at `profiling_level=basic`. Profiling inflates host-side time, so wall times
+from those runs are not used. Host overhead is the wall-clock p50 minus the
+accelerator execute time.
+
+| Mode | Wall p50 (µs) | p50 per round | Wall mean | Accelerator execute | Host overhead | Share |
+|---|---|---|---|---|---|---|
+| C++ `Session::Run` | 327 | 321 / 327 / 329 | 338 | 275 | 52 | 16% |
+| C++ IoBinding, preallocated | 316 | 318 / 316 / 316 | 340 | 273 | 43 | 14% |
+| Python `InferenceSession.run` | 339 | 353 / 339 / 334 | 379 | 277 | 63 | 19% |
+| Python IoBinding, preallocated | 351 | 351 / 354 / 348 | 384 | 276 | 75 | 21% |
+
+The QNN profiler nests the accelerator time inside "QNN accelerator (execute)"
+(~290 µs) and "RPC (execute)" (~300 µs), the call across to the DSP.
+
+- The accelerator time is the same in every mode (273–277 µs): the binding
+  only changes host-side cost.
+- **About 80–86% of single-image latency is the accelerator.** Host-side
+  overhead is 43–75 µs. C++ IoBinding is the leanest (43 µs); plain C++ `Run`
+  adds ~9 µs (creating the input `Ort::Value` and allocating the output);
+  Python adds another ~10 µs.
+- Python IoBinding is *slower* than plain Python `run` (75 vs 63 µs), so in
+  Python the binding API is not a win at this size.
+- Python's mean is well above its p50 (379 vs 339 µs) and its p95 is higher
+  (525 vs 389 µs for C++ Run), so C++ is also more consistent.
+
+CPU sanity check, same run, 4 intra-op threads (ms, median over rounds):
+
+| Model | C++ p50 | Python p50 | C++ mean | Python mean |
+|---|---|---|---|---|
+| INT8 s8w | 1.353 | 1.350 | 1.417 | 1.422 |
+| FP32 | 3.958 | 3.967 | 4.207 | 4.114 |
+
+On the CPU, C++ and Python are within 1%, as expected when compute dominates.
+
+### Plugin EP API notes (C++)
+
+Things that matter for the engine's QNN provider:
+
+- **Load ONNX Runtime explicitly.** Delay-load `onnxruntime.dll`, define
+  `ORT_API_MANUAL_INIT`, load the bundled DLL by full path, check
+  `GetApi(ORT_API_VERSION)` and call `Ort::InitApi(api)`. Otherwise a wrong or
+  missing DLL crashes during static initialization with no chance to report
+  it. The engine executable needs the same treatment.
+- **Registration.** `Env::RegisterExecutionProviderLibrary(name, full_path)`
+  takes a wide-string path on Windows and must use an absolute path. Register
+  once per `Env`, and release all sessions before
+  `UnregisterExecutionProviderLibrary`.
+- **Device enumeration.** `Env::GetEpDevices()` returns `ConstEpDevice` views
+  owned by the environment. Select by `EpName() == "QNNExecutionProvider"` and
+  `Device().Type() == OrtHardwareDeviceType_NPU`, not by position: the QNN EP
+  also exposes the Adreno GPU. `Device().Vendor()` is empty for QNN devices;
+  use `VendorId()` / `Metadata()` instead.
+- **Attaching to a device.** `SessionOptions::AppendExecutionProvider_V2(env,
+  {device}, options)` takes the EP options as a `std::unordered_map<std::string,
+  std::string>`. It replaces the provider name. The plugin EP never appears in
+  `GetAvailableProviders()`.
+- **Provider options vs session config.** QNN options (`backend_path`,
+  `htp_performance_mode`, `enable_htp_fp16_precision`, `profiling_level`,
+  `profiling_file_path`) go in the provider-options map. Strict mode
+  (`session.disable_cpu_ep_fallback`) and EP context (`ep.context_enable`,
+  `ep.context_file_path`, `ep.context_embed_mode`) are **session config
+  entries** (`AddConfigEntry`). `backend_path` should be an absolute path to the
+  `QnnHtp.dll` shipped with the plugin, because QnnHtp loads its stub/skel files
+  from its own directory.
+- **EP context.** Generating is a side effect of creating a session with
+  `ep.context_enable=1`. The default embed mode 0 writes `<name>_ctx.onnx` (~1 KB,
+  one `EPContext` node) plus `<name>_ctx_qnn.bin`. Delete old files before
+  regenerating. Load the `_ctx.onnx` like any model, with the same
+  device/options, and strict mode still applies. `Ort::CompileModel` with
+  `ModelCompilationOptions` is the newer explicit API for the same thing.
+- **Errors.** Strict-mode refusal arrives as `Ort::Exception` with
+  `GetOrtErrorCode() == ORT_FAIL` at session creation, not at run time.
+- **Type info lifetime.** `Session::GetInputTypeInfo(i).GetTensorTypeAndShapeInfo()`
+  on a temporary returns a dangling view (garbage element types). Keep the
+  `TypeInfo` alive while using its tensor info.
+- **IoBinding.** Bind `Ort::Value`s created over preallocated CPU buffers
+  (`MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeDefault)`) once, then
+  call `Session::Run(RunOptions, IoBinding)` repeatedly. This works with the QNN
+  plugin EP and is the lowest-overhead mode measured.
+- **QNN profiling** is configured per session through provider options and
+  written when the session is released. It adds roughly 12 ms of host time per
+  inference, so never time a profiled session.
+
 ## Implications
 
 **Works natively on ARM64:**
@@ -499,14 +704,16 @@ then:
 ```powershell
 .\.venv\Scripts\python.exe scripts\check_env.py --json tmp\check_env.json
 .\.venv\Scripts\python.exe tools\ort_probe\reference.py
-.\build\ort_probe\arm64-release\Release\ort_probe.exe tmp\mobilenetv2.onnx
+.\build\arm64-release\bin\Release\ort_probe.exe --model tmp\mobilenetv2.onnx --target npu --fill 0.5
 ```
 
 The quantization and NPU results come from the data and model pipeline in
 [setup.md](setup.md#preparing-data-and-models), ending with
 `scripts\eval_cpu.py`, `scripts\npu_check.py` and `scripts\compare_aihub.py`
 (`--qnn-profile` for the per-op profile). The rejection check is
-`tools\qnn_rejection_check.py`.
+`tools\qnn_rejection_check.py`. The C++ results come from
+`tools\ort_probe\make_reference.py`, `ort_probe.exe` (see
+[setup.md](setup.md#3-run-ort_probe)) and `scripts\npu_overhead.py`.
 
 `check_env.py` prints system information and a PASS / FAIL / NOT INSTALLED /
 SKIP line per library, with error messages for failures. `--json PATH` also

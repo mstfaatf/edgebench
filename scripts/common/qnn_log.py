@@ -129,3 +129,44 @@ def parse_placement_log(text: str) -> PlacementReport:
         p["failed_units"] = dict(sorted(p["failed_units"].items()))
     report.rejected_nodes = list(rejected.values())
     return report
+
+
+# --------------------------------------------------------------------------- QNN profile CSV
+
+# Per-inference backend events written by the QNN EP profiler
+# (provider options profiling_level=basic|detailed, profiling_file_path=...),
+# from the accelerator outwards. Times are microseconds.
+QNN_EXECUTE_EVENTS = {
+    "accelerator_execute_us": ("BACKEND", "Accelerator (execute) time"),
+    "accelerator_execute_excluding_wait_us": ("BACKEND", "Accelerator (execute excluding wait) time"),
+    "qnn_accelerator_execute_us": ("BACKEND", "QNN accelerator (execute) time"),
+    "rpc_execute_us": ("BACKEND", "RPC (execute) time"),
+    "qnn_execute_us": ("EXECUTE", "QNN (execute) time"),
+}
+
+
+def parse_qnn_profile_csv(text: str) -> dict:
+    """Summarize a QNN EP profiling CSV.
+
+    Returns per-inference medians of the backend execute events
+    (``QNN_EXECUTE_EVENTS``), the number of inferences seen, and per-op cycle
+    medians (only present with ``profiling_level=detailed``).
+    """
+    import csv
+    import io
+    import statistics
+
+    events: dict[str, list[float]] = {k: [] for k in QNN_EXECUTE_EVENTS}
+    lookup = {v: k for k, v in QNN_EXECUTE_EVENTS.items()}
+    ops: dict[str, list[float]] = {}
+    for row in csv.DictReader(io.StringIO(text)):
+        msg, ident, level = row.get("Message"), row.get("Event Identifier"), row.get("Event Level")
+        if msg == "NODE":
+            ops.setdefault(ident, []).append(float(row["Time"]))
+        elif level == "ROOT" and row.get("Unit of Measurement") == "US" \
+                and (msg, ident) in lookup:
+            events[lookup[(msg, ident)]].append(float(row["Time"]))
+    out = {k: (statistics.median(v) if v else None) for k, v in events.items()}
+    out["inferences"] = len(events["accelerator_execute_us"])
+    out["op_cycles_median"] = {k: statistics.median(v) for k, v in ops.items()}
+    return out
