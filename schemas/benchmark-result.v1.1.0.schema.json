@@ -1,0 +1,983 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/mstfaatf/edgebench/main/schemas/benchmark-result.v1.1.0.schema.json",
+  "title": "EdgeBench benchmark result",
+  "description": "One benchmark run: one model, one provider configuration, one or more trials. Schema version 1.1.0. Fields added in 1.1.0 are optional keys, so a 1.0.0 document with schema_version set to 1.1.0 is valid. See docs/results-schema.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "run_id", "timestamp_utc", "label", "status", "error", "warnings", "tool", "system",
+    "runtime", "model", "config", "execution", "timing", "memory", "accuracy", "raw"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Schema version this document conforms to. Each version has its own schema file.",
+      "const": "1.1.0"
+    },
+    "run_id": {"$ref": "#/$defs/uuid"},
+    "timestamp_utc": {"$ref": "#/$defs/timestampUtc"},
+    "label": {"type": ["string", "null"], "description": "Optional human-readable name for the run."},
+    "status": {"enum": ["success", "failed"]},
+    "error": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["stage", "message", "code"],
+          "properties": {
+            "stage": {
+              "enum": [
+                "configuration", "environment", "model_load", "ep_registration", "session_creation", "warmup",
+                "measurement", "accuracy", "output"
+              ]
+            },
+            "message": {"type": "string", "minLength": 1},
+            "code": {
+              "type": ["string", "null"],
+              "description": "Error code from the failing component (e.g. an ONNX Runtime OrtErrorCode name), if any."
+            }
+          }
+        }
+      ]
+    },
+    "warnings": {"type": "array", "items": {"$ref": "#/$defs/warning"}},
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "git_commit", "git_dirty", "build_type", "compiler"],
+      "properties": {
+        "name": {"const": "edgebench"},
+        "version": {"$ref": "#/$defs/semver"},
+        "git_commit": {
+          "oneOf": [{"type": "null"}, {"type": "string", "pattern": "^[0-9a-f]{40}$"}]
+        },
+        "git_dirty": {
+          "type": ["boolean", "null"],
+          "description": "True if the working tree had uncommitted changes at build time."
+        },
+        "build_type": {"type": ["string", "null"], "description": "CMake build configuration, e.g. Release or Debug."},
+        "compiler": {"type": ["string", "null"], "description": "Compiler identification, e.g. 'MSVC 19.42.34435'."},
+        "implementation": {
+          "enum": ["cpp", "python", null],
+          "description": "Which implementation wrote the document: the C++ engine (cpp) or a Python script (python)."
+        }
+      }
+    },
+    "system": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "process_architecture", "cpu", "memory_total_bytes", "device", "power"],
+      "properties": {
+        "os": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version", "build", "architecture"],
+          "properties": {
+            "name": {"type": "string", "minLength": 1},
+            "version": {"type": ["string", "null"], "description": "Marketing/display version, e.g. 25H2."},
+            "build": {"type": ["string", "null"], "description": "Full build number, e.g. 26200.9974."},
+            "architecture": {"$ref": "#/$defs/architecture"}
+          }
+        },
+        "process_architecture": {
+          "$ref": "#/$defs/architecture",
+          "description": "Architecture the edgebench process itself was built for. Differs from os.architecture when running under emulation."
+        },
+        "cpu": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "physical_cores", "logical_processors"],
+          "properties": {
+            "name": {"type": ["string", "null"]},
+            "physical_cores": {"$ref": "#/$defs/nullablePositiveInteger"},
+            "logical_processors": {"$ref": "#/$defs/nullablePositiveInteger"}
+          }
+        },
+        "memory_total_bytes": {"$ref": "#/$defs/nullableNonNegativeInteger"},
+        "device": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["manufacturer", "model"],
+          "properties": {
+            "manufacturer": {"type": ["string", "null"]},
+            "model": {"type": ["string", "null"]}
+          }
+        },
+        "power": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source", "power_mode"],
+          "properties": {
+            "source": {"enum": ["ac", "battery", null]},
+            "power_mode": {
+              "type": ["string", "null"],
+              "description": "Windows power mode as reported by the OS, e.g. 'Best performance'."
+            },
+            "power_plan": {
+              "type": ["string", "null"],
+              "description": "Active power plan (power scheme) name, e.g. Balanced."
+            },
+            "battery_percent": {
+              "type": ["integer", "null"],
+              "minimum": 0,
+              "maximum": 100,
+              "description": "Battery charge at the start of the run; null without a battery or if unknown."
+            },
+            "battery_saver": {"type": ["boolean", "null"], "description": "Whether battery saver was on."}
+          }
+        },
+        "load": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "description": "System load sampled right before measurement. Null if not sampled.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["cpu_utilization_ratio", "sample_window_s"],
+              "properties": {
+                "cpu_utilization_ratio": {
+                  "type": ["number", "null"],
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "System-wide CPU utilization (0-1) sampled before the timed trials: background load."
+                },
+                "sample_window_s": {"$ref": "#/$defs/nullableNonNegativeNumber", "description": "Length of the sampling window."}
+              }
+            }
+          ]
+        }
+      }
+    },
+    "runtime": {
+      "description": "Null only if the run failed before ONNX Runtime was loaded.",
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["onnxruntime", "execution_provider", "qnn", "ep_device"],
+          "properties": {
+            "onnxruntime": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["version", "library_path"],
+              "properties": {
+                "version": {"$ref": "#/$defs/semver"},
+                "library_path": {
+                  "type": ["string", "null"],
+                  "description": "Absolute path of the onnxruntime library actually loaded."
+                },
+                "api_version": {
+                  "$ref": "#/$defs/nullablePositiveInteger",
+                  "description": "ONNX Runtime C API version obtained from the library (ORT_API_VERSION of the headers the engine was built with)."
+                },
+                "load_check": {
+                  "enum": ["full_path_verified", "python_package", "not_checked"],
+                  "description": "full_path_verified: the C++ engine loaded onnxruntime.dll by absolute path from its own directory and checked its version and C API version. python_package: loaded through the onnxruntime Python package. not_checked: no check was made."
+                }
+              }
+            },
+            "execution_provider": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "version", "library_path"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Execution provider used for the session, e.g. QNNExecutionProvider."
+                },
+                "version": {
+                  "type": ["string", "null"],
+                  "description": "EP version, e.g. 2.8.0 for the QNN plugin EP. Null for built-in EPs without their own version."
+                },
+                "library_path": {
+                  "type": ["string", "null"],
+                  "description": "Path of the plugin EP library, if the EP was registered from a library."
+                }
+              }
+            },
+            "qnn": {
+              "description": "QNN-specific details. Null when the QNN EP is not used.",
+              "oneOf": [
+                {"type": "null"},
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["sdk_version", "backend", "backend_path"],
+                  "properties": {
+                    "sdk_version": {
+                      "type": ["string", "null"],
+                      "description": "QNN SDK (QAIRT) version as reported by the loaded backend."
+                    },
+                    "backend": {"enum": ["htp", "gpu", "cpu", "saver", "ir", null]},
+                    "backend_path": {"type": ["string", "null"]},
+                    "backend_build": {
+                      "type": ["string", "null"],
+                      "description": "Build identifier reported by the backend, e.g. v2.52.0.261104115025."
+                    }
+                  }
+                }
+              ]
+            },
+            "ep_device": {
+              "description": "The EP device the session was attached to. Null if no device-based selection was used.",
+              "oneOf": [
+                {"type": "null"},
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ep_name", "ep_vendor", "device_type", "vendor", "vendor_id", "device_id",
+                    "driver_version"
+                  ],
+                  "properties": {
+                    "ep_name": {"type": "string", "minLength": 1},
+                    "ep_vendor": {"type": ["string", "null"]},
+                    "device_type": {"$ref": "#/$defs/deviceType"},
+                    "vendor": {
+                      "type": ["string", "null"],
+                      "description": "Hardware vendor string; may be unset by the EP."
+                    },
+                    "vendor_id": {"$ref": "#/$defs/nullableNonNegativeInteger"},
+                    "device_id": {"$ref": "#/$defs/nullableNonNegativeInteger"},
+                    "driver_version": {
+                      "type": ["string", "null"],
+                      "description": "Driver version of the device (e.g. the NPU driver)."
+                    },
+                    "metadata": {
+                      "$ref": "#/$defs/stringMap",
+                      "description": "Hardware device metadata of the selected device."
+                    },
+                    "selection": {
+                      "oneOf": [
+                        {"type": "null"},
+                        {
+                          "description": "How the device was selected.",
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": ["method", "candidate_count"],
+                          "properties": {
+                            "method": {
+                              "enum": ["by_device_type"],
+                              "description": "by_device_type: the EP device of the requested EP whose hardware type is the requested device type."
+                            },
+                            "candidate_count": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "How many devices matched; a valid selection has exactly one."
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "loaded_modules": {
+              "type": "array",
+              "items": {"$ref": "#/$defs/loadedModule"},
+              "description": "Every ONNX Runtime and QNN DLL loaded in the process (onnxruntime*.dll, Qnn*.dll), captured while the session was alive."
+            },
+            "ep_devices": {
+              "type": "array",
+              "items": {"$ref": "#/$defs/epDeviceInfo"},
+              "description": "Every EP device ONNX Runtime enumerated, not only the selected one."
+            }
+          }
+        }
+      ]
+    },
+    "model": {
+      "description": "Null only if the run failed before the model file was read.",
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name", "file_name", "sha256", "size_bytes", "opset", "ir_version", "stored_precision", "inputs",
+            "outputs", "source", "quantization", "precision_notes"
+          ],
+          "properties": {
+            "name": {"type": "string", "minLength": 1},
+            "file_name": {"type": "string", "minLength": 1},
+            "sha256": {"$ref": "#/$defs/sha256"},
+            "size_bytes": {"type": "integer", "minimum": 0},
+            "opset": {
+              "$ref": "#/$defs/nullablePositiveInteger",
+              "description": "Opset version of the default ONNX domain."
+            },
+            "ir_version": {"$ref": "#/$defs/nullablePositiveInteger"},
+            "stored_precision": {
+              "enum": ["fp32", "fp16", "int8", "mixed"],
+              "description": "Precision of the weights/compute as stored in the model file."
+            },
+            "inputs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/tensorInfo"}},
+            "outputs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/tensorInfo"}},
+            "source": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["library", "identifier", "export_tool"],
+              "properties": {
+                "library": {"type": ["string", "null"], "description": "e.g. torchvision, timm, keras, custom."},
+                "identifier": {
+                  "type": ["string", "null"],
+                  "description": "Model/weights identifier within the library, e.g. mobilenet_v2/IMAGENET1K_V2."
+                },
+                "export_tool": {
+                  "type": ["string", "null"],
+                  "description": "Tool and version that produced the ONNX file, e.g. 'torch.onnx 2.13.0'."
+                }
+              }
+            },
+            "quantization": {"$ref": "#/$defs/quantization"},
+            "precision_notes": {
+              "type": ["string", "null"],
+              "description": "Known differences between stored precision and how the hardware computes."
+            },
+            "normalization": {
+              "enum": ["external", "in_graph", "folded", null],
+              "description": "Where input normalization happens: external (before the model, not timed), in_graph (Sub/Div nodes in the model, timed), folded (merged into the first layer's weights)."
+            }
+          }
+        }
+      ]
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested", "strict_mode", "batch_size", "input", "warmup_iterations", "measured_iterations",
+        "trials", "run_api", "ort_execution_mode", "intra_op_threads", "inter_op_threads",
+        "graph_optimization_level", "ep_options", "session_config", "ep_context_cache"
+      ],
+      "properties": {
+        "requested": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["execution_provider", "device_type", "compute_precision"],
+          "properties": {
+            "execution_provider": {"type": "string", "minLength": 1},
+            "device_type": {"$ref": "#/$defs/deviceType"},
+            "compute_precision": {
+              "enum": ["fp32", "fp16", "int8", null],
+              "description": "Compute precision explicitly requested from the EP (e.g. via an EP option). Null if left at the EP default."
+            }
+          }
+        },
+        "strict_mode": {
+          "type": "boolean",
+          "description": "True if CPU fallback was disabled (session.disable_cpu_ep_fallback = 1)."
+        },
+        "batch_size": {"type": "integer", "minimum": 1},
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "constant_value", "seed", "dataset"],
+          "properties": {
+            "kind": {"enum": ["constant", "random", "dataset"]},
+            "constant_value": {"type": ["number", "null"]},
+            "seed": {"type": ["integer", "null"]},
+            "dataset": {"type": ["string", "null"]},
+            "preprocessing": {
+              "type": ["string", "null"],
+              "description": "How inputs were prepared (decode, resize, normalization). Preprocessing is never part of the timed region (timing.scope)."
+            }
+          }
+        },
+        "warmup_iterations": {"type": "integer", "minimum": 0},
+        "measured_iterations": {"type": "integer", "minimum": 1, "description": "Measured iterations per trial."},
+        "trials": {"type": "integer", "minimum": 1},
+        "run_api": {"enum": ["sync", "async"], "description": "Session::Run (sync) or RunAsync (async)."},
+        "ort_execution_mode": {
+          "enum": ["sequential", "parallel"],
+          "description": "ONNX Runtime graph execution mode (ORT_SEQUENTIAL / ORT_PARALLEL)."
+        },
+        "intra_op_threads": {
+          "$ref": "#/$defs/nullableNonNegativeInteger",
+          "description": "Requested value; null if left at the ONNX Runtime default."
+        },
+        "inter_op_threads": {
+          "$ref": "#/$defs/nullableNonNegativeInteger",
+          "description": "Requested value; null if left at the ONNX Runtime default."
+        },
+        "graph_optimization_level": {"enum": ["disable_all", "enable_basic", "enable_extended", "enable_layout", "enable_all"]},
+        "ep_options": {"$ref": "#/$defs/stringMap"},
+        "session_config": {
+          "$ref": "#/$defs/stringMap",
+          "description": "Session config entries set explicitly, e.g. session.disable_cpu_ep_fallback."
+        },
+        "ep_context_cache": {
+          "description": "EP context (precompiled model) cache. Null when the EP has no context cache (e.g. the CPU EP).",
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled", "cache_file"],
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "cache_file": {"type": ["string", "null"], "description": "File name of the EP context model, if enabled."},
+                "state": {
+                  "enum": ["disabled", "generated", "loaded", "regenerated", null],
+                  "description": "Null if the run failed before the cache was examined. disabled: no EP context cache. generated: no cache existed; it was built in this run. loaded: an existing cache with a matching key was used. regenerated: a cache existed but its key did not match; it was deleted and rebuilt."
+                },
+                "files": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["name", "size_bytes", "sha256"],
+                    "properties": {
+                      "name": {"type": "string", "minLength": 1},
+                      "size_bytes": {"type": "integer", "minimum": 0},
+                      "sha256": {"$ref": "#/$defs/sha256"}
+                    }
+                  },
+                  "description": "Files of the cache: the EP context model and its context binaries."
+                },
+                "key": {
+                  "oneOf": [
+                    {"type": "null"},
+                    {
+                      "description": "Everything a cache depends on. A cache whose key differs from the current run is stale.",
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "model_sha256", "ort_version", "ep_version", "qnn_sdk_version", "ep_options_sha256",
+                        "device"
+                      ],
+                      "properties": {
+                        "model_sha256": {"$ref": "#/$defs/sha256", "description": "SHA256 of the source ONNX model."},
+                        "ort_version": {"type": ["string", "null"]},
+                        "ep_version": {"type": ["string", "null"]},
+                        "qnn_sdk_version": {"type": ["string", "null"]},
+                        "ep_options_sha256": {
+                          "oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}],
+                          "description": "SHA256 of config.ep_options serialized as JSON with sorted keys and no whitespace."
+                        },
+                        "device": {
+                          "oneOf": [
+                            {"type": "null"},
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": ["device_type", "vendor_id", "device_id"],
+                              "properties": {
+                                "device_type": {"$ref": "#/$defs/deviceType"},
+                                "vendor_id": {"$ref": "#/$defs/nullableNonNegativeInteger"},
+                                "device_id": {"$ref": "#/$defs/nullableNonNegativeInteger"}
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "run_binding": {
+          "enum": ["run", "iobinding_preallocated"],
+          "description": "run: Session::Run with input/output values created per call. iobinding_preallocated: IoBinding with input and output buffers allocated once."
+        },
+        "profiling": {
+          "description": "Profiling settings of the sessions that produced timing.trials. Profiled sessions are never timed; see timing.accelerator.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ort", "qnn_level"],
+          "properties": {
+            "ort": {"type": "boolean", "description": "ONNX Runtime profiling enabled on the timed sessions."},
+            "qnn_level": {
+              "enum": ["off", "basic", "detailed"],
+              "description": "QNN EP profiling_level of the timed sessions."
+            }
+          }
+        }
+      }
+    },
+    "execution": {
+      "description": "Null only if the run failed before a session was created.",
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["full_device_execution_verified", "verification_method", "verification_details", "node_assignment"],
+          "properties": {
+            "full_device_execution_verified": {
+              "type": ["boolean", "null"],
+              "description": "True: verified that the whole graph ran on the requested device. False: verified that it did not. Null: not verified."
+            },
+            "verification_method": {
+              "enum": [
+                "strict_session", "node_assignment", "cpu_provider_only", "qnn_validation_log", "ort_profile",
+                "combined", null
+              ],
+              "description": "qnn_validation_log: from the QNN EP's per-node validation log (execution.qnn_validation). ort_profile: from the provider of each node in an ONNX Runtime profile. combined: more than one method agreed; verification_details lists them."
+            },
+            "verification_details": {"type": ["string", "null"]},
+            "node_assignment": {
+              "oneOf": [
+                {"type": "null"},
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["total_nodes", "nodes_by_ep"],
+                  "properties": {
+                    "total_nodes": {"type": "integer", "minimum": 0},
+                    "nodes_by_ep": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}}
+                  }
+                }
+              ]
+            },
+            "qnn_validation": {
+              "oneOf": [
+                {"type": "null"},
+                {
+                  "description": "What the QNN EP reported when it validated the graph's nodes. Null if no validation log was captured.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["passes", "rejected_nodes"],
+                  "properties": {
+                    "passes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["passed_nodes", "failed_nodes"],
+                        "properties": {
+                          "passed_nodes": {"type": "integer", "minimum": 0},
+                          "failed_nodes": {"type": "integer", "minimum": 0}
+                        }
+                      },
+                      "description": "One entry per QNN EP capability pass, in order."
+                    },
+                    "rejected_nodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["op_type", "node_name", "reason"],
+                        "properties": {
+                          "op_type": {"type": "string", "minLength": 1},
+                          "node_name": {"type": "string"},
+                          "reason": {"type": ["string", "null"]}
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {"full_device_execution_verified": {"type": "boolean"}}
+              },
+              "then": {
+                "properties": {"verification_method": {"type": "string"}}
+              },
+              "else": {
+                "properties": {"verification_method": {"type": "null"}}
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "timing": {
+      "description": "Null only if the run failed before a session was created.",
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["timer", "percentile_method", "session_init", "first_inference_ms", "trials", "aggregate"],
+          "properties": {
+            "timer": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source", "resolution_ns"],
+              "properties": {
+                "source": {"type": "string", "minLength": 1, "description": "e.g. std::chrono::steady_clock."},
+                "resolution_ns": {"$ref": "#/$defs/nullableNonNegativeNumber"}
+              }
+            },
+            "percentile_method": {"enum": ["nearest_rank"]},
+            "session_init": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["session_create_ms", "ep_context_state"],
+              "properties": {
+                "session_create_ms": {"$ref": "#/$defs/nullableNonNegativeNumber"},
+                "ep_context_state": {
+                  "enum": ["cold", "cached", "not_used", null],
+                  "description": "cold: compiled from the ONNX graph; cached: loaded from an EP context model; not_used: EP has no context cache."
+                },
+                "cold_ms": {
+                  "oneOf": [{"type": "null"}, {"$ref": "#/$defs/nonNegativeNumberArray"}],
+                  "description": "Session creations from the ONNX model without a cache, one entry per creation. Null if none were made."
+                },
+                "context_build_ms": {
+                  "$ref": "#/$defs/nullableNonNegativeNumber",
+                  "description": "Creation of the session that wrote the EP context cache. Null if no cache was built."
+                },
+                "cached_ms": {
+                  "oneOf": [{"type": "null"}, {"$ref": "#/$defs/nonNegativeNumberArray"}],
+                  "description": "Session creations from the EP context model, one entry per creation. Null if no cache was used."
+                }
+              }
+            },
+            "first_inference_ms": {
+              "$ref": "#/$defs/nullableNonNegativeNumber",
+              "description": "Latency of the first warm-up inference, which often includes one-time setup."
+            },
+            "trials": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["trial_index", "stats"],
+                "properties": {"trial_index": {"type": "integer", "minimum": 0}, "stats": {"$ref": "#/$defs/latencyStats"}}
+              }
+            },
+            "aggregate": {
+              "oneOf": [
+                {"type": "null"},
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["stats", "trial_variation"],
+                  "properties": {
+                    "stats": {
+                      "$ref": "#/$defs/latencyStats",
+                      "description": "Computed over all measured iterations of all trials pooled."
+                    },
+                    "trial_variation": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "trial_mean_min_ms", "trial_mean_max_ms", "trial_mean_stddev_ms",
+                        "trial_mean_cv_ratio"
+                      ],
+                      "properties": {
+                        "trial_mean_min_ms": {"type": "number", "minimum": 0},
+                        "trial_mean_max_ms": {"type": "number", "minimum": 0},
+                        "trial_mean_stddev_ms": {"$ref": "#/$defs/nullableNonNegativeNumber"},
+                        "trial_mean_cv_ratio": {"$ref": "#/$defs/nullableNonNegativeNumber"}
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "scope": {
+              "const": "model_execution",
+              "description": "What the timed region covers: the inference call only. Input decoding, resizing and normalization are excluded."
+            },
+            "accelerator": {
+              "oneOf": [
+                {"type": "null"},
+                {
+                  "description": "Accelerator-side time from a separate profiled pass, never from the timed runs: profiling slows down the host side, so its wall times are not used. Null if not measured.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["source", "accelerator_execute_us_median", "rpc_execute_us_median", "separate_run"],
+                  "properties": {
+                    "source": {"enum": ["qnn_profiling_basic", "qnn_profiling_detailed"]},
+                    "accelerator_execute_us_median": {
+                      "type": "number",
+                      "minimum": 0,
+                      "description": "Median accelerator execute time per inference."
+                    },
+                    "rpc_execute_us_median": {
+                      "$ref": "#/$defs/nullableNonNegativeNumber",
+                      "description": "Median RPC execute time per inference (the call across to the accelerator)."
+                    },
+                    "separate_run": {
+                      "const": true,
+                      "description": "Always true: the values come from a separate profiled pass, never from the timed runs."
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "memory": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scope", "peak_working_set_bytes", "peak_private_bytes", "source"],
+          "properties": {
+            "scope": {
+              "const": "process",
+              "description": "Memory of the edgebench process only; device-side NPU memory is not included."
+            },
+            "peak_working_set_bytes": {"$ref": "#/$defs/nullableNonNegativeInteger"},
+            "peak_private_bytes": {"$ref": "#/$defs/nullableNonNegativeInteger"},
+            "source": {"type": ["string", "null"], "description": "API used, e.g. GetProcessMemoryInfo."},
+            "session_create_working_set_delta_bytes": {
+              "type": ["integer", "null"],
+              "description": "Change of the process working set across session creation. Process working set only; memory on the NPU or in drivers outside the process is not included."
+            }
+          }
+        }
+      ]
+    },
+    "accuracy": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["dataset", "sample_count", "metrics", "reference_agreement"],
+          "properties": {
+            "dataset": {"type": "string", "minLength": 1},
+            "sample_count": {"type": "integer", "minimum": 1},
+            "metrics": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "value"],
+                "properties": {
+                  "name": {"type": "string", "minLength": 1, "description": "e.g. top1_accuracy_ratio."},
+                  "value": {"type": ["number", "null"]}
+                }
+              }
+            },
+            "reference_agreement": {
+              "oneOf": [
+                {"type": "null"},
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["reference_run_id", "top1_agreement_ratio", "sample_count"],
+                  "properties": {
+                    "reference_run_id": {"$ref": "#/$defs/uuid"},
+                    "top1_agreement_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+                    "sample_count": {"type": "integer", "minimum": 1}
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "raw": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["latencies_file", "format", "sha256"],
+          "properties": {
+            "latencies_file": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?![A-Za-z]:|[\\\\/])",
+              "description": "Path relative to this result file."
+            },
+            "format": {"enum": ["csv"]},
+            "sha256": {
+              "oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"status": {"const": "success"}}
+      },
+      "then": {
+        "properties": {
+          "error": {"type": "null"},
+          "runtime": {"type": "object"},
+          "model": {"type": "object"},
+          "execution": {"type": "object"},
+          "timing": {
+            "type": "object",
+            "properties": {"trials": {"minItems": 1}, "aggregate": {"type": "object"}}
+          }
+        }
+      },
+      "else": {
+        "properties": {"error": {"type": "object"}}
+      }
+    }
+  ],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "timestampUtc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC timestamp with a Z suffix.",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$"
+    },
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "architecture": {"enum": ["arm64", "x64", "arm64ec", "x86", null]},
+    "deviceType": {"enum": ["CPU", "GPU", "NPU"]},
+    "dtype": {
+      "enum": [
+        "float32", "float16", "bfloat16", "float64", "int4", "uint4", "int8", "uint8", "int16", "uint16",
+        "int32", "uint32", "int64", "uint64", "bool", "string"
+      ]
+    },
+    "nullablePositiveInteger": {"type": ["integer", "null"], "minimum": 1},
+    "nullableNonNegativeInteger": {"type": ["integer", "null"], "minimum": 0},
+    "nullableNonNegativeNumber": {"type": ["number", "null"], "minimum": 0},
+    "stringMap": {"type": "object", "additionalProperties": {"type": "string"}},
+    "warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "path"],
+      "properties": {
+        "code": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "message": {"type": "string", "minLength": 1},
+        "path": {
+          "type": ["string", "null"],
+          "pattern": "^(/[^/]*)*$",
+          "description": "JSON Pointer (RFC 6901) to the field the warning is about, if any."
+        }
+      }
+    },
+    "tensorInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "dtype", "shape"],
+      "properties": {
+        "name": {"type": "string"},
+        "dtype": {"$ref": "#/$defs/dtype"},
+        "shape": {
+          "type": "array",
+          "description": "Integer for a fixed dimension, string for a named symbolic dimension, null for an unnamed unknown dimension.",
+          "items": {"type": ["integer", "string", "null"], "minimum": 0}
+        }
+      }
+    },
+    "quantization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "format", "activation_dtype", "weight_dtype", "calibration", "tool"],
+      "properties": {
+        "method": {"enum": ["none", "static", "dynamic", "qat"]},
+        "format": {"enum": ["qdq", "qoperator", null]},
+        "activation_dtype": {
+          "oneOf": [{"type": "null"}, {"$ref": "#/$defs/dtype"}]
+        },
+        "weight_dtype": {
+          "oneOf": [{"type": "null"}, {"$ref": "#/$defs/dtype"}]
+        },
+        "calibration": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["dataset", "sample_count"],
+              "properties": {
+                "dataset": {"type": ["string", "null"]},
+                "sample_count": {"$ref": "#/$defs/nullablePositiveInteger"}
+              }
+            }
+          ]
+        },
+        "tool": {"type": ["string", "null"], "description": "Quantization tool and version."}
+      },
+      "if": {
+        "properties": {"method": {"const": "none"}}
+      },
+      "then": {
+        "properties": {
+          "format": {"type": "null"},
+          "activation_dtype": {"type": "null"},
+          "weight_dtype": {"type": "null"},
+          "calibration": {"type": "null"},
+          "tool": {"type": "null"}
+        }
+      }
+    },
+    "latencyStats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "count", "mean_ms", "p50_ms", "p95_ms", "p99_ms", "stddev_ms", "min_ms", "max_ms",
+        "inferences_per_sec", "items_per_sec"
+      ],
+      "properties": {
+        "count": {"type": "integer", "minimum": 1, "description": "Number of measured inferences these stats cover."},
+        "mean_ms": {"type": "number", "minimum": 0},
+        "p50_ms": {"type": "number", "minimum": 0, "description": "Median (nearest-rank 50th percentile)."},
+        "p95_ms": {"$ref": "#/$defs/nullableNonNegativeNumber", "description": "Null if count < 20."},
+        "p99_ms": {"$ref": "#/$defs/nullableNonNegativeNumber", "description": "Null if count < 100."},
+        "stddev_ms": {
+          "$ref": "#/$defs/nullableNonNegativeNumber",
+          "description": "Sample standard deviation (n-1). Null if count < 2."
+        },
+        "min_ms": {"type": "number", "minimum": 0},
+        "max_ms": {"type": "number", "minimum": 0},
+        "inferences_per_sec": {
+          "type": "number",
+          "minimum": 0,
+          "description": "1000 / mean_ms (sequential latency-derived throughput)."
+        },
+        "items_per_sec": {"type": "number", "minimum": 0, "description": "inferences_per_sec * config.batch_size."}
+      }
+    },
+    "nonNegativeNumberArray": {"type": "array", "items": {"type": "number", "minimum": 0}},
+    "loadedModule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "path"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "description": "File name, e.g. onnxruntime.dll."},
+        "path": {"type": "string", "minLength": 1, "description": "Absolute path the module was loaded from."}
+      }
+    },
+    "epDeviceInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ep_name", "ep_vendor", "device_type", "vendor", "vendor_id", "device_id", "metadata", "ep_metadata"],
+      "properties": {
+        "ep_name": {"type": "string", "minLength": 1},
+        "ep_vendor": {"type": ["string", "null"]},
+        "device_type": {"$ref": "#/$defs/deviceType"},
+        "vendor": {
+          "type": ["string", "null"],
+          "description": "Hardware vendor string as reported; the QNN EP reports an empty string."
+        },
+        "vendor_id": {"$ref": "#/$defs/nullableNonNegativeInteger"},
+        "device_id": {"$ref": "#/$defs/nullableNonNegativeInteger"},
+        "metadata": {"$ref": "#/$defs/stringMap", "description": "Hardware device metadata, e.g. Description, LUID."},
+        "ep_metadata": {
+          "$ref": "#/$defs/stringMap",
+          "description": "EP metadata for this device, e.g. version, library_path."
+        }
+      }
+    }
+  }
+}

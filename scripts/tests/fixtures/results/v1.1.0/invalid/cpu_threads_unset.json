@@ -1,0 +1,12 @@
+{
+  "description": "Timed CPU run with the ONNX Runtime default thread count.",
+  "base": "docs/examples/v1.1.0/example-cpu-fp32.json",
+  "set": {
+    "/config/intra_op_threads": null
+  },
+  "expect": {
+    "severity": "warning",
+    "code": "cpu_threads_unset",
+    "path": "/config/intra_op_threads"
+  }
+}

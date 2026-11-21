@@ -1,0 +1,12 @@
+{
+  "description": "Two NPU devices matched the selection.",
+  "base": "docs/examples/v1.1.0/example-npu-int8-s8w-strict.json",
+  "set": {
+    "/runtime/ep_device/selection/candidate_count": 2
+  },
+  "expect": {
+    "severity": "error",
+    "code": "device_selection_ambiguous",
+    "path": "/runtime/ep_device/selection/candidate_count"
+  }
+}

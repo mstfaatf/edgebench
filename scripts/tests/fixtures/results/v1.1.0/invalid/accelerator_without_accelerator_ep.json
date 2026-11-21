@@ -1,0 +1,17 @@
+{
+  "description": "Accelerator timing on a CPU EP run.",
+  "base": "docs/examples/v1.1.0/example-cpu-fp32.json",
+  "set": {
+    "/timing/accelerator": {
+      "source": "qnn_profiling_basic",
+      "accelerator_execute_us_median": 275.0,
+      "rpc_execute_us_median": 300.0,
+      "separate_run": true
+    }
+  },
+  "expect": {
+    "severity": "error",
+    "code": "accelerator_without_accelerator_ep",
+    "path": "/timing/accelerator"
+  }
+}

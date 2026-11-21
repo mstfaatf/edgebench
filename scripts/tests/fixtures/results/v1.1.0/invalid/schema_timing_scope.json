@@ -1,0 +1,12 @@
+{
+  "description": "Timed region other than model execution.",
+  "base": "docs/examples/v1.1.0/example-npu-int8-s8w-strict.json",
+  "set": {
+    "/timing/scope": "end_to_end"
+  },
+  "expect": {
+    "severity": "error",
+    "code": "",
+    "path": "/timing/scope"
+  }
+}

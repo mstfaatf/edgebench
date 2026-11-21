@@ -1,0 +1,12 @@
+{
+  "description": "onnxruntime.dll recorded as loaded from System32.",
+  "base": "docs/examples/v1.1.0/example-npu-int8-s8w-strict.json",
+  "set": {
+    "/runtime/loaded_modules/3/path": "C:\\Windows\\System32\\onnxruntime.dll"
+  },
+  "expect": {
+    "severity": "error",
+    "code": "module_outside_bundle",
+    "path": "/runtime/loaded_modules/3/path"
+  }
+}

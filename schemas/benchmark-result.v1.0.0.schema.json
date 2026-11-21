@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/mstfaatf/edgebench/main/schemas/benchmark-result.schema.json",
+  "$id": "https://raw.githubusercontent.com/mstfaatf/edgebench/main/schemas/benchmark-result.v1.0.0.schema.json",
   "title": "EdgeBench benchmark result",
   "description": "One benchmark run: one model, one provider configuration, one or more trials. Schema version 1.0.0. See docs/results-schema.md.",
   "type": "object",

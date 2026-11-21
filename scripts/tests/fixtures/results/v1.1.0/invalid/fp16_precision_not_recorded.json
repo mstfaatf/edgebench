@@ -1,0 +1,12 @@
+{
+  "description": "FP16 enabled on the HTP backend, compute precision left null.",
+  "base": "docs/examples/v1.1.0/example-npu-int8-s8w-strict.json",
+  "set": {
+    "/config/ep_options/enable_htp_fp16_precision": "1"
+  },
+  "expect": {
+    "severity": "error",
+    "code": "fp16_precision_not_recorded",
+    "path": "/config/requested/compute_precision"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "description": "C++ engine result whose ONNX Runtime load was not verified.",
+  "base": "docs/examples/v1.1.0/example-cpu-fp32.json",
+  "set": {
+    "/runtime/onnxruntime/load_check": "not_checked"
+  },
+  "expect": {
+    "severity": "warning",
+    "code": "load_not_checked",
+    "path": "/runtime/onnxruntime/load_check"
+  }
+}

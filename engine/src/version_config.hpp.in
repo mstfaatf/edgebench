@@ -9,3 +9,7 @@
 // ONNX Runtime version EdgeBench is built against and accepts at run time
 // (EDGEBENCH_ONNXRUNTIME_VERSION in the root CMakeLists.txt).
 #define EDGEBENCH_ONNXRUNTIME_VERSION_STRING "@EDGEBENCH_ONNXRUNTIME_VERSION@"
+
+// Results schema version the engine writes (EDGEBENCH_RESULTS_SCHEMA_VERSION in the
+// root CMakeLists.txt); see docs/results-schema.md.
+#define EDGEBENCH_RESULTS_SCHEMA_VERSION_STRING "@EDGEBENCH_RESULTS_SCHEMA_VERSION@"

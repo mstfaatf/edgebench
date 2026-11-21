@@ -1,0 +1,13 @@
+{
+  "description": "Placement verified from the QNN validation log, but no log summary.",
+  "base": "docs/examples/v1.1.0/example-npu-int8-s8w-strict.json",
+  "set": {
+    "/execution/verification_method": "qnn_validation_log",
+    "/execution/qnn_validation": null
+  },
+  "expect": {
+    "severity": "error",
+    "code": "qnn_validation_missing",
+    "path": "/execution/qnn_validation"
+  }
+}

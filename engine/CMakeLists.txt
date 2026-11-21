@@ -39,7 +39,8 @@ if(EDGEBENCH_BUILD_TESTS)
   target_link_libraries(edgebench_tests PRIVATE edgebench_core GTest::gtest_main)
   target_compile_definitions(edgebench_tests PRIVATE
     EDGEBENCH_EXPECTED_VERSION="${PROJECT_VERSION}"
-    EDGEBENCH_EXPECTED_ORT_VERSION="${OnnxRuntime_VERSION}")
+    EDGEBENCH_EXPECTED_ORT_VERSION="${OnnxRuntime_VERSION}"
+    EDGEBENCH_SCHEMA_DIR="${PROJECT_SOURCE_DIR}/schemas")
   edgebench_set_warnings(edgebench_tests)
   gtest_discover_tests(edgebench_tests DISCOVERY_MODE PRE_TEST
     PROPERTIES LABELS unit)

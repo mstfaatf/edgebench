@@ -1,0 +1,12 @@
+{
+  "description": "Loader failure kinds are not load_check values: a failed load leaves runtime null and records the kind in error.code.",
+  "base": "docs/examples/v1.1.0/example-npu-int8-s8w-strict.json",
+  "set": {
+    "/runtime/onnxruntime/load_check": "dll_not_found"
+  },
+  "expect": {
+    "severity": "error",
+    "code": "",
+    "path": "/runtime/onnxruntime/load_check"
+  }
+}

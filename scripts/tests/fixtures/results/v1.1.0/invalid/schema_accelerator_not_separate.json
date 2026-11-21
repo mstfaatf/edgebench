@@ -1,0 +1,12 @@
+{
+  "description": "Accelerator time claimed to come from the timed runs.",
+  "base": "docs/examples/v1.1.0/example-npu-int8-s8w-strict.json",
+  "set": {
+    "/timing/accelerator/separate_run": false
+  },
+  "expect": {
+    "severity": "error",
+    "code": "",
+    "path": "/timing/accelerator/separate_run"
+  }
+}

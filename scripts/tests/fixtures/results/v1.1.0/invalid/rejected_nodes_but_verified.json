@@ -1,0 +1,18 @@
+{
+  "description": "Full NPU execution claimed although QNN rejected a node.",
+  "base": "docs/examples/v1.1.0/example-npu-int8-s8w-strict.json",
+  "set": {
+    "/execution/qnn_validation/rejected_nodes": [
+      {
+        "op_type": "Det",
+        "node_name": "det",
+        "reason": "Det is not supported by the QNN HTP backend"
+      }
+    ]
+  },
+  "expect": {
+    "severity": "error",
+    "code": "rejected_nodes_but_verified",
+    "path": "/execution/full_device_execution_verified"
+  }
+}

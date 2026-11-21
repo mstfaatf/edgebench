@@ -1,0 +1,14 @@
+{
+  "description": "Cached session creation times on a CPU run without a cache.",
+  "base": "docs/examples/v1.1.0/example-cpu-fp32.json",
+  "set": {
+    "/timing/session_init/cached_ms": [
+      300.0
+    ]
+  },
+  "expect": {
+    "severity": "error",
+    "code": "session_init_not_applicable",
+    "path": "/timing/session_init/cached_ms"
+  }
+}

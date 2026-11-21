@@ -110,8 +110,17 @@ benchmark result files against the [results schema](results-schema.md):
 ```
 
 `benchmarks/results/published/` holds no result files yet, so this currently
-reports "No JSON files found" (exit code 0). `docs\examples` holds two example
-results that validate.
+reports "No JSON files found" (exit code 0). `docs\examples\v1.0.0` and
+`docs\examples\v1.1.0` hold example results that validate. The validator picks
+the schema from each file's `schema_version`, reports errors and warnings
+separately, and with `--strict` also fails on warnings. Its tests need only
+`jsonschema` and `pytest` and run on any platform:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest scripts\tests\test_validate_results.py
+```
+
+CTest runs the same tests as `results_schema_tests` (label `schema`).
 
 ## Preparing data and models
 

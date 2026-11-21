@@ -1,0 +1,417 @@
+{
+  "schema_version": "1.1.0",
+  "run_id": "00000000-0000-0000-0000-000000000000",
+  "timestamp_utc": "2026-11-21T02:47:32Z",
+  "label": "MobileNetV2 INT8 per-channel s8w, QNN EP (NPU), strict, cached EP context",
+  "status": "success",
+  "error": null,
+  "warnings": [
+    {
+      "code": "illustrative_example",
+      "message": "Example document assembled from the C++ (ort_probe) measurements behind docs/feasibility.md section 7.3 (2026-11-21, three rounds, each round one trial in its own process). Per-trial count, mean, p50, p95, min, max and standard deviation, the session creation times and the QNN profile are measured values. p99_ms and the pooled aggregate percentiles were not recorded and are estimates.",
+      "path": null
+    },
+    {
+      "code": "value_unavailable",
+      "message": "NPU driver version could not be determined.",
+      "path": "/runtime/ep_device/driver_version"
+    },
+    {
+      "code": "value_unavailable",
+      "message": "Background CPU load was not sampled.",
+      "path": "/system/load"
+    },
+    {
+      "code": "value_unavailable",
+      "message": "The first inference was not timed separately.",
+      "path": "/timing/first_inference_ms"
+    },
+    {
+      "code": "value_unavailable",
+      "message": "Process memory was not recorded.",
+      "path": "/memory"
+    }
+  ],
+  "tool": {
+    "name": "edgebench",
+    "version": "0.1.0",
+    "git_commit": "2069ebaaa3a703a388864c7292883bf6ce802b17",
+    "git_dirty": false,
+    "build_type": "Release",
+    "compiler": "MSVC 19.42.34435",
+    "implementation": "cpp"
+  },
+  "system": {
+    "os": {
+      "name": "Windows 11 Home",
+      "version": "25H2",
+      "build": "26200.9974",
+      "architecture": "arm64"
+    },
+    "process_architecture": "arm64",
+    "cpu": {
+      "name": "Snapdragon(R) X 10-core X1P64100 @ 3.40 GHz",
+      "physical_cores": 10,
+      "logical_processors": 10
+    },
+    "memory_total_bytes": 16757260288,
+    "device": {
+      "manufacturer": "Microsoft Corporation",
+      "model": "Microsoft Surface Laptop, 7th Edition"
+    },
+    "power": {
+      "source": "ac",
+      "power_mode": "Balanced",
+      "power_plan": "Balanced",
+      "battery_percent": 80,
+      "battery_saver": false
+    },
+    "load": null
+  },
+  "runtime": {
+    "onnxruntime": {
+      "version": "1.32.0",
+      "library_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime.dll",
+      "api_version": 32,
+      "load_check": "full_path_verified"
+    },
+    "execution_provider": {
+      "name": "QNNExecutionProvider",
+      "version": "2.8.0",
+      "library_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll"
+    },
+    "qnn": {
+      "sdk_version": "2.52.0",
+      "backend": "htp",
+      "backend_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtp.dll",
+      "backend_build": "v2.52.0.261104115025"
+    },
+    "ep_device": {
+      "ep_name": "QNNExecutionProvider",
+      "ep_vendor": "Qualcomm",
+      "device_type": "NPU",
+      "vendor": "",
+      "vendor_id": 1297040209,
+      "device_id": 1093682224,
+      "driver_version": null,
+      "metadata": {
+        "LUID": "70553"
+      },
+      "selection": {
+        "method": "by_device_type",
+        "candidate_count": 1
+      }
+    },
+    "loaded_modules": [
+      {
+        "name": "QnnHtp.dll",
+        "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtp.dll"
+      },
+      {
+        "name": "QnnHtpV73Stub.dll",
+        "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtpV73Stub.dll"
+      },
+      {
+        "name": "QnnSystem.dll",
+        "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnSystem.dll"
+      },
+      {
+        "name": "onnxruntime.dll",
+        "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime.dll"
+      },
+      {
+        "name": "onnxruntime_providers_qnn.dll",
+        "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll"
+      },
+      {
+        "name": "onnxruntime_providers_shared.dll",
+        "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_shared.dll"
+      }
+    ],
+    "ep_devices": [
+      {
+        "ep_name": "CPUExecutionProvider",
+        "ep_vendor": "Microsoft",
+        "device_type": "CPU",
+        "vendor": "Qualcomm",
+        "vendor_id": 1297040209,
+        "device_id": 7,
+        "metadata": {
+          "Description": "Snapdragon(R) X 10-core X1P64100 @ 3.42 GHz"
+        },
+        "ep_metadata": {
+          "version": "1.32.0"
+        }
+      },
+      {
+        "ep_name": "QNNExecutionProvider",
+        "ep_vendor": "Qualcomm",
+        "device_type": "NPU",
+        "vendor": "",
+        "vendor_id": 1297040209,
+        "device_id": 1093682224,
+        "metadata": {
+          "LUID": "70553"
+        },
+        "ep_metadata": {
+          "library_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll",
+          "version": "2.8.0"
+        }
+      },
+      {
+        "ep_name": "QNNExecutionProvider",
+        "ep_vendor": "Qualcomm",
+        "device_type": "GPU",
+        "vendor": "",
+        "vendor_id": 1297040209,
+        "device_id": 909329200,
+        "metadata": {
+          "Description": "Qualcomm(R) Adreno(TM) X1-85 GPU",
+          "Discrete": "0",
+          "DxgiAdapterNumber": "0",
+          "DxgiHighPerformanceIndex": "0",
+          "DxgiVideoMemory": "128 MB",
+          "LUID": "68962"
+        },
+        "ep_metadata": {
+          "library_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll",
+          "version": "2.8.0"
+        }
+      }
+    ]
+  },
+  "model": {
+    "name": "mobilenet_v2",
+    "file_name": "mobilenetv2_int8qdq_pc_s8w_b1.onnx",
+    "sha256": "cf8da5ea7d2ada587db119d9df8c983ea5ecd0123ee8be713548e127f9141e40",
+    "size_bytes": 3886138,
+    "opset": 17,
+    "ir_version": 8,
+    "stored_precision": "int8",
+    "inputs": [
+      {
+        "name": "input",
+        "dtype": "float32",
+        "shape": [
+          1,
+          3,
+          224,
+          224
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "logits",
+        "dtype": "float32",
+        "shape": [
+          1,
+          1000
+        ]
+      }
+    ],
+    "source": {
+      "library": "torchvision",
+      "identifier": "mobilenet_v2/IMAGENET1K_V2",
+      "export_tool": "torch.onnx 2.13.0"
+    },
+    "quantization": {
+      "method": "static",
+      "format": "qdq",
+      "activation_dtype": "uint8",
+      "weight_dtype": "int8",
+      "calibration": {
+        "dataset": "imagenette2-320 calibration split",
+        "sample_count": 200
+      },
+      "tool": "onnxruntime.quantization 1.32.0 (get_qnn_qdq_config, MinMax, per-channel symmetric int8 weights)"
+    },
+    "precision_notes": "QDQ model with float32 input and output; quantization happens in the graph.",
+    "normalization": "external"
+  },
+  "config": {
+    "requested": {
+      "execution_provider": "QNNExecutionProvider",
+      "device_type": "NPU",
+      "compute_precision": null
+    },
+    "strict_mode": true,
+    "batch_size": 1,
+    "input": {
+      "kind": "dataset",
+      "constant_value": null,
+      "seed": null,
+      "dataset": "imagenette2-320 eval split, first image (val/n01440764/ILSVRC2012_val_00046252.JPEG), the same input for every iteration",
+      "preprocessing": "Decoded with PIL, shorter side resized to 256 (bilinear), center-cropped to 224, scaled to [0, 1], normalized with the ImageNet mean/std, NCHW float32. Done once before timing (scripts/common/preprocess.py); not part of the timed region."
+    },
+    "warmup_iterations": 20,
+    "measured_iterations": 200,
+    "trials": 3,
+    "run_api": "sync",
+    "ort_execution_mode": "sequential",
+    "intra_op_threads": 4,
+    "inter_op_threads": null,
+    "graph_optimization_level": "enable_all",
+    "ep_options": {
+      "backend_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtp.dll",
+      "htp_performance_mode": "burst"
+    },
+    "session_config": {
+      "session.disable_cpu_ep_fallback": "1"
+    },
+    "ep_context_cache": {
+      "enabled": true,
+      "cache_file": "overhead_s8w_ctx.onnx",
+      "state": "loaded",
+      "files": [
+        {
+          "name": "overhead_s8w_ctx.onnx",
+          "size_bytes": 923,
+          "sha256": "07c21cbdb23b2ca03987d307e53293fbcc29884ca7d0738f7177fb302a108528"
+        },
+        {
+          "name": "overhead_s8w_ctx_qnn.bin",
+          "size_bytes": 3952640,
+          "sha256": "d052d3ea7900640bb219af662b1dad131d21e0dbaaf8317773fba59231e44043"
+        }
+      ],
+      "key": {
+        "model_sha256": "cf8da5ea7d2ada587db119d9df8c983ea5ecd0123ee8be713548e127f9141e40",
+        "ort_version": "1.32.0",
+        "ep_version": "2.8.0",
+        "qnn_sdk_version": "2.52.0",
+        "ep_options_sha256": "96ea2c67c0558c257cd313e51052aa2c80843ad4daebae74e0ea2610fdbaf0c7",
+        "device": {
+          "device_type": "NPU",
+          "vendor_id": 1297040209,
+          "device_id": 1093682224
+        }
+      }
+    },
+    "run_binding": "run",
+    "profiling": {
+      "ort": false,
+      "qnn_level": "off"
+    }
+  },
+  "execution": {
+    "full_device_execution_verified": true,
+    "verification_method": "combined",
+    "verification_details": "Strict session (CPU fallback disabled) created from the EP context model, whose graph is a single EPContext node assigned to the QNN EP. The QNN validation counts come from a strict, verbose session on the same ONNX model (scripts/npu_check.py): two capability passes, every node unit accepted.",
+    "node_assignment": {
+      "total_nodes": 1,
+      "nodes_by_ep": {
+        "QNNExecutionProvider": 1
+      }
+    },
+    "qnn_validation": {
+      "passes": [
+        {
+          "passed_nodes": 313,
+          "failed_nodes": 0
+        },
+        {
+          "passed_nodes": 319,
+          "failed_nodes": 0
+        }
+      ],
+      "rejected_nodes": []
+    }
+  },
+  "timing": {
+    "timer": {
+      "source": "std::chrono::steady_clock",
+      "resolution_ns": 100
+    },
+    "percentile_method": "nearest_rank",
+    "scope": "model_execution",
+    "session_init": {
+      "session_create_ms": 321.7083,
+      "ep_context_state": "cached",
+      "cold_ms": null,
+      "context_build_ms": null,
+      "cached_ms": [
+        317.1276,
+        321.7083,
+        326.4456
+      ]
+    },
+    "first_inference_ms": null,
+    "trials": [
+      {
+        "trial_index": 0,
+        "stats": {
+          "count": 200,
+          "mean_ms": 0.334944,
+          "p50_ms": 0.3205,
+          "p95_ms": 0.3891,
+          "p99_ms": 0.5324,
+          "stddev_ms": 0.072779,
+          "min_ms": 0.3012,
+          "max_ms": 0.9625,
+          "inferences_per_sec": 2985.574,
+          "items_per_sec": 2985.574
+        }
+      },
+      {
+        "trial_index": 1,
+        "stats": {
+          "count": 200,
+          "mean_ms": 0.337936,
+          "p50_ms": 0.3271,
+          "p95_ms": 0.3843,
+          "p99_ms": 0.5478,
+          "stddev_ms": 0.062499,
+          "min_ms": 0.3047,
+          "max_ms": 1.0382,
+          "inferences_per_sec": 2959.14,
+          "items_per_sec": 2959.14
+        }
+      },
+      {
+        "trial_index": 2,
+        "stats": {
+          "count": 200,
+          "mean_ms": 0.359493,
+          "p50_ms": 0.3289,
+          "p95_ms": 0.425,
+          "p99_ms": 0.8283,
+          "stddev_ms": 0.172746,
+          "min_ms": 0.3056,
+          "max_ms": 2.0382,
+          "inferences_per_sec": 2781.695,
+          "items_per_sec": 2781.695
+        }
+      }
+    ],
+    "aggregate": {
+      "stats": {
+        "count": 600,
+        "mean_ms": 0.344124,
+        "p50_ms": 0.3271,
+        "p95_ms": 0.3891,
+        "p99_ms": 0.5478,
+        "stddev_ms": 0.114416,
+        "min_ms": 0.3012,
+        "max_ms": 2.0382,
+        "inferences_per_sec": 2905.929,
+        "items_per_sec": 2905.929
+      },
+      "trial_variation": {
+        "trial_mean_min_ms": 0.334944,
+        "trial_mean_max_ms": 0.359493,
+        "trial_mean_stddev_ms": 0.013393,
+        "trial_mean_cv_ratio": 0.03892
+      }
+    },
+    "accelerator": {
+      "source": "qnn_profiling_basic",
+      "accelerator_execute_us_median": 275.0,
+      "rpc_execute_us_median": 300.0,
+      "separate_run": true
+    }
+  },
+  "memory": null,
+  "accuracy": null,
+  "raw": null
+}

@@ -1,0 +1,12 @@
+{
+  "description": "Cache enabled but its state says disabled.",
+  "base": "docs/examples/v1.1.0/example-npu-int8-s8w-strict.json",
+  "set": {
+    "/config/ep_context_cache/state": "disabled"
+  },
+  "expect": {
+    "severity": "error",
+    "code": "ep_context_state_mismatch",
+    "path": "/config/ep_context_cache/state"
+  }
+}

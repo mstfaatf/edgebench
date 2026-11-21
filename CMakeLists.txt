@@ -29,6 +29,16 @@ set(EDGEBENCH_ONNXRUNTIME_VERSION 1.32.0)
 find_package(OnnxRuntime ${EDGEBENCH_ONNXRUNTIME_VERSION} EXACT REQUIRED COMPONENTS QNN)
 message(STATUS "ONNX Runtime ${OnnxRuntime_VERSION}: ${OnnxRuntime_ROOT}")
 
+# Results schema version the engine writes (generated into engine/src/version_config.hpp).
+# Each version has its own schema file, schemas/benchmark-result.v<version>.schema.json.
+set(EDGEBENCH_RESULTS_SCHEMA_VERSION 1.1.0)
+set(EDGEBENCH_RESULTS_SCHEMA_FILE
+  "${CMAKE_CURRENT_SOURCE_DIR}/schemas/benchmark-result.v${EDGEBENCH_RESULTS_SCHEMA_VERSION}.schema.json")
+if(NOT EXISTS "${EDGEBENCH_RESULTS_SCHEMA_FILE}")
+  message(FATAL_ERROR "EDGEBENCH_RESULTS_SCHEMA_VERSION is ${EDGEBENCH_RESULTS_SCHEMA_VERSION}, "
+    "but ${EDGEBENCH_RESULTS_SCHEMA_FILE} does not exist")
+endif()
+
 if(EDGEBENCH_BUILD_TESTS)
   enable_testing()
   include(FetchContent)
@@ -48,4 +58,19 @@ endif()
 add_subdirectory(engine)
 if(EDGEBENCH_BUILD_TOOLS)
   add_subdirectory(tools/ort_probe)
+endif()
+
+# Results schema and validator tests (Python, platform-independent; ctest label "schema").
+# The same tests run without CMake: python -m pytest scripts/tests/test_validate_results.py
+if(EDGEBENCH_BUILD_TESTS)
+  set(EDGEBENCH_PYTHON "${CMAKE_CURRENT_SOURCE_DIR}/.venv/Scripts/python.exe"
+    CACHE FILEPATH "Python interpreter with the packages from requirements.txt, for the schema tests")
+  if(EXISTS "${EDGEBENCH_PYTHON}")
+    add_test(NAME results_schema_tests
+      COMMAND "${EDGEBENCH_PYTHON}" -m pytest scripts/tests/test_validate_results.py -q -p no:cacheprovider
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_tests_properties(results_schema_tests PROPERTIES LABELS schema)
+  else()
+    message(STATUS "EDGEBENCH_PYTHON (${EDGEBENCH_PYTHON}) not found: schema tests not added to CTest")
+  endif()
 endif()

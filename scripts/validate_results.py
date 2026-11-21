@@ -1,13 +1,18 @@
 """Validate EdgeBench benchmark result files.
 
-Checks each file against schemas/benchmark-result.schema.json, then applies
+Each file is checked against the schema of the version it declares in
+schema_version (schemas/benchmark-result.v<version>.schema.json), then against
 consistency rules that JSON Schema cannot express (percentile ordering,
 sample-count thresholds, throughput vs. mean latency, trial counts vs. the run
-configuration, and the raw latency file). See docs/results-schema.md.
+configuration, the raw latency file, and for 1.1.0 the profiling, precision,
+EP context cache and loaded-module rules). See docs/results-schema.md.
+
+Problems are errors or warnings. A file with errors fails; a file with only
+warnings passes unless --strict is given.
 
 Usage:
     python scripts/validate_results.py FILE_OR_DIR [FILE_OR_DIR ...]
-    python scripts/validate_results.py benchmarks/results/published
+    python scripts/validate_results.py --strict benchmarks/results/published
 
 Directories are searched recursively for *.json files. Exits with status 1 if
 any file fails, 2 on usage errors.
@@ -23,16 +28,18 @@ import csv
 import hashlib
 import json
 import math
+import re
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Iterable
 
 import jsonschema
 from jsonschema.exceptions import best_match
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SCHEMA_PATH = REPO_ROOT / "schemas" / "benchmark-result.schema.json"
+SCHEMA_DIR = REPO_ROOT / "schemas"
+SCHEMA_FILE_RE = re.compile(r"^benchmark-result\.v(\d+\.\d+\.\d+)\.schema\.json$")
 
 NIL_UUID = "00000000-0000-0000-0000-000000000000"
 EXAMPLE_WARNING_CODE = "illustrative_example"
@@ -43,24 +50,79 @@ MIN_COUNT = {"stddev_ms": 2, "p95_ms": 20, "p99_ms": 100}
 REL_TOL = 1e-3
 
 
+ERROR = "error"
+WARNING = "warning"
+
+
 @dataclass(frozen=True)
 class Issue:
     path: str  # JSON Pointer into the document, or "" for the whole file
     message: str
+    severity: str = ERROR
+    code: str = ""  # rule identifier for consistency rules, e.g. "profiled_timing"
 
     def __str__(self) -> str:
-        return f"{self.path or '/'}: {self.message}"
+        suffix = f" [{self.code}]" if self.code else ""
+        return f"{self.severity}: {self.path or '/'}: {self.message}{suffix}"
 
 
-def load_schema(path: Path = SCHEMA_PATH) -> dict[str, Any]:
+def errors(issues: Iterable[Issue]) -> list[Issue]:
+    return [i for i in issues if i.severity == ERROR]
+
+
+def warnings_of(issues: Iterable[Issue]) -> list[Issue]:
+    return [i for i in issues if i.severity == WARNING]
+
+
+def version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in version.split("."))
+
+
+def schema_path(version: str) -> Path:
+    return SCHEMA_DIR / f"benchmark-result.v{version}.schema.json"
+
+
+def supported_versions(schema_dir: Path = SCHEMA_DIR) -> list[str]:
+    """Versions that have a schema file, oldest first."""
+    found = [m.group(1) for f in schema_dir.glob("benchmark-result.v*.schema.json")
+             if (m := SCHEMA_FILE_RE.match(f.name))]
+    return sorted(found, key=version_key)
+
+
+def load_schema(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as f:
         return json.load(f)
 
 
-def make_validator(schema: dict[str, Any] | None = None) -> jsonschema.Draft202012Validator:
-    schema = schema if schema is not None else load_schema()
+def make_validator(schema: dict[str, Any]) -> jsonschema.Draft202012Validator:
     jsonschema.Draft202012Validator.check_schema(schema)
     return jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker())
+
+
+class Validators:
+    """Schema validators by schema_version, loaded on first use.
+
+    With `forced_schema`, every document is checked against that schema
+    regardless of the version it declares.
+    """
+
+    def __init__(self, schema_dir: Path = SCHEMA_DIR, forced_schema: dict[str, Any] | None = None):
+        self.schema_dir = schema_dir
+        self.versions = supported_versions(schema_dir)
+        self._forced = make_validator(forced_schema) if forced_schema is not None else None
+        self._cache: dict[str, jsonschema.Draft202012Validator] = {}
+
+    @property
+    def forced(self) -> bool:
+        return self._forced is not None
+
+    def for_version(self, version: str) -> jsonschema.Draft202012Validator:
+        if self._forced is not None:
+            return self._forced
+        if version not in self._cache:
+            self._cache[version] = make_validator(
+                load_schema(self.schema_dir / f"benchmark-result.v{version}.schema.json"))
+        return self._cache[version]
 
 
 def pointer(parts: Iterable[Any]) -> str:
@@ -71,18 +133,19 @@ def pointer(parts: Iterable[Any]) -> str:
 # Schema validation
 # ---------------------------------------------------------------------------
 
-def schema_issues(doc: Any, validator: jsonschema.Draft202012Validator) -> list[Issue]:
-    supported = validator.schema["properties"]["schema_version"]["enum"]
-    if isinstance(doc, dict) and isinstance(doc.get("schema_version"), str):
-        version = doc["schema_version"]
-        if version not in supported:
-            major = version.split(".", 1)[0]
-            if major != supported[-1].split(".", 1)[0]:
-                return [Issue("/schema_version",
-                              f"unsupported major version {version!r}; this schema supports {supported}")]
+def schema_issues(doc: Any, validators: Validators) -> list[Issue]:
+    if not isinstance(doc, dict):
+        return [Issue("", "a result document must be a JSON object")]
+    version = doc.get("schema_version")
+    supported = ", ".join(validators.versions)
+    if not validators.forced:
+        if not isinstance(version, str):
+            what = "missing" if version is None else f"not a string ({version!r})"
+            return [Issue("/schema_version", f"schema_version is {what}; supported versions: {supported}")]
+        if version not in validators.versions:
             return [Issue("/schema_version",
-                          f"version {version!r} is not known to this schema (supports {supported}); "
-                          "update schemas/benchmark-result.schema.json")]
+                          f"unsupported schema_version {version!r}; supported versions: {supported}")]
+    validator = validators.for_version(version if isinstance(version, str) else "")
 
     issues = []
     for error in validator.iter_errors(doc):
@@ -240,12 +303,158 @@ def raw_issues(doc: dict[str, Any], result_path: Path | None) -> list[Issue]:
     return issues
 
 
+def _windows_path_key(path: str) -> str:
+    """Normalized form of a Windows path for comparison: separators, extended-length prefix, case."""
+    p = path.replace("/", "\\")
+    if p.startswith("\\\\?\\UNC\\"):
+        p = "\\\\" + p[8:]
+    elif p.startswith("\\\\?\\"):
+        p = p[4:]
+    return str(PureWindowsPath(p)).rstrip("\\").casefold()
+
+
+def _windows_path_within(path: str, directory: str) -> bool:
+    p, d = _windows_path_key(path), _windows_path_key(directory)
+    return p == d or p.startswith(d + "\\")
+
+
+CACHE_STATES_WITH_FILES = ("generated", "loaded", "regenerated")
+
+# Consistency rules for schema 1.1.0 and later: code -> severity (see docs/results-schema.md).
+V1_1_RULES = {
+    "profiled_timing": ERROR,
+    "accelerator_without_accelerator_ep": ERROR,
+    "fp16_precision_not_recorded": ERROR,
+    "cpu_threads_unset": WARNING,
+    "load_not_checked": WARNING,
+    "module_outside_bundle": ERROR,
+    "device_selection_ambiguous": ERROR,
+    "ep_context_files_missing": ERROR,
+    "ep_context_state_mismatch": ERROR,
+    "session_init_not_applicable": ERROR,
+    "qnn_validation_missing": ERROR,
+    "rejected_nodes_but_verified": ERROR,
+}
+
+
+def v1_1_issues(doc: dict[str, Any]) -> list[Issue]:
+    """Rules for fields added in schema 1.1.0. Fields that are absent are not checked."""
+    issues: list[Issue] = []
+
+    def report(path: str, message: str, code: str) -> None:
+        issues.append(Issue(path, message, V1_1_RULES[code], code))
+
+    config, timing, runtime, execution = doc["config"], doc["timing"], doc["runtime"], doc["execution"]
+    requested = config["requested"]
+    device = requested["device_type"]
+    timed = timing is not None and len(timing["trials"]) > 0
+    ep_name = runtime["execution_provider"]["name"] if runtime is not None else None
+
+    # Profiled sessions are never timed.
+    profiling = config.get("profiling")
+    if timed and profiling is not None and (profiling["ort"] or profiling["qnn_level"] != "off"):
+        report("/config/profiling",
+              f"timing.trials were measured with profiling on (ort={profiling['ort']}, "
+              f"qnn_level={profiling['qnn_level']!r}); profiled sessions must not be timed. "
+              "Accelerator time from a separate profiled pass goes in timing.accelerator",
+              "profiled_timing")
+
+    # Accelerator time needs an accelerator.
+    if timing is not None and timing.get("accelerator") is not None and (
+            device == "CPU" or ep_name == "CPUExecutionProvider"):
+        report("/timing/accelerator",
+              f"accelerator timing recorded for a {ep_name or device} run; it requires an accelerator "
+              "execution provider", "accelerator_without_accelerator_ep")
+
+    # FP16 on the NPU must be requested and recorded as such.
+    if (device == "NPU" and config["ep_options"].get("enable_htp_fp16_precision") == "1"
+            and requested["compute_precision"] != "fp16"):
+        report("/config/requested/compute_precision",
+              f"enable_htp_fp16_precision is set, so the compute precision must be recorded as 'fp16' "
+              f"(got {requested['compute_precision']!r})", "fp16_precision_not_recorded")
+
+    # CPU latency depends strongly on the thread count.
+    if timed and device == "CPU" and config["intra_op_threads"] is None:
+        report("/config/intra_op_threads",
+                "timed CPU run with intra_op_threads left at the ONNX Runtime default; "
+                "set and record the thread count explicitly", "cpu_threads_unset")
+
+    # ONNX Runtime loading.
+    load_check = runtime["onnxruntime"].get("load_check") if runtime is not None else None
+    if doc["tool"].get("implementation") == "cpp" and load_check == "not_checked":
+        report("/runtime/onnxruntime/load_check",
+                "C++ engine result without a verified ONNX Runtime load", "load_not_checked")
+    if load_check == "full_path_verified":
+        library = runtime["onnxruntime"]["library_path"]
+        if library is None:
+            report("/runtime/onnxruntime/library_path",
+                  "load_check 'full_path_verified' requires the loaded library path", "module_outside_bundle")
+        else:
+            bundle = str(PureWindowsPath(library.replace("/", "\\")).parent)
+            for i, module in enumerate(runtime.get("loaded_modules") or []):
+                if not _windows_path_within(module["path"], bundle):
+                    report(f"/runtime/loaded_modules/{i}/path",
+                          f"{module['name']} was loaded from outside the bundle directory {bundle}",
+                          "module_outside_bundle")
+
+    # Device selection.
+    ep_device = runtime["ep_device"] if runtime is not None else None
+    selection = ep_device.get("selection") if ep_device is not None else None
+    if selection is not None and doc["status"] == "success" and selection["candidate_count"] != 1:
+        report("/runtime/ep_device/selection/candidate_count",
+              f"{selection['candidate_count']} devices matched; a run must select exactly one",
+              "device_selection_ambiguous")
+
+    # EP context cache.
+    cache = config["ep_context_cache"]
+    cache_on = cache is not None and cache["enabled"]
+    state = cache.get("state") if cache is not None else None
+    if state is not None:
+        if state in CACHE_STATES_WITH_FILES and not cache.get("files"):
+            report("/config/ep_context_cache/files",
+                  f"state {state!r} but no cache files are listed", "ep_context_files_missing")
+        if (state == "disabled") == cache["enabled"]:
+            report("/config/ep_context_cache/state",
+                  f"state {state!r} contradicts enabled={cache['enabled']}", "ep_context_state_mismatch")
+        if (state == "loaded" and timing is not None
+                and timing["session_init"]["ep_context_state"] not in ("cached", None)):
+            report("/timing/session_init/ep_context_state",
+                  f"must be 'cached' when the cache was loaded (got "
+                  f"{timing['session_init']['ep_context_state']!r})", "ep_context_state_mismatch")
+    if timing is not None:
+        init = timing["session_init"]
+        for key in ("context_build_ms", "cached_ms"):
+            if init.get(key) is not None and not cache_on:
+                report(f"/timing/session_init/{key}",
+                      "must be null when no EP context cache is enabled", "session_init_not_applicable")
+        if init.get("context_build_ms") is not None and state == "loaded":
+            report("/timing/session_init/context_build_ms",
+                  "must be null when an existing cache was loaded (nothing was built)",
+                  "session_init_not_applicable")
+
+    # Placement evidence.
+    if execution is not None:
+        validation = execution.get("qnn_validation")
+        if execution["verification_method"] == "qnn_validation_log" and validation is None:
+            report("/execution/qnn_validation",
+                  "verification_method 'qnn_validation_log' requires execution.qnn_validation",
+                  "qnn_validation_missing")
+        if validation is not None and execution["full_device_execution_verified"] is True and (
+                validation["rejected_nodes"] or any(p["failed_nodes"] for p in validation["passes"])):
+            report("/execution/full_device_execution_verified",
+                  "true although execution.qnn_validation reports rejected nodes",
+                  "rejected_nodes_but_verified")
+    return issues
+
+
 def consistency_issues(doc: dict[str, Any], result_path: Path | None = None) -> list[Issue]:
     issues = []
     if doc["run_id"] == NIL_UUID and not any(w["code"] == EXAMPLE_WARNING_CODE for w in doc["warnings"]):
         issues.append(Issue("/run_id", f"the nil UUID is reserved for examples with a '{EXAMPLE_WARNING_CODE}' warning"))
     issues += timing_issues(doc)
     issues += raw_issues(doc, result_path)
+    if version_key(doc["schema_version"]) >= (1, 1, 0):
+        issues += v1_1_issues(doc)
     return issues
 
 
@@ -253,16 +462,17 @@ def consistency_issues(doc: dict[str, Any], result_path: Path | None = None) -> 
 # Entry points
 # ---------------------------------------------------------------------------
 
-def validate_document(doc: Any, validator: jsonschema.Draft202012Validator,
+def validate_document(doc: Any, validators: Validators | None = None,
                       result_path: Path | None = None) -> list[Issue]:
-    """Return all problems with a parsed result document (empty list if valid)."""
-    issues = schema_issues(doc, validator)
+    """Return all errors and warnings for a parsed result document (empty list if clean)."""
+    validators = validators if validators is not None else Validators()
+    issues = schema_issues(doc, validators)
     if issues:
         return issues  # consistency rules assume a schema-valid document
     return consistency_issues(doc, result_path)
 
 
-def validate_file(path: Path, validator: jsonschema.Draft202012Validator) -> list[Issue]:
+def validate_file(path: Path, validators: Validators | None = None) -> list[Issue]:
     try:
         with path.open(encoding="utf-8") as f:
             doc = json.load(f)
@@ -270,7 +480,7 @@ def validate_file(path: Path, validator: jsonschema.Draft202012Validator) -> lis
         return [Issue("", f"cannot read file: {exc}")]
     except json.JSONDecodeError as exc:
         return [Issue("", f"invalid JSON: {exc}")]
-    return validate_document(doc, validator, path)
+    return validate_document(doc, validators, path)
 
 
 def collect_files(paths: Iterable[Path]) -> list[Path]:
@@ -288,7 +498,10 @@ def collect_files(paths: Iterable[Path]) -> list[Path]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("paths", nargs="+", type=Path, metavar="FILE_OR_DIR")
-    parser.add_argument("--schema", type=Path, default=SCHEMA_PATH, help="schema file (default: %(default)s)")
+    parser.add_argument("--strict", action="store_true", help="fail on warnings as well as errors")
+    parser.add_argument("--schema", type=Path,
+                        help="validate every file against this schema file instead of the one "
+                             "matching its schema_version")
     args = parser.parse_args(argv)
 
     try:
@@ -300,18 +513,20 @@ def main(argv: list[str] | None = None) -> int:
         print("No JSON files found.")
         return 0
 
-    validator = make_validator(load_schema(args.schema))
-    failed = 0
+    validators = Validators(forced_schema=load_schema(args.schema) if args.schema else None)
+    failed = warned = 0
     for path in files:
-        issues = validate_file(path, validator)
-        if issues:
-            failed += 1
-            print(f"FAIL {path}")
-            for issue in issues:
-                print(f"  {issue}")
-        else:
-            print(f"PASS {path}")
-    print(f"\n{len(files) - failed} passed, {failed} failed")
+        issues = validate_file(path, validators)
+        n_errors, n_warnings = len(errors(issues)), len(warnings_of(issues))
+        warned += n_warnings > 0
+        fails = n_errors > 0 or (args.strict and n_warnings > 0)
+        failed += fails
+        status = "FAIL" if fails else ("WARN" if n_warnings else "PASS")
+        print(f"{status} {path}")
+        for issue in sorted(issues, key=lambda i: i.severity != ERROR):
+            print(f"  {issue}")
+    mode = " (strict: warnings fail)" if args.strict else ""
+    print(f"\n{len(files) - failed} passed, {failed} failed, {warned} with warnings{mode}")
     return 1 if failed else 0
 
 
