@@ -43,9 +43,13 @@ The ARM64 build is the one tagged `-arm64`. Confirm it with `sysconfig`:
 >
 > | Kind of script | Behaviour on a non-native interpreter | Examples |
 > |---|---|---|
-> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `tools/ort_probe/reference.py`, `scripts/export_mobilenetv2.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `scripts/npu_overhead.py`, `tools/qnn_rejection_check.py`, `tools/ort_probe/make_reference.py` |
+> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `scripts/export_mobilenetv2.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `scripts/npu_overhead.py`, `tools/qnn_rejection_check.py`, `tools/ort_probe/reference.py`, `tools/ort_probe/make_reference.py` |
 > | Environment diagnostic | Runs and reports the problem prominently | `scripts/check_env.py` |
-> | Platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/validate_results.py` and its tests |
+> | Downloads and platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/get_data.py`, `scripts/get_aihub_baseline.py`, `scripts/validate_results.py`, and the tests in `scripts/tests/` |
+> | Shared modules in `scripts/common/` | Not checked themselves. `npu_harness.py` and `ort_qnn.py` load ONNX Runtime and are imported only by guarded scripts, after the check; the others (`preprocess.py`, `accuracy.py`, `qnn_log.py`, `onnx_prune.py`, `qdq_inspect.py`, `results_io.py`, `cli.py`) do not | – |
+>
+> The C++ build has the equivalent check at configure time
+> (`cmake/RequireNativeArm64.cmake`).
 >
 > Results from emulated or non-Snapdragon machines would be mislabeled, so only
 > the first kind is blocked. Tooling that just reads or checks files must keep
@@ -104,6 +108,10 @@ benchmark result files against the [results schema](results-schema.md):
 ```powershell
 .\.venv\Scripts\python.exe scripts\validate_results.py benchmarks\results\published
 ```
+
+`benchmarks/results/published/` holds no result files yet, so this currently
+reports "No JSON files found" (exit code 0). `docs\examples` holds two example
+results that validate.
 
 ## Preparing data and models
 
@@ -218,9 +226,15 @@ to `cache/qnn/` (not committed; they are specific to the device and the QNN SDK
 version). Results are discussed in [feasibility.md](feasibility.md).
 
 CPU timing sessions use 4 intra-op threads (`--cpu-threads`); always record
-the thread count with CPU numbers. `tools\qnn_rejection_check.py` checks that
-the placement check detects nodes the QNN EP rejects (it runs a tiny model with
-an unsupported `Det` node with and without strict mode).
+the thread count with CPU numbers.
+
+To check that the placement check detects nodes the QNN EP rejects, run a tiny
+model with an unsupported `Det` node with and without strict mode (all 12
+checks should pass):
+
+```powershell
+.\.venv\Scripts\python.exe tools\qnn_rejection_check.py
+```
 
 ### 6. Compare with Qualcomm AI Hub's model
 
@@ -315,7 +329,10 @@ Configuration fails with a clear message if the compiler does not target
 native ARM64. GoogleTest is downloaded at configure
 time (pinned by SHA256). Executables are placed in
 `build/<preset>/bin/<Config>/`, together with the ONNX Runtime and QNN runtime
-DLLs. Project code (engine and tools) is compiled with `/W4 /WX`.
+DLLs. Project code (engine and tools) is compiled with `/W4 /WX`. If the
+repository is checked out under `%TEMP%`, MSBuild prints warning MSB8029 about
+intermediate directories in a temporary folder; it is harmless, but a checkout
+elsewhere avoids it.
 
 ### 3. Run `ort_probe`
 
