@@ -1,74 +1,116 @@
 // edgebench: CPU vs NPU inference benchmarking for Windows on Snapdragon.
 //
-// ONNX Runtime is delay-loaded and initialized manually: the first thing main()
-// does (after --help) is load the onnxruntime.dll next to the executable by full
-// path and verify it, so a missing or wrong DLL is reported instead of crashing.
+//   edgebench run --model <file.onnx> [options]   benchmark a model (--dry-run: resolve only)
+//   edgebench doctor [--json]                     check the build, system and ONNX Runtime
 //
-// Exit codes: 0 ok, 2 usage error, 4 ONNX Runtime could not be loaded.
+// ONNX Runtime is delay-loaded and initialized manually, and is only loaded by
+// the commands that need it (never for --help or --version), by full path from
+// the executable's directory; see edgebench/ort_loader.hpp. Exit codes are
+// listed in edgebench/exit_codes.hpp and docs/cli.md.
+
+#include <onnxruntime_cxx_api.h>
 
 #include <cstdio>
-#include <string_view>
+#include <exception>
+#include <string>
+#include <vector>
 
+#include "edgebench/cli.hpp"
+#include "edgebench/doctor.hpp"
+#include "edgebench/exit_codes.hpp"
 #include "edgebench/ort_loader.hpp"
+#include "edgebench/run_config.hpp"
 #include "edgebench/version.hpp"
+
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+
+namespace eb = edgebench;
 
 namespace {
 
-constexpr int kExitOk = 0;
-constexpr int kExitUsage = 2;
-constexpr int kExitOrtLoadFailed = 4;
-
-void print_usage(std::FILE* out) {
-    std::fputs(
-        "Usage: edgebench [options]\n"
-        "\n"
-        "Loads the bundled ONNX Runtime and prints its version and location.\n"
-        "\n"
-        "Options:\n"
-        "  --version   Same as no options\n"
-        "  -h, --help  Show this help\n"
-        "\n"
-        "Exit codes: 0 ok, 2 usage error, 4 ONNX Runtime could not be loaded.\n",
-        out);
+std::string to_utf8(const wchar_t* w) {
+    const int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
+    if (n <= 1)
+        return {};
+    std::string out(static_cast<size_t>(n - 1), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w, -1, out.data(), n, nullptr, nullptr);
+    return out;
 }
 
-int load_and_report() {
-    const std::string_view v = edgebench::version();
-    std::printf("edgebench %.*s\n", static_cast<int>(v.size()), v.data());
-    std::fflush(stdout);
+int fail(eb::ExitCode code, const std::string& message) {
+    std::fprintf(stderr, "error: %s\n", message.c_str());
+    return eb::to_int(code);
+}
 
-    const edgebench::OrtLoadResult r = edgebench::load_onnxruntime();
-    if (!r.ok()) {
-        const std::string_view kind = edgebench::to_string(r.error_kind);
-        std::fprintf(stderr, "error: cannot load ONNX Runtime (%.*s)\n  %s\n",
-                     static_cast<int>(kind.size()), kind.data(), r.message.c_str());
-        return kExitOrtLoadFailed;
+int load_failure(const eb::OrtLoadResult& r) {
+    return fail(eb::ExitCode::ort_load_failure, "cannot load ONNX Runtime (" +
+                                                    std::string(eb::to_string(r.error_kind)) +
+                                                    ")\n  " + r.message);
+}
+
+int run_command(const eb::RunConfig& config) {
+    if (!config.dry_run) {
+        return fail(eb::ExitCode::internal_error,
+                    "benchmark execution is not available in this build");
     }
-    const std::string_view check = r.load_check();
-    std::printf("onnxruntime %s\n  C API version: %d\n  library:       %s\n  load check:    %.*s\n",
-                r.ort_version.c_str(), r.api_version, edgebench::path_to_utf8(r.dll_path).c_str(),
-                static_cast<int>(check.size()), check.data());
-    return kExitOk;
+    const eb::OrtLoadResult ort = eb::load_onnxruntime();
+    if (!ort.ok())
+        return load_failure(ort);
+    nlohmann::ordered_json resolved = {{"command", "run"},
+                                       {"dry_run", true},
+                                       {"edgebench_version", eb::version()},
+                                       {"results_schema_version", eb::results_schema_version()}};
+    resolved.update(eb::resolved_config_json(config));
+    resolved["runtime"] = {{"onnxruntime",
+                            {{"version", ort.ort_version},
+                             {"library_path", eb::path_to_utf8(ort.dll_path)},
+                             {"api_version", ort.api_version},
+                             {"load_check", ort.load_check()}}}};
+    std::printf("%s\n", resolved.dump(2).c_str());
+    return eb::to_int(eb::ExitCode::success);
+}
+
+int doctor_command(const eb::DoctorOptions& options) {
+    const eb::DoctorReport report = eb::run_doctor();
+    if (options.json)
+        std::printf("%s\n", eb::to_json(report).dump(2).c_str());
+    else
+        std::fputs(eb::format_text(report).c_str(), stdout);
+    std::fflush(stdout);
+    for (const eb::DoctorProblem& p : report.problems)
+        std::fprintf(stderr, "error: [%s] %s\n", p.code.c_str(), p.message.c_str());
+    return eb::to_int(report.exit_code);
 }
 
 }  // namespace
 
-int main(int argc, char** argv) {
-    if (argc > 2) {
-        print_usage(stderr);
-        return kExitUsage;
+int wmain(int argc, wchar_t** argv) {
+    std::vector<std::string> args;
+    for (int i = 1; i < argc; ++i)
+        args.push_back(to_utf8(argv[i]));
+
+    const eb::ParseResult parsed = eb::parse_command_line(args);
+    if (parsed.exit) {
+        std::fputs(parsed.out.c_str(), stdout);
+        std::fputs(parsed.err.c_str(), stderr);
+        return eb::to_int(*parsed.exit);
     }
-    if (argc == 2) {
-        const std::string_view arg = argv[1];
-        if (arg == "--help" || arg == "-h") {
-            print_usage(stdout);
-            return kExitOk;
+    try {
+        switch (parsed.command) {
+            case eb::Command::run:
+                return run_command(parsed.run);
+            case eb::Command::doctor:
+                return doctor_command(parsed.doctor);
+            case eb::Command::none:
+                break;
         }
-        if (arg != "--version") {
-            std::fprintf(stderr, "edgebench: unknown option '%s'\n\n", argv[1]);
-            print_usage(stderr);
-            return kExitUsage;
-        }
+        return fail(eb::ExitCode::internal_error, "no command to run");
+    } catch (const Ort::Exception& e) {
+        return fail(eb::ExitCode::ort_runtime_error,
+                    std::string("ONNX Runtime error: ") + e.what());
+    } catch (const std::exception& e) {
+        return fail(eb::ExitCode::internal_error, e.what());
     }
-    return load_and_report();
 }

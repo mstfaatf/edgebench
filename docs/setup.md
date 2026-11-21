@@ -329,20 +329,31 @@ set `OnnxRuntime_ROOT` / `QnnEp_ROOT` when configuring.
 cmake --preset arm64-release          # or arm64-debug
 cmake --build --preset arm64-release
 ctest --preset arm64-release
-.\build\arm64-release\bin\Release\edgebench.exe
+.\build\arm64-release\bin\Release\edgebench.exe doctor
 ```
 
-`edgebench.exe` loads the bundled ONNX Runtime and prints its version, C API
-version and location (see [How the executables find ONNX Runtime](#how-the-executables-find-onnx-runtime)).
+`edgebench doctor` checks the build, the machine and the bundled ONNX Runtime
+(see [How the executables find ONNX Runtime](#how-the-executables-find-onnx-runtime));
+[cli.md](cli.md) describes every command and exit code.
 Tests carry a CTest label: `unit` tests need no ONNX Runtime DLLs; `ort_bundle`
-tests load the bundled DLLs and run `edgebench.exe` with a missing, wrong, or
-damaged `onnxruntime.dll`. To run only the unit tests: `ctest --preset arm64-release -L unit`.
+tests load the bundled DLLs and run `edgebench.exe` and `ort_probe.exe` (including
+with a missing, wrong, or damaged `onnxruntime.dll`); `schema` runs the
+results-schema tests. To run only the unit tests: `ctest --preset arm64-release -L unit`.
 
 The presets use the Visual Studio 2022 generator with the ARM64-hosted toolset,
 so no `vcvarsall`/ARM64 compiler environment is needed, only `cmake` on `PATH`.
 Configuration fails with a clear message if the compiler does not target
-native ARM64. GoogleTest is downloaded at configure
-time (pinned by SHA256). Executables are placed in
+native ARM64. Third-party C++ libraries are downloaded at configure time,
+pinned by release tag and SHA256:
+
+| Library | Version | Used for |
+|---|---|---|
+| [CLI11](https://github.com/CLIUtils/CLI11) | 2.7.2 | Command-line parsing (`edgebench`) |
+| [nlohmann/json](https://github.com/nlohmann/json) | 3.12.0 | JSON output |
+| [GoogleTest](https://github.com/google/googletest) | 1.18.0 | Unit and process tests (only with `EDGEBENCH_BUILD_TESTS`) |
+
+Their headers are treated as external, so `/W4 /WX` applies to project code only.
+Executables are placed in
 `build/<preset>/bin/<Config>/`, together with the ONNX Runtime and QNN runtime
 DLLs. Project code (engine and tools) is compiled with `/W4 /WX`. If the
 repository is checked out under `%TEMP%`, MSBuild prints warning MSB8029 about
@@ -367,8 +378,9 @@ current Windows 11), and the normal DLL search order can pick it up. So
    Runtime / QNN DLL (`onnxruntime*.dll`, `Qnn*.dll`) comes from that directory.
 
 The build copies the bundled DLLs next to the executables. If loading fails,
-`edgebench.exe` prints the error kind and exits with code 4 (`ort_probe` exits
-with 1):
+`edgebench` (e.g. `edgebench doctor`) and `ort_probe` print the error kind and
+exit with code 4. `edgebench doctor` names any module loaded from outside the
+bundle directory, which is also exit code 4:
 
 | Error | Meaning | Fix |
 |---|---|---|
@@ -411,9 +423,11 @@ To compare C++ with Python on identical inputs, write reference tensors first
          --reference-dir data\ort_probe_reference\latest --reference-config npu_s8w
 ```
 
-The probe exits with 0 if everything passed, 1 if a check failed (comparison,
-DLL check, device selection), 2 on a usage error, and 3 on an ONNX Runtime error
-(the error code and message are printed). It loads ONNX Runtime the same way as
+The probe uses edgebench's [exit codes](cli.md#exit-codes): 0 if everything
+passed, 1 if a check failed (output comparison, device selection), 2 on a usage
+error, 3 on an ONNX Runtime error (the error code and message are printed), and
+4 if ONNX Runtime could not be loaded or a loaded ONNX Runtime/QNN DLL is not the
+bundled one. It loads ONNX Runtime the same way as
 `edgebench.exe` (see [How the executables find ONNX Runtime](#how-the-executables-find-onnx-runtime))
 and refuses to run with any other copy.
 

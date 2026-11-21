@@ -1,21 +1,45 @@
-# edgebench_set_warnings() comes from cmake/EdgeBenchWarnings.cmake; GoogleTest is
-# made available by the root CMakeLists.txt when EDGEBENCH_BUILD_TESTS is on.
+# edgebench_set_warnings() comes from cmake/EdgeBenchWarnings.cmake; GoogleTest,
+# CLI11 and nlohmann/json are made available by the root CMakeLists.txt.
 
 # --- Core library -----------------------------------------------------------
 
 configure_file(src/version_config.hpp.in
   "${CMAKE_CURRENT_BINARY_DIR}/generated/version_config.hpp" @ONLY)
 
+# Git commit and dirty flag, regenerated on every build (the header only changes
+# when the values do).
+set(EDGEBENCH_BUILD_INFO_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/build_info.hpp")
+set(_build_info_command "${CMAKE_COMMAND}" -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+  -DOUTPUT=${EDGEBENCH_BUILD_INFO_HEADER} -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
+  -P "${PROJECT_SOURCE_DIR}/cmake/BuildInfo.cmake")
+execute_process(COMMAND ${_build_info_command})
+add_custom_target(edgebench_build_info
+  COMMAND ${_build_info_command}
+  BYPRODUCTS "${EDGEBENCH_BUILD_INFO_HEADER}"
+  COMMENT "Updating git build information"
+  VERBATIM)
+
 add_library(edgebench_core STATIC
+  src/cli.cpp
+  src/doctor.cpp
+  src/ep_devices.cpp
+  src/exit_codes.cpp
   src/module_paths.cpp
   src/ort_loader.cpp
+  src/run_config.cpp
+  src/system_info.cpp
   src/version.cpp)
+add_dependencies(edgebench_core edgebench_build_info)
 target_include_directories(edgebench_core
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
   PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_compile_definitions(edgebench_core PRIVATE EDGEBENCH_BUILD_TYPE="$<CONFIG>")
 # OnnxRuntime::OnnxRuntime brings ORT_API_MANUAL_INIT and the delay-load of
 # onnxruntime.dll to everything linking edgebench_core (cmake/FindOnnxRuntime.cmake).
-target_link_libraries(edgebench_core PUBLIC OnnxRuntime::OnnxRuntime)
+# nlohmann/json appears in public headers; CLI11 is used only inside cli.cpp.
+target_link_libraries(edgebench_core
+  PUBLIC OnnxRuntime::OnnxRuntime nlohmann_json::nlohmann_json
+  PRIVATE CLI11::CLI11)
 edgebench_set_warnings(edgebench_core)
 
 # --- CLI --------------------------------------------------------------------
@@ -34,7 +58,10 @@ onnxruntime_copy_runtime_files(edgebench QNN)
 
 if(EDGEBENCH_BUILD_TESTS)
   add_executable(edgebench_tests
+    tests/cli_test.cpp
+    tests/exit_codes_test.cpp
     tests/module_paths_test.cpp
+    tests/run_config_test.cpp
     tests/version_test.cpp)
   target_link_libraries(edgebench_tests PRIVATE edgebench_core GTest::gtest_main)
   target_compile_definitions(edgebench_tests PRIVATE
@@ -58,8 +85,14 @@ if(EDGEBENCH_BUILD_TESTS)
   target_link_libraries(edgebench_bundle_tests PRIVATE edgebench_core GTest::gtest_main)
   target_compile_definitions(edgebench_bundle_tests PRIVATE
     EDGEBENCH_EXE_PATH="$<TARGET_FILE:edgebench>"
-    EDGEBENCH_PRELOAD_HELPER_PATH="$<TARGET_FILE:edgebench_preload_helper>")
+    EDGEBENCH_PRELOAD_HELPER_PATH="$<TARGET_FILE:edgebench_preload_helper>"
+    EDGEBENCH_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
   add_dependencies(edgebench_bundle_tests edgebench edgebench_preload_helper)
+  if(EDGEBENCH_BUILD_TOOLS)
+    target_compile_definitions(edgebench_bundle_tests PRIVATE
+      EDGEBENCH_ORT_PROBE_PATH="$<TARGET_FILE:ort_probe>")
+    add_dependencies(edgebench_bundle_tests ort_probe)
+  endif()
   edgebench_set_warnings(edgebench_bundle_tests)
   onnxruntime_copy_runtime_files(edgebench_bundle_tests)
   gtest_discover_tests(edgebench_bundle_tests DISCOVERY_MODE PRE_TEST

@@ -18,8 +18,10 @@
 // (ORT_API_MANUAL_INIT), so the first thing main() does is load the copy next to
 // the executable by full path and verify it; see edgebench::load_onnxruntime().
 //
-// Run with --help for the options. Exit codes: 0 ok, 1 check failed, 2 usage,
-// 3 ONNX Runtime error.
+// Run with --help for the options. Exit codes are edgebench's (edgebench/exit_codes.hpp,
+// docs/cli.md): 0 ok, 1 a check failed (output comparison, device selection) or an
+// unexpected error, 2 usage error, 3 ONNX Runtime error, 4 ONNX Runtime could not be
+// loaded or a loaded ORT/QNN DLL is not the bundled one.
 
 #include <onnxruntime_cxx_api.h>
 
@@ -34,6 +36,7 @@
 #include <string>
 #include <vector>
 
+#include "edgebench/exit_codes.hpp"
 #include "edgebench/ort_loader.hpp"
 #include "ort_support.hpp"
 #include "probe_util.hpp"
@@ -43,10 +46,12 @@ using namespace probe;
 
 namespace {
 
-constexpr int kExitOk = 0;
-constexpr int kExitCheckFailed = 1;
-constexpr int kExitUsage = 2;
-constexpr int kExitOrtError = 3;
+using edgebench::ExitCode;
+constexpr int kExitOk = edgebench::to_int(ExitCode::success);
+constexpr int kExitCheckFailed = edgebench::to_int(ExitCode::internal_error);
+constexpr int kExitUsage = edgebench::to_int(ExitCode::usage_error);
+constexpr int kExitOrtError = edgebench::to_int(ExitCode::ort_runtime_error);
+constexpr int kExitOrtLoadFailure = edgebench::to_int(ExitCode::ort_load_failure);
 
 // AllClose bounds for NPU-vs-CPU checks: the HTP backend computes float
 // graphs at reduced precision, so exact agreement with the CPU EP is not expected.
@@ -76,6 +81,7 @@ struct ImageComparison {
 struct Report {
     JsonWriter json;
     bool failed = false;
+    bool foreign_module = false;  // an ORT/QNN DLL outside the executable's directory
 };
 
 void WriteModuleList(JsonWriter& j, const std::vector<edgebench::LoadedModule>& modules) {
@@ -219,7 +225,7 @@ int RunProbe(const Options& o) {
     if (!ort_dll_ok) {
         j.EndObject().EndObject();
         std::fprintf(stderr, "onnxruntime.dll was not loaded from %s\n", exe_dir.string().c_str());
-        return kExitCheckFailed;
+        return kExitOrtLoadFailure;
     }
 
     // ---------------------------------------------------------------- devices
@@ -329,6 +335,7 @@ int RunProbe(const Options& o) {
     WriteModuleList(j, modules);
     j.Key("all_modules_next_to_exe").Bool(modules_bundled).EndObject();  // dll_check
     report.failed |= !modules_bundled;
+    report.foreign_module |= !modules_bundled;
 
     j.Key("devices");
     WriteDevices(j, devices);
@@ -509,6 +516,8 @@ int RunProbe(const Options& o) {
         std::ofstream(o.json) << j.str() << "\n";
     }
     std::printf("\n%s\n", report.failed ? "FAILED" : "OK");
+    if (report.foreign_module)
+        return kExitOrtLoadFailure;
     return report.failed ? kExitCheckFailed : kExitOk;
 }
 
@@ -556,7 +565,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "cannot use the bundled ONNX Runtime (%s): %s\n", kind.c_str(),
                      load.message.c_str());
         WriteErrorJson(o, "dll_load", -1, kind + ": " + load.message);
-        return kExitCheckFailed;
+        return kExitOrtLoadFailure;
     }
     try {
         return RunProbe(o);

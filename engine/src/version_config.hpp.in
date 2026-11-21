@@ -13,3 +13,6 @@
 // Results schema version the engine writes (EDGEBENCH_RESULTS_SCHEMA_VERSION in the
 // root CMakeLists.txt); see docs/results-schema.md.
 #define EDGEBENCH_RESULTS_SCHEMA_VERSION_STRING "@EDGEBENCH_RESULTS_SCHEMA_VERSION@"
+
+// Compiler identification, e.g. "MSVC 19.42.34435".
+#define EDGEBENCH_COMPILER_STRING "@CMAKE_CXX_COMPILER_ID@ @CMAKE_CXX_COMPILER_VERSION@"

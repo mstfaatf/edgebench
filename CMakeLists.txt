@@ -39,9 +39,33 @@ if(NOT EXISTS "${EDGEBENCH_RESULTS_SCHEMA_FILE}")
     "but ${EDGEBENCH_RESULTS_SCHEMA_FILE} does not exist")
 endif()
 
+# Third-party C++ libraries, pinned by release tag and SHA256 (versions are listed in
+# docs/setup.md). SYSTEM makes their headers external, so /W4 /WX does not apply to them.
+include(FetchContent)
+FetchContent_Declare(cli11
+  URL https://github.com/CLIUtils/CLI11/releases/download/v2.7.2/CLI11-2.7.2-Source.tar.gz
+  URL_HASH SHA256=0cb0ef44c4c7129ea972505ee81e6d09c71b2e7fe59ca3a13c47d8a994d682b2
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  SYSTEM)
+set(CLI11_PRECOMPILED OFF CACHE BOOL "" FORCE)
+set(CLI11_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(CLI11_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(CLI11_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(CLI11_INSTALL OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(nlohmann_json
+  URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
+  URL_HASH SHA256=42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  SYSTEM)
+set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+set(JSON_Install OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(cli11 nlohmann_json)
+
+# Git commit and dirty flag, refreshed on every build (cmake/BuildInfo.cmake).
+find_package(Git QUIET)
+
 if(EDGEBENCH_BUILD_TESTS)
   enable_testing()
-  include(FetchContent)
   FetchContent_Declare(googletest
     URL https://github.com/google/googletest/archive/refs/tags/v1.18.0.tar.gz
     URL_HASH SHA256=6e3191c1455468b3fc35a417fb565c1c5071aee1b7e7f85e30cf48a98d37d8b5

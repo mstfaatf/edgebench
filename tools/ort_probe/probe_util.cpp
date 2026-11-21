@@ -219,8 +219,9 @@ outputs from tools/ort_probe/make_reference.py, and measures latency.
   --json PATH              write a JSON summary
   --verbose-log            ONNX Runtime verbose logging to stderr
 
-Exit codes: 0 ok, 1 check failed (comparison, DLL check, device selection),
-2 usage error, 3 ONNX Runtime error.
+Exit codes: 0 ok, 1 check failed (output comparison, device selection) or
+unexpected error, 2 usage error, 3 ONNX Runtime error, 4 ONNX Runtime could not
+be loaded or a loaded ONNX Runtime/QNN DLL is not the bundled one.
 )";
     return s.str();
 }

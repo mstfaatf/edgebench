@@ -10,7 +10,9 @@ namespace edgebench::test {
 
 struct ProcessResult {
     uint32_t exit_code = 0;
-    std::string output;  // stdout and stderr, interleaved
+    std::string out;     // stdout
+    std::string err;     // stderr
+    std::string output;  // stdout followed by stderr
     bool timed_out = false;
 };
 

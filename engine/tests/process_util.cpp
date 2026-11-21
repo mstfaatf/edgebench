@@ -4,6 +4,7 @@
 #include <optional>
 #include <stdexcept>
 #include <system_error>
+#include <thread>
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -75,18 +76,21 @@ ProcessResult run_process(const fs::path& exe, const std::vector<std::wstring>& 
         cmd += L" " + quote(a);
 
     SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
-    Handle read_end, write_end;
-    if (!CreatePipe(&read_end.h, &write_end.h, &sa, 0))
+    Handle out_read, out_write, err_read, err_write;
+    if (!CreatePipe(&out_read.h, &out_write.h, &sa, 0) ||
+        !CreatePipe(&err_read.h, &err_write.h, &sa, 0)) {
         throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
                                 "CreatePipe");
-    SetHandleInformation(read_end.h, HANDLE_FLAG_INHERIT, 0);
+    }
+    SetHandleInformation(out_read.h, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(err_read.h, HANDLE_FLAG_INHERIT, 0);
 
     STARTUPINFOW si{};
     si.cb = sizeof(si);
     si.dwFlags = STARTF_USESTDHANDLES;
     si.hStdInput = nullptr;
-    si.hStdOutput = write_end.h;
-    si.hStdError = write_end.h;
+    si.hStdOutput = out_write.h;
+    si.hStdError = err_write.h;
     PROCESS_INFORMATION pi{};
 
     std::optional<ScopedEnv> path_env;
@@ -108,14 +112,22 @@ ProcessResult run_process(const fs::path& exe, const std::vector<std::wstring>& 
                                 "CreateProcessW");
     }
     Handle process{pi.hProcess}, thread{pi.hThread};
-    CloseHandle(write_end.h);
-    write_end.h = nullptr;
+    CloseHandle(out_write.h);
+    out_write.h = nullptr;
+    CloseHandle(err_write.h);
+    err_write.h = nullptr;
 
     ProcessResult r;
-    char buf[4096];
-    DWORD got = 0;
-    while (ReadFile(read_end.h, buf, sizeof(buf), &got, nullptr) && got > 0)
-        r.output.append(buf, got);
+    auto drain = [](HANDLE h, std::string& into) {
+        char buf[4096];
+        DWORD got = 0;
+        while (ReadFile(h, buf, sizeof(buf), &got, nullptr) && got > 0)
+            into.append(buf, got);
+    };
+    // Read both pipes at once so a child filling one of them cannot block.
+    std::thread err_reader(drain, err_read.h, std::ref(r.err));
+    drain(out_read.h, r.out);
+    err_reader.join();
     if (WaitForSingleObject(process.h, timeout_ms) != WAIT_OBJECT_0) {
         TerminateProcess(process.h, 0xFFFFFFFF);
         r.timed_out = true;
@@ -124,7 +136,9 @@ ProcessResult run_process(const fs::path& exe, const std::vector<std::wstring>& 
     GetExitCodeProcess(process.h, &code);
     r.exit_code = code;
     // Text-mode stdio in the child writes CRLF; compare with plain "\n".
-    std::erase(r.output, '\r');
+    std::erase(r.out, '\r');
+    std::erase(r.err, '\r');
+    r.output = r.out + r.err;
     return r;
 }
 

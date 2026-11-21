@@ -59,12 +59,13 @@ powershell -ExecutionPolicy Bypass -File scripts\fetch_deps.ps1
 cmake --preset arm64-release
 cmake --build --preset arm64-release
 ctest --preset arm64-release
-.\build\arm64-release\bin\Release\edgebench.exe --version
+.\build\arm64-release\bin\Release\edgebench.exe doctor
 ```
 
 ## Documentation
 
 - [docs/setup.md](docs/setup.md): environment, data and model preparation, C++ build
+- [docs/cli.md](docs/cli.md): `edgebench` commands, options and exit codes
 - [docs/feasibility.md](docs/feasibility.md): feasibility note (test environment,
   NPU verification, accuracy, initialization, latency sanity checks, C++ path,
   verdicts, engine requirements)
