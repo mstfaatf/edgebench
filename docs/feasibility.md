@@ -196,6 +196,22 @@ the CPU, but the script also checks placement directly, three ways:
 | *Control:* unpruned INT8 per-tensor | OK | 383, 0 / 389, 0 | 1 fused node on QNN | 1 node, QNN |
 
 - The whole graph becomes a single QNN partition, and no node is rejected.
+- **Rejection detection is validated against a real rejection.**
+  `tools/qnn_rejection_check.py` builds a `Relu → Det → Relu` model (the QNN EP
+  does not implement `Det`). Without strict mode, the QNN EP logs
+  `Validation FAILED for 1 nodes in OrtNodeUnit (Det)` followed by the node
+  and the reason ("Operators of type `Det` are not supported by QNN EP"), and
+  ONNX Runtime places `Det` on the CPU EP and the two Relus in two QNN
+  partitions. With strict mode, session creation fails with "This session
+  contains graph nodes that are assigned to the default CPU EP, but fallback to
+  CPU EP has been explicitly disabled by the user", and the EP logs
+  `Unsupported nodes in QNN EP: { name: unsupported_det, type: Det }`. The
+  parser reports the rejected node, its reason, and the CPU placement in both
+  cases; trimmed copies of these logs are the parser's test fixtures. Two other
+  candidates behaved differently than one might expect: `NonZero` is rejected,
+  but for its dynamic output shape, and a float64 `Cast → Add → Cast` chain is
+  accepted by the QNN EP, so "double precision" is not a reliable way to provoke
+  a rejection.
 - The pruned INT8 models have 303 nodes. ONNX Runtime's
   `EnsureUniqueDQForNodeUnit` gives each of the 10 DequantizeLinear nodes that
   feed two consumers (the residual connections) its own copy, giving 313. The
@@ -242,7 +258,7 @@ file on the CPU execution provider (FP32 for the FP16 row).
 > the script. Configurations were interleaved CPU/NPU with a 5 s cooldown. Use
 > these numbers only to see orders of magnitude.
 
-Session creation, median of 3 (ms):
+Session creation, median of 3 (ms), run A (run B below the table):
 
 | Configuration | Cold (no EP context) | EP context generation | From cached EP context |
 |---|---|---|---|
@@ -252,6 +268,7 @@ Session creation, median of 3 (ms):
 | NPU FP16 | 2546 | 2464 | 388 |
 | CPU FP32 / INT8 | 24 / 44–61 | – | – |
 
+- Run B: cold 1.86–2.19 s, cached 0.25–0.27 s for the NPU configurations.
 - "Cold" means no EP context cache: QNN composes and finalizes the HTP graph on
   every session creation. With `ep.context_enable=1` and an explicit
   `ep.context_file_path` (under `cache/qnn/`, not committed), ONNX Runtime writes
@@ -265,18 +282,19 @@ Session creation, median of 3 (ms):
   deltas are dominated by memory being released and reused, so they are not
   reported.
 
-Steady-state latency of one `Run()` (ms):
+Steady-state latency of one `Run()` (ms), from two runs of the script on the
+same day with the same settings (run B was later):
 
-| Configuration | Mean | p50 | p95 | Min |
+| Configuration | Run A mean | Run A p50 / p95 / min | Run B mean | Run B p50 / p95 / min |
 |---|---|---|---|---|
-| CPU FP32 | 9.86 | 7.89 | 16.32 | 5.88 |
-| CPU INT8 per-tensor | 3.51 | 2.85 | 7.12 | 2.23 |
-| CPU INT8 per-channel u8w | 3.33 | 2.85 | 5.43 | 2.40 |
-| CPU INT8 per-channel s8w | 3.16 | 2.51 | 6.25 | 1.56 |
-| NPU INT8 per-tensor | 0.477 | 0.433 | 0.667 | 0.350 |
-| NPU INT8 per-channel u8w | 0.357 | 0.345 | 0.414 | 0.316 |
-| NPU INT8 per-channel s8w | 0.352 | 0.343 | 0.393 | 0.318 |
-| NPU FP16 | 0.661 | 0.630 | 0.727 | 0.593 |
+| CPU FP32 | 9.86 | 7.89 / 16.32 / 5.88 | 4.07 | 3.95 / 4.87 / 3.62 |
+| CPU INT8 per-tensor | 3.51 | 2.85 / 7.12 / 2.23 | 1.63 | 1.59 / 1.89 / 1.46 |
+| CPU INT8 per-channel u8w | 3.33 | 2.85 / 5.43 / 2.40 | 1.64 | 1.60 / 1.93 / 1.43 |
+| CPU INT8 per-channel s8w | 3.16 | 2.51 / 6.25 / 1.56 | 1.44 | 1.40 / 1.74 / 1.23 |
+| NPU INT8 per-tensor | 0.477 | 0.433 / 0.667 / 0.350 | 0.356 | 0.343 / 0.409 / 0.321 |
+| NPU INT8 per-channel u8w | 0.357 | 0.345 / 0.414 / 0.316 | 0.338 | 0.323 / 0.403 / 0.308 |
+| NPU INT8 per-channel s8w | 0.352 | 0.343 / 0.393 / 0.318 | 0.399 | 0.371 / 0.500 / 0.353 |
+| NPU FP16 | 0.661 | 0.630 / 0.727 / 0.593 | 0.614 | 0.601 / 0.682 / 0.582 |
 
 - CPU timing sessions use `intra_op_num_threads=4`. With ONNX Runtime's default
   (one thread per core, 10 here), single-image latency on this machine was
@@ -285,12 +303,151 @@ Steady-state latency of one `Run()` (ms):
   at p50 8 ms with p95 52 ms. With 4 threads the same models ran at a steady
   p50 of 7.6–7.8 ms (FP32) and 2.4 ms (INT8 s8w). The thread count has to be a
   controlled, recorded benchmark parameter.
-- NPU latency is tight (p95 within ~0.1–0.25 ms of p50) and about 7–9× lower
-  than INT8 on 4 CPU threads; INT8 and FP16 on the NPU are 15–28× faster than
-  FP32 on the CPU.
+- **Even with a fixed thread count, CPU latency moved by ~2× between the two
+  runs**, while NPU latency moved by at most ~25% (per configuration, within
+  0.02–0.12 ms). Nothing in the configuration changed; the machine's background
+  state did. CPU numbers need repeated runs, and a recorded system state, before
+  they mean anything.
+- NPU latency is tight within a run (p95 within ~0.05–0.25 ms of p50). INT8 on
+  the NPU is 3.6–9× faster than INT8 on 4 CPU threads, depending on the run, and
+  INT8 or FP16 on the NPU is 7–28× faster than FP32 on the CPU.
+- Per-channel u8w and s8w perform the same on the NPU; the per-run differences
+  between the INT8 variants are within run-to-run noise.
 - **Thermals and power.** The power mode was *Balanced* (on AC) throughout.
   Each timed run lasts well under a second; behaviour under sustained load
   (thermal throttling) has not been measured.
+
+## AI Hub baseline
+
+To see whether our quantization leaves speed or accuracy on the table,
+`scripts/compare_aihub.py` runs Qualcomm AI Hub's pre-quantized MobileNetV2
+through the same strict NPU setup (same harness, `scripts/common/npu_harness.py`)
+next to our per-tensor and per-channel s8w INT8 models. Results below were
+collected on 2026-11-20, plugged in, Windows power mode *Balanced*.
+
+### The asset
+
+| | |
+|---|---|
+| Source | Hugging Face [`qualcomm/MobileNet-v2`](https://huggingface.co/qualcomm/MobileNet-v2) at revision `31a0cdd09d996f7d71847ce14a83d92ccb747caa` (AI Hub Models release 0.67.0). The repository holds the model card and `release_assets.json`; the assets themselves are on Qualcomm's public S3 bucket. No account or token is needed. The older `qualcomm/MobileNet-v2-Quantized` repository no longer exists |
+| Asset | `mobilenet_v2-onnx-w8a8.zip` ("ONNX, w8a8, Universal"), S3 object version `sZ4TesoRKcf.fYEFLxRCWMdgKSihVzMh`, SHA256 `4e0ab0c7ec6136a7cccbbe96e6f2213e6cc259e7a08bcc2b699c44e6d7c8341e`. Its float twin `mobilenet_v2-onnx-float.zip` (SHA256 `4a479de6925b49e60317ab2e52827e5e8dd94e997d8994afba62855907eb8837`) is also downloaded |
+| Built with | QAIRT 2.51.0, ONNX Runtime 1.30.0 (we run QNN SDK 2.52.0 via onnxruntime-qnn 2.8.0 and ONNX Runtime 1.32.0; it loads and runs without issues) |
+| License | Model card: Apache-2.0. Original implementation ([tonylins/pytorch-mobilenet-v2](https://github.com/tonylins/pytorch-mobilenet-v2)): Apache-2.0. `qai_hub_models` source: BSD-3-Clause |
+| Contents | `mobilenet_v2_onnx/mobilenet_v2.onnx` (164 KB graph) + `mobilenet_v2.data` (14.1 MB external data: the weights, stored as float32), `labels.txt`, `metadata.json`. No pre-compiled QNN context binary |
+| Weights | Not torchvision's: AI Hub loads the tonylins checkpoint (reported 71.8% ImageNet top-1; torchvision's `IMAGENET1K_V2` reports 72.15%) |
+
+### Inputs, outputs and preprocessing
+
+| | AI Hub w8a8 | Ours |
+|---|---|---|
+| Input | `image_tensor`, **uint8** [1, 3, 224, 224], NCHW RGB, scale 0.0039182 (≈ 1/255), zero point 0 | `input`, float32 [1, 3, 224, 224], NCHW RGB |
+| Normalization | Inside the graph (`Sub` mean, `Div` std, both quantized), on a [0, 1] image | On the CPU before the model (shared preprocessing) |
+| Output | `class_logits`, **uint8** [1, 1000], scale 0.131066, zero point 76 | `logits`, float32 [1, 1000] |
+| Classes | ImageNet-1k in torchvision order (`labels.txt` differs only in two names: 134 "crane", 639 "maillot") | ImageNet-1k |
+
+AI Hub's own ImageNet transform (`qai_hub_models`, `IMAGENET_TRANSFORM`) is
+`Resize(256)`, `CenterCrop(224)`, `ToTensor()`, the same as our shared
+pipeline up to the normalization step. The AI Hub model therefore gets the
+shared pipeline's [0, 1] tensor before normalization, quantized with the
+graph's input scale and zero point. This reproduces the original 8-bit pixel
+values exactly on all 500 eval images. Its uint8 output is dequantized with the
+graph's output parameters (`uint8_io_adapter` in `npu_harness.py`). AI Hub's
+float model takes the same [0, 1] tensor as float32.
+
+### Graph comparison
+
+| | Ours per-tensor | Ours per-channel s8w | AI Hub w8a8 |
+|---|---|---|---|
+| Opset | 17 | 17 | 21 |
+| Nodes (compute) | 303 (65) | 303 (65) | 470 (101) |
+| Compute ops | 52 Conv, 10 Add, GlobalAveragePool, Flatten, Gemm | same | 52 Conv, 35 Clip, 10 Add, ReduceMean, Gemm, Sub, Div |
+| Weights | uint8, per-tensor, asymmetric | int8, per-channel, symmetric | int8, per-channel, symmetric (float initializers quantized by in-graph QuantizeLinear) |
+| Biases | int32 | int32, per-channel | int32, per-channel |
+| Activations | uint8 | uint8 | uint8 |
+| Every compute node in a QDQ unit | yes | yes | yes |
+| Graph I/O | float32 | float32 | uint8 |
+| QNN validation, pass 1 / 2 | 313 / 319 nodes, 0 rejected | 313 / 319, 0 rejected | 491 / 494, 0 rejected |
+| HTP ops (QNN profile) | 71 | 71 | 105 |
+
+AI Hub's quantization recipe is the same as our s8w variant (per-channel
+symmetric int8 weights, uint8 activations). The structural differences are
+that it keeps the ReLU6 `Clip` nodes as separate quantized units (our quantizer
+folds them into the Conv output ranges), normalizes the input inside the
+graph, and uses uint8 graph I/O.
+
+### Placement
+
+The AI Hub model passes strict mode with all nodes on QNN, checked the same
+three ways as our models: QNN validation passes every node (0 rejected),
+ONNX Runtime places a single fused node on the QNN EP, and the ORT profile shows
+only the QNN EP executing. Its cached EP-context session also passes strict
+mode and gives bit-identical outputs. It runs on the CPU EP as well.
+
+### Accuracy
+
+500 eval images. "Own float" is each model's float source model: our FP32
+export, or AI Hub's float ONNX model.
+
+| Configuration | Top-1 (1000) | Top-1 (10) | Agreement with own float (1000 / 10) | Agreement with same model on CPU (1000) | Max abs logit diff vs CPU |
+|---|---|---|---|---|---|
+| CPU ours FP32 | 71.0% | 98.4% | – | – | – |
+| CPU ours INT8 per-tensor | 70.4% | 98.6% | 85.6% / 98.2% | – | – |
+| CPU ours INT8 s8w | 69.8% | 98.6% | 93.6% / 99.6% | – | – |
+| CPU AI Hub float | 77.4% | 99.2% | – | – | – |
+| CPU AI Hub w8a8 | 75.2% | 99.0% | 84.2% / 99.8% | – | – |
+| **NPU ours INT8 per-tensor** | 70.6% | 98.6% | 86.2% / 99.0% | 97.2% | 0.68 |
+| **NPU ours INT8 s8w** | 70.4% | 98.4% | 93.6% / 99.4% | 97.6% | 0.63 |
+| **NPU AI Hub w8a8** | 75.4% | 99.0% | 85.6% / 99.6% | 93.6% | 3.93 |
+
+Held-out check: only 134 Imagenette val images come from ImageNet val, so
+neither set of weights was trained on them (CPU, top-1 over 1000 classes):
+ours FP32 71.6% (96/134), ours s8w 70.1% (94), AI Hub float 74.6% (100),
+AI Hub w8a8 75.4% (101). With 134 images, one image is 0.75 points and the
+standard error is about 4 points.
+
+### Latency and initialization
+
+NPU only, 3 rounds with the order rotated each round (every model timed once
+in each position), 20 warmup + 200 timed runs, 3 session creations per init
+measurement, 5 s cooldown. Medians over rounds. **Sanity check, not a benchmark.**
+
+| NPU, strict | Cold init (ms) | Cached init (ms) | Mean | p50 | p95 | Min | p50 per round |
+|---|---|---|---|---|---|---|---|
+| Ours INT8 per-tensor | 2102 | 310 | 0.345 | 0.328 | 0.413 | 0.309 | 0.348 / 0.320 / 0.328 |
+| Ours INT8 s8w | 2160 | 299 | 0.367 | 0.339 | 0.411 | 0.322 | 0.339 / 0.336 / 0.356 |
+| AI Hub w8a8 | 2230 | 304 | 0.518 | 0.496 | 0.583 | 0.468 | 0.496 / 0.492 / 0.499 |
+
+The AI Hub model card lists 0.456 ms for this asset on a Snapdragon X Elite,
+in line with the 0.50 ms measured here on an X Plus.
+
+### Findings
+
+- **Speed: ours is faster.** AI Hub's model has a 46–51% higher p50 than either
+  of ours, consistently in every round. Init times are on par.
+- **Why.** QNN's detailed profiler (`compare_aihub.py --qnn-profile`) puts the
+  AI Hub model at 479 µs of accelerator execute time against 298 µs for ours.
+  Its in-graph normalization accounts for most of the difference: the `Div`
+  takes 33.5% and the `Sub` 16.0% of its HTP cycles (element-wise quantized
+  arithmetic on the full 3×224×224 input). The 52 convolutions cost about the
+  same in both models. The kept `Clip` nodes are not the cause: re-quantizing
+  our model with the Clips kept (`keep_removable_activations=True`) produced
+  the same 494-node QNN graph shape and the same p50 (0.327 vs 0.330 ms over 4
+  rounds). Our models do the same normalization on the CPU before `Run()`, at
+  0.027 ms in NumPy. Folding it into the first convolution would remove it
+  entirely.
+- **Accuracy: the gap is in the weights, not the quantization.** AI Hub's model
+  scores 5 points higher on the eval split, but its *float* model is 6.4
+  points higher than ours, and its quantization loses more: 2.0–2.2 points and
+  84–86% agreement with its float model, against 0.6–1.2 points and 93.6%
+  agreement for our s8w model. On the 134 held-out images the float gap shrinks
+  to 3 points (4 images), within noise. Published ImageNet val accuracy is
+  71.8% (tonylins) vs 72.15% (torchvision V2). The eval split is mostly
+  ImageNet train images, which favours a checkpoint that fits its training data
+  more closely, so most of the eval-split gap is probably a property of the
+  checkpoints on this data rather than a real accuracy difference.
+- **Conclusion.** Our per-channel s8w recipe is at parity with AI Hub's on
+  placement and quantization scheme. It is faster on the NPU and loses less
+  accuracy to quantization. Per-channel s8w is the default INT8 recipe from here on.
 
 ## Implications
 
@@ -347,7 +504,9 @@ then:
 
 The quantization and NPU results come from the data and model pipeline in
 [setup.md](setup.md#preparing-data-and-models), ending with
-`scripts\eval_cpu.py` and `scripts\npu_check.py`.
+`scripts\eval_cpu.py`, `scripts\npu_check.py` and `scripts\compare_aihub.py`
+(`--qnn-profile` for the per-op profile). The rejection check is
+`tools\qnn_rejection_check.py`.
 
 `check_env.py` prints system information and a PASS / FAIL / NOT INSTALLED /
 SKIP line per library, with error messages for failures. `--json PATH` also

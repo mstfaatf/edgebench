@@ -11,3 +11,6 @@ MobileNetV2 lives in `mobilenetv2/` and is produced by
 (INT8 QDQ); see [docs/setup.md](../docs/setup.md#preparing-data-and-models).
 Every model has a JSON sidecar with the same name recording how it was made
 and its SHA256.
+
+Qualcomm AI Hub's MobileNetV2 (w8a8 and float ONNX, used as a baseline) is
+downloaded to `aihub/` by `scripts/get_aihub_baseline.py`.

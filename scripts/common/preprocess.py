@@ -72,18 +72,36 @@ def _center_crop(img: Image.Image, size: int) -> Image.Image:
     return img.crop((left, top, left + size, top + size))
 
 
-def preprocess_image(img: Image.Image) -> np.ndarray:
-    """Return a [1, 3, 224, 224] float32 array for a PIL image."""
+def preprocess_image_unit(img: Image.Image) -> np.ndarray:
+    """Steps 1-4 and 6: a [1, 3, 224, 224] float32 RGB array in [0, 1], not normalized.
+
+    For models that normalize internally (e.g. Qualcomm AI Hub exports, which take a
+    [0, 1] image and quantize it to uint8).
+    """
     img = _center_crop(_resize_shorter_side(img.convert("RGB"), RESIZE_SIZE), CROP_SIZE)
     x = np.asarray(img, dtype=np.float32) / 255.0  # HWC
-    x = (x - np.asarray(MEAN, dtype=np.float32)) / np.asarray(STD, dtype=np.float32)
     return np.ascontiguousarray(x.transpose(2, 0, 1)[np.newaxis], dtype=np.float32)
 
 
-def load_image(path: str | Path) -> np.ndarray:
-    """Load an image file and preprocess it to a [1, 3, 224, 224] float32 array."""
+def normalize(x_unit: np.ndarray) -> np.ndarray:
+    """Step 5: ImageNet mean/std normalization of a [1, 3, H, W] array in [0, 1]."""
+    mean = np.asarray(MEAN, dtype=np.float32).reshape(1, 3, 1, 1)
+    std = np.asarray(STD, dtype=np.float32).reshape(1, 3, 1, 1)
+    return np.ascontiguousarray((x_unit - mean) / std, dtype=np.float32)
+
+
+def preprocess_image(img: Image.Image) -> np.ndarray:
+    """Return a normalized [1, 3, 224, 224] float32 array for a PIL image."""
+    return normalize(preprocess_image_unit(img))
+
+
+def load_image(path: str | Path, *, normalized: bool = True) -> np.ndarray:
+    """Load an image file and preprocess it to a [1, 3, 224, 224] float32 array.
+
+    With ``normalized=False`` the array is in [0, 1] (no mean/std normalization).
+    """
     with Image.open(path) as img:
-        return preprocess_image(img)
+        return preprocess_image(img) if normalized else preprocess_image_unit(img)
 
 
 @dataclass(frozen=True)

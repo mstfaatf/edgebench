@@ -5,7 +5,7 @@
   device": the plugin also exposes the Adreno GPU),
 - strict session options (``session.disable_cpu_ep_fallback=1``),
 - capturing ONNX Runtime's native log output (written to the process's stderr
-  file descriptor) and parsing node placement from it,
+  file descriptor); the placement parser itself is in ``common/qnn_log.py``,
 - Windows facts that affect measurements: loaded DLL paths, AC/battery state,
   power mode, and process working set.
 
@@ -22,13 +22,13 @@ import re
 import sys
 import tempfile
 import uuid
-from collections import Counter
 from contextlib import contextmanager
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import onnxruntime as ort
 import onnxruntime_qnn
+
+from common.qnn_log import PlacementReport, parse_placement_log  # noqa: F401 - re-exported
 
 QNN_EP = "QNNExecutionProvider"
 STRICT_CONFIG = {"session.disable_cpu_ep_fallback": "1"}
@@ -111,69 +111,6 @@ def capture_native_stderr(path: Path):
         os.dup2(saved, 2)
         os.close(fd)
         os.close(saved)
-
-
-_LOG_LINE = re.compile(r"\[(?P<sev>[VIWEF]):onnxruntime:[^,]*, (?P<src>[\w.]+):\d+ [^\]]*\] (?P<msg>.*)")
-_PASS = re.compile(r"GetCapability pass (?P<n>\d+)")
-_VALID = re.compile(r"Validation (?P<res>PASSED|FAILED) for (?P<n>\d+) nodes in OrtNodeUnit \((?P<op>\w+)\)")
-_PLACED = re.compile(r"(?:All nodes|Node\(s\)) placed on \[(?P<ep>\w+)\]\. Number of nodes: (?P<n>\d+)")
-_REJECT_HINT = re.compile(r"not supported|unsupported|FAILED|cannot|failed", re.IGNORECASE)
-
-
-@dataclass
-class PlacementReport:
-    ort_placements: dict = field(default_factory=dict)  # EP -> nodes (after EP fusion)
-    qnn_passes: list = field(default_factory=list)  # per GetCapability pass
-    rejections: list = field(default_factory=list)  # EP log lines explaining rejected nodes
-    warnings: list = field(default_factory=list)  # distinct W/E lines
-
-    def as_dict(self) -> dict:
-        return {
-            "ort_node_placements": self.ort_placements,
-            "qnn_get_capability_passes": self.qnn_passes,
-            "qnn_rejections": self.rejections,
-            "log_warnings": self.warnings,
-        }
-
-    @property
-    def all_on_qnn(self) -> bool:
-        final = self.qnn_passes[-1] if self.qnn_passes else None
-        return (set(self.ort_placements) == {QNN_EP}
-                and final is not None and final["failed_nodes"] == 0)
-
-
-def parse_placement_log(text: str) -> PlacementReport:
-    """Extract node placement facts from a verbose (severity 0) ORT session log."""
-    report = PlacementReport()
-    current = None
-    warnings: list[str] = []
-    for line in text.splitlines():
-        m = _LOG_LINE.search(line)
-        if not m:
-            continue
-        msg, src, sev = m["msg"].strip(), m["src"], m["sev"]
-        if p := _PASS.search(msg):
-            current = {"pass": int(p["n"]), "passed_units": Counter(), "passed_nodes": 0,
-                       "failed_units": Counter(), "failed_nodes": 0}
-            report.qnn_passes.append(current)
-        elif (v := _VALID.search(msg)) and current is not None:
-            key = "passed" if v["res"] == "PASSED" else "failed"
-            current[f"{key}_units"][v["op"]] += 1
-            current[f"{key}_nodes"] += int(v["n"])
-            if key == "failed":
-                report.rejections.append(msg)
-        elif pl := _PLACED.search(msg):
-            report.ort_placements[pl["ep"]] = report.ort_placements.get(pl["ep"], 0) + int(pl["n"])
-        elif src.startswith(("qnn_", "base_op_builder", "conv_op_builder")) and sev in "WE" \
-                and _REJECT_HINT.search(msg):
-            report.rejections.append(msg)
-        if sev in "WEF" and msg not in warnings:
-            warnings.append(msg)
-    for p in report.qnn_passes:
-        p["passed_units"] = dict(sorted(p["passed_units"].items()))
-        p["failed_units"] = dict(sorted(p["failed_units"].items()))
-    report.warnings = warnings
-    return report
 
 
 # --------------------------------------------------------------------------- Windows facts

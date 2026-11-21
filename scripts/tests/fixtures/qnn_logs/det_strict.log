@@ -1,0 +1,17 @@
+2026-11-20 20:14:36.5270241 [V:onnxruntime:, qnn_execution_provider.cc:2236 onnxruntime::QnnEp::GetCapabilityImpl] GetCapability pass 1 (pre-Layout-Transform; post-LT-gated fusions dormant)
+2026-11-20 20:14:37.0501947 [V:onnxruntime:, qnn_execution_provider.cc:1810 onnxruntime::LogNodeSupport] Validation PASSED for 1 nodes in OrtNodeUnit (Relu) :
+2026-11-20 20:14:37.0513207 [V:onnxruntime:, qnn_execution_provider.cc:1810 onnxruntime::LogNodeSupport] Validation FAILED for 1 nodes in OrtNodeUnit (Det) :
+	Operator type: Det Node name: unsupported_det Node index: 1
+	REASON : Operators of type `Det` are not supported by QNN EP.Det node `unsupported_det` will not be assigned to QNN EP.
+[0;93m2026-11-20 20:14:37.0526938 [W:onnxruntime:, qnn_execution_provider.cc:1820 onnxruntime::LogNodeSupport] QNN EP does not support OrtNodeUnit for Det node 'unsupported_det': Operators of type `Det` are not supported by QNN EP.Det node `unsupported_det` will not be assigned to QNN EP.[m
+2026-11-20 20:14:37.0586149 [V:onnxruntime:, qnn_execution_provider.cc:1810 onnxruntime::LogNodeSupport] Validation PASSED for 1 nodes in OrtNodeUnit (Relu) :
+[1;31m2026-11-20 20:14:37.0597291 [E:onnxruntime:, qnn_execution_provider.cc:2513 onnxruntime::QnnEp::GetCapabilityImpl] Unsupported nodes in QNN EP: { name: unsupported_det, type: Det }[m
+2026-11-20 20:14:37.0607220 [V:onnxruntime:, qnn_execution_provider.cc:2236 onnxruntime::QnnEp::GetCapabilityImpl] GetCapability pass 2 (post-Layout-Transform; post-LT-gated fusions enabled)
+2026-11-20 20:14:37.0670025 [V:onnxruntime:, qnn_execution_provider.cc:1810 onnxruntime::LogNodeSupport] Validation PASSED for 1 nodes in OrtNodeUnit (Relu) :
+2026-11-20 20:14:37.0681153 [V:onnxruntime:, qnn_execution_provider.cc:1810 onnxruntime::LogNodeSupport] Validation FAILED for 1 nodes in OrtNodeUnit (Det) :
+	Operator type: Det Node name: unsupported_det Node index: 1
+	REASON : Operators of type `Det` are not supported by QNN EP.Det node `unsupported_det` will not be assigned to QNN EP.
+[0;93m2026-11-20 20:14:37.0697774 [W:onnxruntime:, qnn_execution_provider.cc:1820 onnxruntime::LogNodeSupport] QNN EP does not support OrtNodeUnit for Det node 'unsupported_det': Operators of type `Det` are not supported by QNN EP.Det node `unsupported_det` will not be assigned to QNN EP.[m
+2026-11-20 20:14:37.0752730 [V:onnxruntime:, qnn_execution_provider.cc:1810 onnxruntime::LogNodeSupport] Validation PASSED for 1 nodes in OrtNodeUnit (Relu) :
+[1;31m2026-11-20 20:14:37.0762490 [E:onnxruntime:, qnn_execution_provider.cc:2513 onnxruntime::QnnEp::GetCapabilityImpl] Unsupported nodes in QNN EP: { name: unsupported_det, type: Det }[m
+[1;31m2026-11-20 20:14:39.0102421 [E:onnxruntime:, inference_session.cc:3309 onnxruntime::InferenceSession::Initialize::<lambda_2>::operator ()] This session contains graph nodes that are assigned to the default CPU EP, but fallback to CPU EP has been explicitly disabled by the user.[m

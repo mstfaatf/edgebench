@@ -43,7 +43,7 @@ The ARM64 build is the one tagged `-arm64`. Confirm it with `sysconfig`:
 >
 > | Kind of script | Behaviour on a non-native interpreter | Examples |
 > |---|---|---|
-> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `tools/ort_probe/reference.py`, `scripts/export_mobilenetv2.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py` |
+> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `tools/ort_probe/reference.py`, `scripts/export_mobilenetv2.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `tools/qnn_rejection_check.py` |
 > | Environment diagnostic | Runs and reports the problem prominently | `scripts/check_env.py` |
 > | Platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/validate_results.py` and its tests |
 >
@@ -211,6 +211,31 @@ few minutes. The summary goes to
 logs and profiles in `npu_check_logs/` next to it. EP context caches are written
 to `cache/qnn/` (not committed; they are specific to the device and the QNN SDK
 version). Results are discussed in [feasibility.md](feasibility.md).
+
+CPU timing sessions use 4 intra-op threads (`--cpu-threads`); always record
+the thread count with CPU numbers. `tools\qnn_rejection_check.py` checks that
+the placement check detects nodes the QNN EP rejects (it runs a tiny model with
+an unsupported `Det` node with and without strict mode).
+
+### 6. Compare with Qualcomm AI Hub's model
+
+```powershell
+.\.venv\Scripts\python.exe scripts\get_aihub_baseline.py
+.\.venv\Scripts\python.exe scripts\compare_aihub.py              # add --qnn-profile for per-op HTP cycles
+```
+
+`get_aihub_baseline.py` downloads Qualcomm AI Hub's pre-quantized (w8a8) and
+float MobileNetV2 ONNX models (AI Hub Models release 0.67.0, from the
+[`qualcomm/MobileNet-v2`](https://huggingface.co/qualcomm/MobileNet-v2) model
+card's release assets; no account needed). They are pinned by URL, S3 object
+version and SHA256, and extracted to `models/aihub/`. Each gets a JSON sidecar
+with its source, license and I/O. `compare_aihub.py` runs the AI Hub model
+through the same strict NPU checks as ours, next to our per-tensor and
+per-channel s8w INT8 models. The AI Hub model takes a uint8 image and
+normalizes internally, so it receives the shared preprocessing's [0, 1] tensor
+quantized to uint8, and its uint8 output is dequantized. Timing runs 3 rounds
+with the model order rotated. The summary goes to
+`benchmarks/results/local/feasibility/aihub_comparison_mobilenetv2.json`.
 
 ## Building the C++ tools
 

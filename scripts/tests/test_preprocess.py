@@ -70,3 +70,22 @@ def test_imagenette_classes():
 
 def test_wnid_of():
     assert preprocess.wnid_of("val/n01440764/ILSVRC2012_val_00046252.JPEG") == "n01440764"
+
+
+def test_unit_range_and_normalize_compose():
+    img = make_image(333, 500, seed=2)
+    unit = preprocess.preprocess_image_unit(img)
+    assert unit.shape == (1, 3, 224, 224) and unit.dtype == np.float32
+    assert unit.min() >= 0.0 and unit.max() <= 1.0
+    # Normalizing the unit-range tensor gives exactly the normalized pipeline output.
+    np.testing.assert_array_equal(preprocess.normalize(unit), preprocess.preprocess_image(img))
+
+
+def test_unit_range_matches_torchvision_to_tensor():
+    transforms = pytest.importorskip("torchvision.transforms")
+    reference = transforms.Compose([transforms.Resize(preprocess.RESIZE_SIZE),
+                                    transforms.CenterCrop(preprocess.CROP_SIZE),
+                                    transforms.ToTensor()])
+    img = make_image(320, 240, seed=3)
+    np.testing.assert_allclose(preprocess.preprocess_image_unit(img),
+                               reference(img).numpy()[np.newaxis], rtol=0, atol=1e-7)
