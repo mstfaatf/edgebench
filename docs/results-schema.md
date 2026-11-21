@@ -392,7 +392,7 @@ cached creation.
 
 | Field | Type | Nullable | Meaning |
 |---|---|---|---|
-| `session_init.cold_ms` | array of numbers | yes | Creations from the ONNX model without a cache, one entry per creation |
+| `session_init.cold_ms` | array of numbers | yes | Creations from the ONNX model without a cache, one entry per creation (edgebench: one per trial, in trial order; `session_create_ms` is then their nearest-rank median) |
 | `session_init.context_build_ms` | number | yes | Creation of the session that wrote the EP context cache |
 | `session_init.cached_ms` | array of numbers | yes | Creations from the EP context model, one entry per creation |
 

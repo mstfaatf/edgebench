@@ -20,6 +20,7 @@ add_custom_target(edgebench_build_info
   VERBATIM)
 
 add_library(edgebench_core STATIC
+  src/benchmark.cpp
   src/cli.cpp
   src/cpu_provider.cpp
   src/doctor.cpp
@@ -29,15 +30,20 @@ add_library(edgebench_core STATIC
   src/input_fill.cpp
   src/model_info.cpp
   src/module_paths.cpp
+  src/onnx_inspect.cpp
   src/ort_bench_session.cpp
   src/ort_loader.cpp
   src/placement.cpp
   src/result.cpp
   src/run_config.cpp
+  src/run_identity.cpp
   src/runtime.cpp
+  src/scheduler.cpp
   src/sha256.cpp
+  src/stats.cpp
   src/system_info.cpp
   src/tensor_info.cpp
+  src/timer_info.cpp
   src/version.cpp)
 add_dependencies(edgebench_core edgebench_build_info)
 target_include_directories(edgebench_core
@@ -73,12 +79,14 @@ if(EDGEBENCH_BUILD_TESTS)
     tests/exit_codes_test.cpp
     tests/module_paths_test.cpp
     tests/run_config_test.cpp
+    tests/timing_test.cpp
     tests/version_test.cpp)
   target_link_libraries(edgebench_tests PRIVATE edgebench_core GTest::gtest_main)
   target_compile_definitions(edgebench_tests PRIVATE
     EDGEBENCH_EXPECTED_VERSION="${PROJECT_VERSION}"
     EDGEBENCH_EXPECTED_ORT_VERSION="${OnnxRuntime_VERSION}"
-    EDGEBENCH_SCHEMA_DIR="${PROJECT_SOURCE_DIR}/schemas")
+    EDGEBENCH_SCHEMA_DIR="${PROJECT_SOURCE_DIR}/schemas"
+    EDGEBENCH_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
   edgebench_set_warnings(edgebench_tests)
   gtest_discover_tests(edgebench_tests DISCOVERY_MODE PRE_TEST
     PROPERTIES LABELS unit)
@@ -90,6 +98,7 @@ if(EDGEBENCH_BUILD_TESTS)
   edgebench_set_warnings(edgebench_preload_helper)
 
   add_executable(edgebench_bundle_tests
+    tests/benchmark_test.cpp
     tests/ort_loader_test.cpp
     tests/edgebench_exe_test.cpp
     tests/provider_test.cpp
@@ -98,7 +107,8 @@ if(EDGEBENCH_BUILD_TESTS)
   target_compile_definitions(edgebench_bundle_tests PRIVATE
     EDGEBENCH_EXE_PATH="$<TARGET_FILE:edgebench>"
     EDGEBENCH_PRELOAD_HELPER_PATH="$<TARGET_FILE:edgebench_preload_helper>"
-    EDGEBENCH_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    EDGEBENCH_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    EDGEBENCH_PYTHON="${EDGEBENCH_PYTHON}")
   add_dependencies(edgebench_bundle_tests edgebench edgebench_preload_helper)
   if(EDGEBENCH_BUILD_TOOLS)
     target_compile_definitions(edgebench_bundle_tests PRIVATE

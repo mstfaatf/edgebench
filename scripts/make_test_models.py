@@ -1,12 +1,14 @@
 """Generate the tiny ONNX models used by the C++ tests.
 
-Writes three models to engine/tests/fixtures/models/ (committed, a few hundred
+Writes four models to engine/tests/fixtures/models/ (committed, a few hundred
 bytes each):
 
 - fixed_float32.onnx: input "x" float32 [1, 4] -> MatMul (4x3) -> Add -> Relu ->
   output "y" float32 [1, 3]. Every dimension is fixed.
 - dynamic_batch.onnx: the same graph with input/output dimension 0 named "batch".
 - int64_input.onnx: input "ids" int64 [1, 4] -> Cast to float32 -> output "y" [1, 4].
+- nan_output.onnx: input "x" float32 [1, 4] -> Sqrt(x - 2) -> output "y" [1, 4]. Every
+  generated input lies in [0, 1), so every output value is NaN.
 
 Weights are fixed constants, so the output is byte-identical on every run.
 Only needs the onnx package (no ONNX Runtime), so it runs on any platform:
@@ -68,10 +70,25 @@ def int64_input() -> onnx.ModelProto:
     return _model(graph)
 
 
+def nan_output() -> onnx.ModelProto:
+    two = helper.make_tensor("two", TensorProto.FLOAT, [], [2.0])
+    nodes = [
+        helper.make_node("Sub", ["x", "two"], ["d"], name="sub"),
+        helper.make_node("Sqrt", ["d"], ["y"], name="sqrt"),
+    ]
+    graph = helper.make_graph(
+        nodes, "nan_output",
+        [helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 4])],
+        [helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 4])],
+        initializer=[two])
+    return _model(graph)
+
+
 MODELS = {
     "fixed_float32.onnx": lambda: dense_relu(1),
     "dynamic_batch.onnx": lambda: dense_relu("batch"),
     "int64_input.onnx": int64_input,
+    "nan_output.onnx": nan_output,
 }
 
 

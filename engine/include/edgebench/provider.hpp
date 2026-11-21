@@ -15,6 +15,7 @@
 
 #include "edgebench/bench_session.hpp"
 #include "edgebench/ep_devices.hpp"
+#include "edgebench/placement.hpp"
 #include "edgebench/result.hpp"
 #include "edgebench/run_config.hpp"
 
@@ -53,11 +54,17 @@ public:
     virtual const ProviderDescription& describe() const = 0;
 
     /// Creates a session for `model`: checks its inputs and outputs (fixed shapes,
-    /// supported dtypes; usage_error otherwise), generates the inputs, prepares
-    /// the run binding and records node placement. ONNX Runtime failures are
-    /// ort_runtime_error with the ORT error code.
+    /// supported dtypes; usage_error otherwise), generates the inputs and prepares
+    /// the run binding. ONNX Runtime failures are ort_runtime_error with the ORT
+    /// error code. Does nothing else, so its creation time is the session's alone.
     virtual Result<std::unique_ptr<BenchSession>> create_session(const std::filesystem::path& model,
                                                                  const RunConfig& config) = 0;
+
+    /// Node placement for `model` with `config`'s session options, from a separate
+    /// session created with verbose logging. Call it when no timed session follows
+    /// (`run` calls it after the last trial), so it cannot warm anything up.
+    virtual Result<NodeAssignment> record_placement(const std::filesystem::path& model,
+                                                    const RunConfig& config) = 0;
 };
 
 /// The provider selected by `config.provider`. `runtime` must outlive it.

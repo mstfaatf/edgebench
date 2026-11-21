@@ -79,21 +79,18 @@ Result<std::unique_ptr<BenchSession>> CpuProvider::create_session(
     }();
     if (!session)
         return session.error();
-
-    // Placement from a separate, verbose session with the same options.
-    Result<NodeAssignment> placement = [&]() -> Result<NodeAssignment> {
-        try {
-            Ort::SessionOptions options = session_options(config);
-            return record_node_placement(runtime_, model, options);
-        } catch (const Ort::Exception& e) {
-            return ort_error("session_options_failed", "setting session options",
-                             e.GetOrtErrorCode(), e.what());
-        }
-    }();
-    if (!placement)
-        return placement.error();
-    session.value()->set_node_assignment(std::move(placement).value());
     return std::unique_ptr<BenchSession>(std::move(session).value());
+}
+
+Result<NodeAssignment> CpuProvider::record_placement(const std::filesystem::path& model,
+                                                     const RunConfig& config) {
+    try {
+        Ort::SessionOptions options = session_options(config);
+        return record_node_placement(runtime_, model, options);
+    } catch (const Ort::Exception& e) {
+        return ort_error("session_options_failed", "setting session options", e.GetOrtErrorCode(),
+                         e.what());
+    }
 }
 
 Result<std::unique_ptr<Provider>> make_provider(Runtime& runtime, const RunConfig& config) {

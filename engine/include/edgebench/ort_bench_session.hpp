@@ -20,14 +20,12 @@ class OrtBenchSession final : public BenchSession {
 public:
     /// Creates the session from `model` with `options` (timed: session_create_ms()),
     /// reads and checks its inputs and outputs, fills the inputs as `config` says
-    /// and prepares `config.binding`. The provider records node placement in a
-    /// separate session and passes it to set_node_assignment().
+    /// and prepares `config.binding`. session_create_ms() covers the Ort::Session
+    /// construction only.
     static Result<std::unique_ptr<OrtBenchSession>> create(Ort::Env& env,
                                                            const std::filesystem::path& model,
                                                            const Ort::SessionOptions& options,
                                                            const RunConfig& config);
-
-    void set_node_assignment(NodeAssignment placement) { placement_ = std::move(placement); }
 
     const std::vector<TensorInfo>& inputs() const override { return inputs_; }
     const std::vector<TensorInfo>& outputs() const override { return outputs_; }
@@ -36,7 +34,6 @@ public:
     std::span<float> input_data(std::size_t index) override;
     Result<void> run_once() override;
     TensorView output(std::size_t index) const override;
-    const NodeAssignment& node_assignment() const override { return placement_; }
     double session_create_ms() const override { return create_ms_; }
 
 private:
@@ -46,7 +43,6 @@ private:
     Ort::Session session_;
     RunBinding binding_mode_;
     double create_ms_;
-    NodeAssignment placement_;
 
     std::vector<TensorInfo> inputs_, outputs_;
     std::vector<std::string> input_names_, output_names_;

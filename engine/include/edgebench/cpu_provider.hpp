@@ -24,6 +24,8 @@ public:
     const ProviderDescription& describe() const override { return description_; }
     Result<std::unique_ptr<BenchSession>> create_session(const std::filesystem::path& model,
                                                          const RunConfig& config) override;
+    Result<NodeAssignment> record_placement(const std::filesystem::path& model,
+                                            const RunConfig& config) override;
 
     /// Session options for `config`: explicit intra-op threads, sequential
     /// execution, graph optimization level, and describe().session_config.

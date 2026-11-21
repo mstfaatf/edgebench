@@ -18,11 +18,10 @@ edgebench <command> --help
 
 ## `edgebench run`
 
-Benchmarks one model with one configuration. Only the CPU provider is available
-in this version, and benchmark execution itself is not part of this build yet:
-without `--dry-run`, `run` validates its options, prints
-`error: benchmark execution is not available in this build` and exits with
-code 1. `--dry-run` creates the real session and checks one inference.
+Benchmarks one model with one configuration and prints a summary. Only the CPU
+provider is available in this version. Results are kept in memory and printed;
+`--output-dir` is validated but no result file is written yet. `--dry-run`
+creates the real session and checks one inference without measuring.
 
 | Option | Default | Constraints / meaning |
 |---|---|---|
@@ -45,6 +44,91 @@ code 1. `--dry-run` creates the real session and checks one inference.
 All validation problems are reported together, one per line, as
 `error: --<option>: <message>`, followed by a hint to run `edgebench run --help`.
 
+### What `run` measures
+
+A run consists of `--trials` trials. Each trial:
+
+1. waits `--cooldown-ms` (before every trial except the first);
+2. creates a **new session** (the creation time of the `Ort::Session` alone,
+   without input generation, binding setup or model hashing, goes into
+   `timing.session_init.cold_ms`, one value per trial);
+3. runs the first warm-up iteration and times it (trial 1's value is
+   `timing.first_inference_ms`, which often includes one-time setup);
+4. runs the remaining warm-up iterations untimed;
+5. runs `--iterations` measured iterations, each timed on its own around the
+   inference call only (`run_once()`: `Session::Run`, or the IoBinding run) with
+   `std::chrono::steady_clock`;
+6. checks that every output value is finite, compares the final outputs with
+   trial 1's, and releases the session.
+
+After the last trial, node placement is recorded in a separate session with
+verbose logging (see [`--dry-run`](#--dry-run)); doing it last means it cannot
+warm up any timed session.
+
+Not timed: model hashing, session creation (measured separately), input
+generation, binding setup, warm-up iterations after the first, output checks,
+and cooldowns. Inputs are generated once per session before the first
+iteration (see [Input data](#input-data)); there is no image decoding, resizing
+or normalization in a run.
+
+Statistics, as defined in the [results schema](results-schema.md#timing): per
+trial and pooled over all trials (`aggregate`): mean, nearest-rank p50/p95/p99,
+sample standard deviation (n − 1), min, max, and throughput
+(`inferences/s` = 1000 / mean, sequential). p95 needs at least 20 samples and
+p99 at least 100; below that they are shown as `-`. The trial-to-trial spread
+is the range and the coefficient of variation (sample stddev / mean) of the
+trial means. `session_create_ms` is the nearest-rank median of the per-trial
+creation times.
+
+Stops with an error:
+
+- exit 3 if an inference fails (the message names the trial and iteration, and
+  contains the ONNX Runtime error code);
+- exit 1 if an output contains NaN or infinity (names the output and trial), or
+  if a trial's outputs have a different top-1 than trial 1's for the same input.
+  Outputs that differ only in value but not in top-1 are reported as a
+  `nondeterministic_outputs` warning instead.
+
+Trial order comes from a scheduler that rotates the starting configuration
+every round; with the single configuration of `run` the order is simply trial
+1, 2, 3, … (see [architecture.md](architecture.md#trial-loop-and-scheduling)).
+
+### Output
+
+Progress (`trial 1 of 3: ...`, `cooldown 2000 ms`, `recording node placement`)
+and warnings go to stderr; the summary goes to stdout. Times are milliseconds.
+For FP32 MobileNetV2 with the defaults on a Surface Laptop 7 (plugged in,
+*Balanced* power mode):
+
+```text
+Model       mobilenetv2_fp32_b1.onnx (fp32, 13992263 bytes, sha256 163fa832dc77)
+Provider    CPUExecutionProvider, 4 intra-op threads, binding iobinding_preallocated, graph optimization enable_all
+Trials      3 x 200 measured iterations (20 warm-up, 2000 ms cooldown), batch size 1
+Input       random
+Session     create ms: 21.7 50.2 48.1  (median 48.1)
+First run   7.005 ms (first warm-up iteration of trial 1)
+
+ms               mean        p50        p95        p99        min        max inferences/s
+trial 1        4.0445     3.9595     4.6094     4.8339     3.5801     5.3162        247.3
+trial 2        3.9776     3.8939     4.5425     4.8205     3.5677     5.5284        251.4
+trial 3        4.0434     3.9115     4.7777     5.1508     3.5848     5.5991        247.3
+aggregate      4.0218     3.9300     4.6420     4.9964     3.5677     5.5991        248.6
+
+Trial means 3.9776 .. 4.0445 ms, CV 0.95%
+Placement   55 nodes: CPUExecutionProvider 55 (all on the requested EP)
+```
+
+- `Session`: creation time of each trial's session, and their median. Session
+  creation is sensitive to the CPU's idle state: after a 2 s cooldown it took
+  about 50 ms on this machine, against about 16 ms when trials ran back to back
+  (and about 22 ms for the first trial, which follows model hashing). The cooldown
+  lets the CPU settle between trials; warm-up absorbs the effect before the
+  measured iterations.
+- `First run`: trial 1's first warm-up iteration.
+- One row per trial, then `aggregate` over all measured iterations pooled.
+- `Trial means`: range of the trial means and their coefficient of variation.
+- `Placement`: node count per execution provider after graph optimization.
+
 ### `--dry-run`
 
 A dry run does everything a benchmark does up to the first measurement:
@@ -58,12 +142,12 @@ A dry run does everything a benchmark does up to the first measurement:
    and its dtype). `batch_size` is dimension 0 of the first input.
 4. Generates the inputs (see [Input data](#input-data)) and prepares the run
    binding.
-5. Records node placement from a second session created with the same options
-   and verbose logging (ONNX Runtime's "Node placements" log). It is a separate
-   session because verbose logging slows session creation down; the timed
-   session never logs verbosely.
-6. Runs one inference and checks that every floating-point output value is
+5. Runs one inference and checks that every floating-point output value is
    finite.
+6. Records node placement from a second session created with the same options
+   and verbose logging (ONNX Runtime's "Node placements" log). It is a separate
+   session because verbose logging slows session creation down; a timed
+   session never logs verbosely.
 
 It prints the result as JSON with the field names of the
 [results schema](results-schema.md): `model` (with `sha256`, `inputs` and

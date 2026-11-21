@@ -1,6 +1,6 @@
 // edgebench: CPU vs NPU inference benchmarking for Windows on Snapdragon.
 //
-//   edgebench run --model <file.onnx> [options]   benchmark a model (--dry-run: resolve only)
+//   edgebench run --model <file.onnx> [options]   benchmark a model (--dry-run: check only)
 //   edgebench doctor [--json]                     check the build, system and ONNX Runtime
 //
 // ONNX Runtime is delay-loaded and initialized manually, and is only loaded by
@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "edgebench/benchmark.hpp"
 #include "edgebench/cli.hpp"
 #include "edgebench/doctor.hpp"
 #include "edgebench/dry_run.hpp"
@@ -52,11 +53,26 @@ int load_failure(const eb::OrtLoadResult& r) {
                                                     ")\n  " + r.message);
 }
 
-int run_command(const eb::RunConfig& config) {
-    if (!config.dry_run) {
-        return fail(eb::ExitCode::internal_error,
-                    "benchmark execution is not available in this build");
+int benchmark_command(eb::Runtime& runtime, const eb::RunConfig& config) {
+    eb::Result<std::unique_ptr<eb::Provider>> provider = eb::make_provider(runtime, config);
+    if (!provider)
+        return fail(provider.error().exit_code, provider.error().message);
+    const eb::Result<eb::BenchmarkResult> result =
+        eb::run_benchmark(runtime, *provider.value(), config, [](std::string_view message) {
+            std::fprintf(stderr, "%.*s\n", static_cast<int>(message.size()), message.data());
+            std::fflush(stderr);
+        });
+    if (!result)
+        return fail(result.error().exit_code, result.error().message);
+    for (const eb::ResultWarning& w : result.value().warnings) {
+        if (w.code != "value_unavailable")
+            std::fprintf(stderr, "warning: [%s] %s\n", w.code.c_str(), w.message.c_str());
     }
+    std::fputs(eb::format_summary(result.value()).c_str(), stdout);
+    return eb::to_int(eb::ExitCode::success);
+}
+
+int run_command(const eb::RunConfig& config) {
     const eb::OrtLoadResult ort = eb::load_onnxruntime();
     if (!ort.ok())
         return load_failure(ort);
@@ -64,6 +80,8 @@ int run_command(const eb::RunConfig& config) {
     eb::Result<std::unique_ptr<eb::Runtime>> runtime = eb::Runtime::create(ort);
     if (!runtime)
         return fail(runtime.error().exit_code, runtime.error().message);
+    if (!config.dry_run)
+        return benchmark_command(*runtime.value(), config);
     const eb::Result<nlohmann::ordered_json> resolved = eb::dry_run(*runtime.value(), config);
     if (!resolved)
         return fail(resolved.error().exit_code, resolved.error().message);

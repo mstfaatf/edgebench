@@ -10,7 +10,6 @@
 #include <span>
 #include <vector>
 
-#include "edgebench/placement.hpp"
 #include "edgebench/result.hpp"
 #include "edgebench/run_config.hpp"
 #include "edgebench/tensor_info.hpp"
@@ -41,9 +40,6 @@ public:
     /// The outputs of the latest run_once() (empty views before the first run).
     /// Valid until the next run_once().
     virtual TensorView output(std::size_t index) const = 0;
-
-    /// Node placement, recorded from a separate session with the same options.
-    virtual const NodeAssignment& node_assignment() const = 0;
 
     /// Wall-clock time to create this session, in milliseconds.
     virtual double session_create_ms() const = 0;

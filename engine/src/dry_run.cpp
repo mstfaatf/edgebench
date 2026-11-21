@@ -69,7 +69,11 @@ Result<json> dry_run(Runtime& runtime, const RunConfig& config) {
         }
     }
 
-    const NodeAssignment& placement = session.node_assignment();
+    // Placement after the session check: nothing is timed in a dry run.
+    Result<NodeAssignment> placed = provider.value()->record_placement(model.value().path, config);
+    if (!placed)
+        return placed.error();
+    const NodeAssignment& placement = placed.value();
     const std::string requested_ep(execution_provider_name(config.provider));
     const bool all_on_requested = placement.all_on(requested_ep);
 

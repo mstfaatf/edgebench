@@ -77,6 +77,10 @@ if(EDGEBENCH_BUILD_TESTS)
   set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(googletest)
   include(GoogleTest)
+  # Python with the packages from requirements.txt: runs the schema tests, and the
+  # engine tests use it to validate result documents with scripts/validate_results.py.
+  set(EDGEBENCH_PYTHON "${CMAKE_CURRENT_SOURCE_DIR}/.venv/Scripts/python.exe"
+    CACHE FILEPATH "Python interpreter with the packages from requirements.txt, for the schema tests")
 endif()
 
 add_subdirectory(engine)
@@ -87,8 +91,6 @@ endif()
 # Results schema and validator tests (Python, platform-independent; ctest label "schema").
 # The same tests run without CMake: python -m pytest scripts/tests/test_validate_results.py
 if(EDGEBENCH_BUILD_TESTS)
-  set(EDGEBENCH_PYTHON "${CMAKE_CURRENT_SOURCE_DIR}/.venv/Scripts/python.exe"
-    CACHE FILEPATH "Python interpreter with the packages from requirements.txt, for the schema tests")
   if(EXISTS "${EDGEBENCH_PYTHON}")
     add_test(NAME results_schema_tests
       COMMAND "${EDGEBENCH_PYTHON}" -m pytest scripts/tests/test_validate_results.py -q -p no:cacheprovider

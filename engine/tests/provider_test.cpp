@@ -170,8 +170,12 @@ TEST(CpuProvider, NodePlacementIsAllCpu) {
     for (const fs::path& model : {kFixtures / "fixed_float32.onnx", kFp32}) {
         if (!fs::is_regular_file(model))
             continue;
-        auto s = make_session(config_for(model, eb::RunBinding::run));
-        const eb::NodeAssignment& p = s->node_assignment();
+        const eb::RunConfig c = config_for(model, eb::RunBinding::run);
+        auto provider = eb::make_provider(runtime(), c);
+        ASSERT_TRUE(provider.ok());
+        const auto placed = provider.value()->record_placement(model, c);
+        ASSERT_TRUE(placed.ok()) << placed.error().message;
+        const eb::NodeAssignment& p = placed.value();
         EXPECT_GT(p.total_nodes, 0) << model;
         EXPECT_TRUE(p.all_on("CPUExecutionProvider")) << model;
         EXPECT_EQ(p.nodes_by_ep.size(), 1u) << model;

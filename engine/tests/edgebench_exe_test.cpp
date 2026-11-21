@@ -341,14 +341,38 @@ TEST(Cli, RunDryRunNeedsOnnxRuntime) {
     EXPECT_TRUE(contains(r.err, "cannot load ONNX Runtime (dll_not_found)")) << describe(r);
 }
 
-TEST(Cli, RunWithoutDryRunIsNotAvailableYet) {
-    IsolatedExe iso;
+TEST(Cli, RunBenchmarksTheFixture) {
+    const fs::path model =
+        kSourceDir / "engine" / "tests" / "fixtures" / "models" / "fixed_float32.onnx";
     const ProcessResult r =
-        run_process(iso.exe, {L"run", L"--model", iso.dummy_model().native()}, iso.dir.path());
+        run_process(kEdgebenchExe,
+                    {L"run", L"--model", model.native(), L"--trials", L"2", L"--warmup", L"3",
+                     L"--iterations", L"10", L"--cooldown-ms", L"0"},
+                    kSourceDir);
+    expect_no_crash(r);
+    ASSERT_EQ(r.exit_code, 0u) << describe(r);
+    // Summary on stdout, progress on stderr.
+    EXPECT_TRUE(contains(r.out, "\naggregate ")) << describe(r);
+    EXPECT_TRUE(contains(r.out, "\ntrial 1 ")) << describe(r);
+    EXPECT_TRUE(contains(r.out, "\ntrial 2 ")) << describe(r);
+    EXPECT_TRUE(contains(r.out, "2 x 10 measured iterations")) << describe(r);
+    EXPECT_TRUE(contains(r.out, "CPUExecutionProvider")) << describe(r);
+    EXPECT_FALSE(contains(r.out, "trial 1 of 2")) << describe(r);
+    EXPECT_TRUE(contains(r.err, "trial 1 of 2")) << describe(r);
+    EXPECT_TRUE(contains(r.err, "trial 2 of 2")) << describe(r);
+    EXPECT_TRUE(contains(r.err, "recording node placement")) << describe(r);
+    EXPECT_FALSE(contains(r.err, "cooldown")) << describe(r);  // --cooldown-ms 0
+}
+
+TEST(Cli, RunStopsOnNonFiniteOutput) {
+    const fs::path model =
+        kSourceDir / "engine" / "tests" / "fixtures" / "models" / "nan_output.onnx";
+    const ProcessResult r = run_process(
+        kEdgebenchExe,
+        {L"run", L"--model", model.native(), L"--trials", L"2", L"--iterations", L"5"}, kSourceDir);
     expect_no_crash(r);
     EXPECT_EQ(r.exit_code, code(ExitCode::internal_error)) << describe(r);
-    EXPECT_TRUE(contains(r.err, "benchmark execution is not available in this build"))
-        << describe(r);
+    EXPECT_TRUE(contains(r.err, "trial 1 of 2: output 'y' has a non-finite value")) << describe(r);
     EXPECT_TRUE(r.out.empty()) << describe(r);
 }
 

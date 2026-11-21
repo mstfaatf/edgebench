@@ -7,6 +7,7 @@ Tiny ONNX models for the C++ tests (a few hundred bytes each):
 | `fixed_float32.onnx` | `x` float32 [1, 4] | `y` float32 [1, 3] | Sessions, run modes, node placement |
 | `dynamic_batch.onnx` | `x` float32 [batch, 4] | `y` float32 [batch, 3] | Rejection of dynamic dimensions |
 | `int64_input.onnx` | `ids` int64 [1, 4] | `y` float32 [1, 4] | Rejection of non-float32 inputs |
+| `nan_output.onnx` | `x` float32 [1, 4] | `y` float32 [1, 4] | Detection of non-finite outputs (`sqrt(x - 2)` is NaN for inputs in [0, 1)) |
 
 `fixed_float32` and `dynamic_batch` compute `relu(x W + b)` with fixed constants;
 `int64_input` casts its input to float32. Regenerate them (deterministically)

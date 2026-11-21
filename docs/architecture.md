@@ -7,6 +7,9 @@ how a new execution provider plugs in.
 ```text
 load_onnxruntime()  ->  Runtime  ->  Provider  ->  BenchSession  ->  run_once() ...
    (ort_loader)        (Ort::Env)   (CpuProvider)  (OrtBenchSession)
+
+run_benchmark()     ->  BenchmarkResult  ->  format_summary()
+   (benchmark)          (schema-shaped)
 ```
 
 ## Loading and the Runtime
@@ -30,7 +33,8 @@ is alive. Node placement uses this to read ONNX Runtime's "Node placements" log.
 |---|---|
 | `name()`, `device_type()` | CLI name (`cpu`) and results-schema device type (`CPU`) |
 | `describe()` | Everything the result file records about the provider: EP name, version and library path, the selected EP device with how it was selected (`by_device_type`, candidate count), `ep_options`, `session_config` |
-| `create_session(model, config)` | Builds the session options for the device and returns a ready `BenchSession`, or an `Error` |
+| `create_session(model, config)` | Builds the session options for the device and returns a ready `BenchSession`, or an `Error`. Does nothing else, so its timing is the session's alone |
+| `record_placement(model, config)` | Creates a separate session with the same options and verbose logging and returns the node counts per EP |
 
 `make_provider(runtime, config)` returns the provider for `config.provider`.
 
@@ -58,7 +62,6 @@ optimization level.
 | `input_data(i)` | The owned float32 input buffer (stable address) |
 | `run_once()` | One inference; the only call inside the timed region |
 | `output(i)` | Read-only view of the latest outputs |
-| `node_assignment()` | Nodes per EP, from a separate verbose placement session |
 | `session_create_ms()` | Creation time of this session |
 
 `OrtBenchSession` (`ort_bench_session.hpp`) implements it for every ONNX Runtime
@@ -74,8 +77,47 @@ provider. Given the provider's `Ort::SessionOptions`, it:
   inputs and preallocated output buffers once, so `run_once()` allocates no
   tensors.
 
-The provider records node placement in a second session with the same options
-and verbose logging, so verbose logging never affects the session that is timed.
+Node placement is not part of a BenchSession: `Provider::record_placement()`
+creates its own session with verbose logging, so verbose logging never affects a
+session that is timed.
+
+## Trial loop and scheduling
+
+`run_benchmark()` (`benchmark.hpp`) runs one configuration:
+
+```text
+hash + inspect model file            (not timed; warms the file cache for every trial)
+for each trial (scheduler order):
+    cooldown (not before the first trial)
+    provider.create_session()        -> cold_ms[trial]
+    warm-up 1 (timed)                -> first_inference_ms (trial 0)
+    warm-up 2..n (untimed)
+    measured iterations              -> one latency per run_once()
+    finite check, compare outputs with trial 0, release the session
+provider.record_placement()          (after every timed session)
+statistics: per trial, pooled aggregate, trial variation
+```
+
+Every trial gets a fresh session, so session creation is measured once per
+trial and no trial inherits another's warm state. Placement runs last for the
+same reason: its verbose session must not warm anything before a timed session
+is created.
+
+`schedule_trials(configurations, trials)` (`scheduler.hpp`) produces the order:
+trials run in rounds, round r runs every configuration once starting at
+configuration r mod N (`0 1 2 | 1 2 0 | 2 0 1`). No configuration always runs
+first or always right after a particular other one. `run` uses it with one
+configuration; a suite of configurations uses the same scheduler. Each trial
+records its `trial_index` and its `sequence` in the overall order.
+
+`BenchmarkResult` mirrors the results schema 1.1.0 (tool, system, runtime,
+model, config, execution, timing, warnings) and keeps every per-iteration
+latency, so exporters only translate it. `stats.hpp` holds the statistics as pure
+functions (nearest-rank percentiles, sample standard deviation, trial variation);
+`timer_info.hpp` reports the clock and its effective resolution
+(`steady_clock::period` checked against `QueryPerformanceFrequency`).
+`onnx_inspect.hpp` reads the model file's opset, IR version, producer and
+quantization nodes, which ONNX Runtime does not expose.
 
 ## Errors
 
@@ -90,10 +132,10 @@ model are exit code 2, ONNX Runtime failures 3, load failures 4.
    candidate), build the `Ort::SessionOptions` (append the EP with its options
    and config entries), and fill `ProviderDescription` with everything that was
    set.
-2. In `create_session`, create an `OrtBenchSession` with those options and
-   record node placement with `record_node_placement()` using the same options.
-   Report nodes that are not on the requested EP; in strict mode a refused
-   session is exit code 5.
+2. In `create_session`, create an `OrtBenchSession` with those options. In
+   `record_placement`, call `record_node_placement()` with the same options.
+   Nodes that are not on the requested EP are reported by the caller; in strict
+   mode a refused session is exit code 5.
 3. Add the value to `ProviderKind`, `parse_provider()` and `make_provider()`.
 
 The timing, statistics and export code only use `Provider::describe()` and the
