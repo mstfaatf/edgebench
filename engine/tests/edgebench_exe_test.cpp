@@ -14,6 +14,7 @@
 #include "edgebench/cli.hpp"
 #include "edgebench/exit_codes.hpp"
 #include "edgebench/ort_loader.hpp"
+#include "edgebench/sha256.hpp"
 #include "edgebench/version.hpp"
 #include "process_util.hpp"
 
@@ -277,7 +278,58 @@ TEST(Cli, RunDryRunPrintsResolvedConfig) {
         c.at("input"),
         (json{{"kind", "random"}, {"constant_value", nullptr}, {"seed", 0}, {"dataset", nullptr}}));
     EXPECT_EQ(c.at("graph_optimization_level"), "enable_all");
+    EXPECT_EQ(c.at("batch_size"), 1);
+    EXPECT_EQ(c.at("session_config"), (json{{"session.intra_op.allow_spinning", "1"}}));
     EXPECT_EQ(j.at("runtime").at("onnxruntime").at("load_check"), "full_path_verified");
+
+    // Model facts: the digest equals an independent SHA-256 of the file.
+    EXPECT_EQ(j.at("model").at("sha256").get<std::string>(), eb::sha256_file(kFp32Model).value());
+    EXPECT_EQ(
+        j.at("model").at("inputs"),
+        (json::array({{{"name", "input"}, {"dtype", "float32"}, {"shape", {1, 3, 224, 224}}}})));
+    EXPECT_EQ(j.at("model").at("outputs"),
+              (json::array({{{"name", "logits"}, {"dtype", "float32"}, {"shape", {1, 1000}}}})));
+
+    // Provider and placement: every node on the CPU EP.
+    EXPECT_EQ(j.at("runtime").at("execution_provider").at("name"), "CPUExecutionProvider");
+    EXPECT_EQ(j.at("runtime").at("ep_device").at("selection").at("candidate_count"), 1);
+    const json& ex = j.at("execution");
+    EXPECT_EQ(ex.at("full_device_execution_verified"), true);
+    EXPECT_EQ(ex.at("verification_method"), "node_assignment");
+    const json& na = ex.at("node_assignment");
+    ASSERT_EQ(na.at("nodes_by_ep").size(), 1u) << na.dump();
+    EXPECT_GT(na.at("total_nodes").get<int>(), 0);
+    EXPECT_EQ(na.at("nodes_by_ep").at("CPUExecutionProvider"), na.at("total_nodes"));
+    EXPECT_EQ(j.at("dry_run_check").at("outputs_finite"), true);
+    EXPECT_TRUE(j.at("warnings").empty());
+}
+
+TEST(Cli, RunDryRunRejectsDynamicAndInt64Models) {
+    const fs::path fixtures = kSourceDir / "engine" / "tests" / "fixtures" / "models";
+    const std::pair<const wchar_t*, const char*> cases[] = {
+        {L"dynamic_batch.onnx", "input 'x' has a dynamic dimension 0 ('batch')"},
+        {L"int64_input.onnx", "input 'ids' has dtype int64"},
+    };
+    for (const auto& [file, message] : cases) {
+        const ProcessResult r =
+            run_process(kEdgebenchExe,
+                        {L"run", L"--model", (fixtures / file).native(), L"--dry-run"}, kSourceDir);
+        expect_no_crash(r);
+        EXPECT_EQ(r.exit_code, code(ExitCode::usage_error)) << describe(r);
+        EXPECT_TRUE(contains(r.err, message)) << describe(r);
+        EXPECT_TRUE(r.out.empty()) << describe(r);
+    }
+}
+
+TEST(Cli, RunDryRunInvalidModelExits3WithOrtCode) {
+    TempDir dir;
+    const fs::path bad = dir.path() / "garbage.onnx";
+    std::ofstream(bad) << "this is not an ONNX model";
+    const ProcessResult r =
+        run_process(kEdgebenchExe, {L"run", L"--model", bad.native(), L"--dry-run"}, dir.path());
+    expect_no_crash(r);
+    EXPECT_EQ(r.exit_code, code(ExitCode::ort_runtime_error)) << describe(r);
+    EXPECT_TRUE(contains(r.err, "ONNX Runtime error ORT_")) << describe(r);
 }
 
 TEST(Cli, RunDryRunNeedsOnnxRuntime) {

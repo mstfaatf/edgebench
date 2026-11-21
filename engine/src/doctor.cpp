@@ -6,6 +6,8 @@
 #include <exception>
 #include <sstream>
 
+#include "edgebench/runtime.hpp"
+
 namespace edgebench {
 
 namespace {
@@ -67,7 +69,10 @@ DoctorReport run_doctor() {
             {std::string(to_string(r.onnxruntime.error_kind)), r.onnxruntime.message});
     } else {
         try {
-            r.ep_devices = list_ep_devices();
+            Result<std::unique_ptr<Runtime>> runtime = Runtime::create(r.onnxruntime);
+            if (!runtime)
+                throw std::runtime_error(runtime.error().message);
+            r.ep_devices = runtime.value()->ep_devices();
         } catch (const Ort::Exception& e) {
             r.problems.push_back({"ep_enumeration_failed", e.what()});
         } catch (const std::exception& e) {

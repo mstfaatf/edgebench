@@ -17,9 +17,11 @@
 
 #include "edgebench/cli.hpp"
 #include "edgebench/doctor.hpp"
+#include "edgebench/dry_run.hpp"
 #include "edgebench/exit_codes.hpp"
 #include "edgebench/ort_loader.hpp"
 #include "edgebench/run_config.hpp"
+#include "edgebench/runtime.hpp"
 #include "edgebench/version.hpp"
 
 #define WIN32_LEAN_AND_MEAN
@@ -58,17 +60,16 @@ int run_command(const eb::RunConfig& config) {
     const eb::OrtLoadResult ort = eb::load_onnxruntime();
     if (!ort.ok())
         return load_failure(ort);
-    nlohmann::ordered_json resolved = {{"command", "run"},
-                                       {"dry_run", true},
-                                       {"edgebench_version", eb::version()},
-                                       {"results_schema_version", eb::results_schema_version()}};
-    resolved.update(eb::resolved_config_json(config));
-    resolved["runtime"] = {{"onnxruntime",
-                            {{"version", ort.ort_version},
-                             {"library_path", eb::path_to_utf8(ort.dll_path)},
-                             {"api_version", ort.api_version},
-                             {"load_check", ort.load_check()}}}};
-    std::printf("%s\n", resolved.dump(2).c_str());
+    // Declared first, destroyed last: every session is released before the Runtime.
+    eb::Result<std::unique_ptr<eb::Runtime>> runtime = eb::Runtime::create(ort);
+    if (!runtime)
+        return fail(runtime.error().exit_code, runtime.error().message);
+    const eb::Result<nlohmann::ordered_json> resolved = eb::dry_run(*runtime.value(), config);
+    if (!resolved)
+        return fail(resolved.error().exit_code, resolved.error().message);
+    for (const auto& w : resolved.value().at("warnings"))
+        std::fprintf(stderr, "warning: %s\n", w.at("message").get<std::string>().c_str());
+    std::printf("%s\n", resolved.value().dump(2).c_str());
     return eb::to_int(eb::ExitCode::success);
 }
 

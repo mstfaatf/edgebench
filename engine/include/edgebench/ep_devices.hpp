@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include <onnxruntime_cxx_api.h>
 #include <nlohmann/json.hpp>
 
 namespace edgebench {
@@ -22,9 +23,10 @@ struct EpDeviceInfo {
     std::map<std::string, std::string> ep_metadata;  // EP metadata for the device
 };
 
-/// Devices ONNX Runtime reports in a fresh environment with no plugin EP library
-/// registered (so only built-in EPs, e.g. the CPU EP). Throws Ort::Exception on ORT errors.
-std::vector<EpDeviceInfo> list_ep_devices();
+/// Devices ONNX Runtime reports in `env` for the EPs registered so far (without
+/// plugin EP libraries: built-in EPs only, e.g. the CPU EP). Throws Ort::Exception
+/// on ORT errors. Usually called through Runtime::ep_devices().
+std::vector<EpDeviceInfo> list_ep_devices(Ort::Env& env);
 
 nlohmann::ordered_json to_json(const EpDeviceInfo& device);
 

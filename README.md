@@ -66,6 +66,7 @@ ctest --preset arm64-release
 
 - [docs/setup.md](docs/setup.md): environment, data and model preparation, C++ build
 - [docs/cli.md](docs/cli.md): `edgebench` commands, options and exit codes
+- [docs/architecture.md](docs/architecture.md): engine structure (Runtime, Provider, BenchSession)
 - [docs/feasibility.md](docs/feasibility.md): feasibility note (test environment,
   NPU verification, accuracy, initialization, latency sanity checks, C++ path,
   verdicts, engine requirements)

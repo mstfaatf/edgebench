@@ -45,7 +45,7 @@ The ARM64 build is the one tagged `-arm64`. Confirm it with `sysconfig`:
 > |---|---|---|
 > | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `scripts/export_mobilenetv2.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `scripts/npu_overhead.py`, `tools/qnn_rejection_check.py`, `tools/ort_probe/reference.py`, `tools/ort_probe/make_reference.py` |
 > | Environment diagnostic | Runs and reports the problem prominently | `scripts/check_env.py` |
-> | Downloads and platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/get_data.py`, `scripts/get_aihub_baseline.py`, `scripts/validate_results.py`, and the tests in `scripts/tests/` |
+> | Downloads and platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/get_data.py`, `scripts/get_aihub_baseline.py`, `scripts/validate_results.py`, `scripts/make_test_models.py`, and the tests in `scripts/tests/` |
 > | Shared modules in `scripts/common/` | Not checked themselves. `npu_harness.py` and `ort_qnn.py` load ONNX Runtime and are imported only by guarded scripts, after the check; the others (`preprocess.py`, `accuracy.py`, `qnn_log.py`, `onnx_prune.py`, `qdq_inspect.py`, `results_io.py`, `cli.py`) do not | – |
 >
 > The C++ build has the equivalent check at configure time

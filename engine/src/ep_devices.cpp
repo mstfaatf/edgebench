@@ -25,8 +25,7 @@ std::map<std::string, std::string> to_map(Ort::ConstKeyValuePairs kv) {
 
 }  // namespace
 
-std::vector<EpDeviceInfo> list_ep_devices() {
-    Ort::Env env(ORT_LOGGING_LEVEL_ERROR, "edgebench");
+std::vector<EpDeviceInfo> list_ep_devices(Ort::Env& env) {
     std::vector<EpDeviceInfo> out;
     for (const Ort::ConstEpDevice& d : env.GetEpDevices()) {
         const Ort::ConstHardwareDevice hw = d.Device();

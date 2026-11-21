@@ -12,7 +12,7 @@
 
 namespace edgebench {
 
-enum class Provider { cpu };
+enum class ProviderKind { cpu };
 enum class RunBinding { run, iobinding_preallocated };
 enum class InputKind { random, constant };
 enum class GraphOptLevel { disable_all, enable_basic, enable_extended, enable_all };
@@ -22,7 +22,7 @@ enum class GraphOptLevel { disable_all, enable_basic, enable_extended, enable_al
 /// effective_seed() / effective_constant_value() apply the defaults.
 struct RunConfig {
     std::filesystem::path model;
-    Provider provider = Provider::cpu;
+    ProviderKind provider = ProviderKind::cpu;
     int threads = 4;
     RunBinding binding = RunBinding::iobinding_preallocated;
     int warmup = 20;
@@ -52,7 +52,7 @@ struct ConfigError {
 std::vector<ConfigError> validate(const RunConfig& config);
 
 // CLI spellings (`--provider cpu`, `--binding iobinding`, ...) <-> values.
-std::optional<Provider> parse_provider(std::string_view text);
+std::optional<ProviderKind> parse_provider(std::string_view text);
 std::optional<RunBinding> parse_binding(std::string_view text);
 std::optional<InputKind> parse_input_kind(std::string_view text);
 std::optional<GraphOptLevel> parse_graph_opt(std::string_view text);
@@ -64,8 +64,8 @@ std::string_view supported_providers();
 std::string_view schema_name(RunBinding binding);
 std::string_view schema_name(InputKind kind);
 std::string_view schema_name(GraphOptLevel level);
-std::string_view execution_provider_name(Provider provider);  // e.g. "CPUExecutionProvider"
-std::string_view device_type_name(Provider provider);         // e.g. "CPU"
+std::string_view execution_provider_name(ProviderKind provider);  // e.g. "CPUExecutionProvider"
+std::string_view device_type_name(ProviderKind provider);         // e.g. "CPU"
 
 /// The resolved configuration, with every default filled in. `config` holds the
 /// fields of the results schema's config block under the schema's names

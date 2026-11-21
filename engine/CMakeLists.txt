@@ -21,13 +21,23 @@ add_custom_target(edgebench_build_info
 
 add_library(edgebench_core STATIC
   src/cli.cpp
+  src/cpu_provider.cpp
   src/doctor.cpp
+  src/dry_run.cpp
   src/ep_devices.cpp
   src/exit_codes.cpp
+  src/input_fill.cpp
+  src/model_info.cpp
   src/module_paths.cpp
+  src/ort_bench_session.cpp
   src/ort_loader.cpp
+  src/placement.cpp
+  src/result.cpp
   src/run_config.cpp
+  src/runtime.cpp
+  src/sha256.cpp
   src/system_info.cpp
+  src/tensor_info.cpp
   src/version.cpp)
 add_dependencies(edgebench_core edgebench_build_info)
 target_include_directories(edgebench_core
@@ -39,7 +49,7 @@ target_compile_definitions(edgebench_core PRIVATE EDGEBENCH_BUILD_TYPE="$<CONFIG
 # nlohmann/json appears in public headers; CLI11 is used only inside cli.cpp.
 target_link_libraries(edgebench_core
   PUBLIC OnnxRuntime::OnnxRuntime nlohmann_json::nlohmann_json
-  PRIVATE CLI11::CLI11)
+  PRIVATE CLI11::CLI11 bcrypt)
 edgebench_set_warnings(edgebench_core)
 
 # --- CLI --------------------------------------------------------------------
@@ -59,6 +69,7 @@ onnxruntime_copy_runtime_files(edgebench QNN)
 if(EDGEBENCH_BUILD_TESTS)
   add_executable(edgebench_tests
     tests/cli_test.cpp
+    tests/core_types_test.cpp
     tests/exit_codes_test.cpp
     tests/module_paths_test.cpp
     tests/run_config_test.cpp
@@ -81,6 +92,7 @@ if(EDGEBENCH_BUILD_TESTS)
   add_executable(edgebench_bundle_tests
     tests/ort_loader_test.cpp
     tests/edgebench_exe_test.cpp
+    tests/provider_test.cpp
     tests/process_util.cpp)
   target_link_libraries(edgebench_bundle_tests PRIVATE edgebench_core GTest::gtest_main)
   target_compile_definitions(edgebench_bundle_tests PRIVATE

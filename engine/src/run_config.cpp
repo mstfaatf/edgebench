@@ -63,9 +63,9 @@ std::vector<ConfigError> validate(const RunConfig& c) {
     return errors;
 }
 
-std::optional<Provider> parse_provider(std::string_view text) {
+std::optional<ProviderKind> parse_provider(std::string_view text) {
     if (text == "cpu")
-        return Provider::cpu;
+        return ProviderKind::cpu;
     return std::nullopt;
 }
 
@@ -123,11 +123,11 @@ std::string_view schema_name(GraphOptLevel level) {
     return "enable_all";
 }
 
-std::string_view execution_provider_name(Provider) {
+std::string_view execution_provider_name(ProviderKind) {
     return "CPUExecutionProvider";
 }
 
-std::string_view device_type_name(Provider) {
+std::string_view device_type_name(ProviderKind) {
     return "CPU";
 }
 

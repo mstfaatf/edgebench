@@ -33,7 +33,7 @@ eb::RunConfig valid_config(const TempModel& model) {
 TEST(RunConfig, Defaults) {
     const eb::RunConfig c;
     EXPECT_TRUE(c.model.empty());
-    EXPECT_EQ(c.provider, eb::Provider::cpu);
+    EXPECT_EQ(c.provider, eb::ProviderKind::cpu);
     EXPECT_EQ(c.threads, 4);
     EXPECT_EQ(c.binding, eb::RunBinding::iobinding_preallocated);
     EXPECT_EQ(c.warmup, 20);
@@ -190,12 +190,12 @@ TEST(Validate, ReportsEveryProblem) {
 }
 
 TEST(Provider, OnlyCpuIsAccepted) {
-    EXPECT_EQ(eb::parse_provider("cpu"), eb::Provider::cpu);
+    EXPECT_EQ(eb::parse_provider("cpu"), eb::ProviderKind::cpu);
     for (const char* bad : {"npu", "qnn", "gpu", "dml", "CPU", "", "cpu "})
         EXPECT_FALSE(eb::parse_provider(bad).has_value()) << "'" << bad << "'";
     EXPECT_EQ(eb::supported_providers(), "cpu");
-    EXPECT_EQ(eb::execution_provider_name(eb::Provider::cpu), "CPUExecutionProvider");
-    EXPECT_EQ(eb::device_type_name(eb::Provider::cpu), "CPU");
+    EXPECT_EQ(eb::execution_provider_name(eb::ProviderKind::cpu), "CPUExecutionProvider");
+    EXPECT_EQ(eb::device_type_name(eb::ProviderKind::cpu), "CPU");
 }
 
 TEST(Spellings, CliToSchemaNames) {
