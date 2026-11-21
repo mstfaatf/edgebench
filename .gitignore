@@ -19,6 +19,10 @@ tmp/
 data/
 third_party/
 
+# Locally produced models and their sidecars (only the README is committed)
+models/*
+!models/README.md
+
 # Model binaries (small test fixtures are allowed)
 *.onnx
 *.pt

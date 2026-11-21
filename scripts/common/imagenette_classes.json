@@ -1,0 +1,15 @@
+{
+  "description": "Imagenette class WordNet IDs mapped to their ImageNet-1k class indices (torchvision ordering). Ordered by ImageNet index.",
+  "classes": [
+    {"wnid": "n01440764", "imagenet_index": 0, "name": "tench"},
+    {"wnid": "n02102040", "imagenet_index": 217, "name": "English springer"},
+    {"wnid": "n02979186", "imagenet_index": 482, "name": "cassette player"},
+    {"wnid": "n03000684", "imagenet_index": 491, "name": "chain saw"},
+    {"wnid": "n03028079", "imagenet_index": 497, "name": "church"},
+    {"wnid": "n03394916", "imagenet_index": 566, "name": "French horn"},
+    {"wnid": "n03417042", "imagenet_index": 569, "name": "garbage truck"},
+    {"wnid": "n03425413", "imagenet_index": 571, "name": "gas pump"},
+    {"wnid": "n03445777", "imagenet_index": 574, "name": "golf ball"},
+    {"wnid": "n03888257", "imagenet_index": 701, "name": "parachute"}
+  ]
+}

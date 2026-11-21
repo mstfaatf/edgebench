@@ -116,6 +116,37 @@ MobileNetV2 (`tmp/mobilenetv2.onnx`, FP32, opset 17), every input value 0.5:
   places), on both CPU and NPU.
 - CPU vs NPU: top-1 matches. Max abs diff over all 1000 logits is 0.0596.
 
+## INT8 QDQ quantization (CPU check)
+
+MobileNetV2 (`IMAGENET1K_V2`, opset 17, fixed [1, 3, 224, 224]) quantized with
+ONNX Runtime 1.32.0's QNN helpers (`get_qnn_qdq_config` + `quantize`), MinMax
+calibration on 200 Imagenette train images. See
+[setup.md](setup.md#preparing-data-and-models) for the pipeline. Accuracy on the
+500-image Imagenette eval split, CPU execution provider:
+
+| Model | Size | Top-1 (1000 classes) | Top-1 (10 Imagenette classes) | Agreement with FP32 (1000 / 10) |
+|---|---|---|---|---|
+| FP32 | 13.99 MB | 71.0% | 98.4% | – |
+| INT8 QDQ, per-tensor (uint8 / uint8) | 3.73 MB | 70.4% | 98.6% | 85.6% / 98.2% |
+| INT8 QDQ, per-channel (uint8 / uint8) | 3.99 MB | 69.4% | 98.4% | 92.6% / 99.2% |
+
+- Top-1 over 1000 classes is modest because several Imagenette classes have
+  close ImageNet neighbours. The most common FP32 errors are cassette player →
+  tape player (14 images) and church → monastery (12). Most eval images
+  come from the ImageNet train set, so these numbers are not ImageNet accuracy.
+- Per-channel weights track FP32 more closely (92.6% vs 85.6% agreement over
+  1000 classes) even though their top-1 is slightly lower on this small set.
+- `qnn_preprocess_model` makes no changes to this model. The quantizer folds the
+  ReLU6 `Clip` nodes into the activation quantization ranges but leaves their
+  70 min/max constants with QuantizeLinear/DequantizeLinear chains whose
+  output nothing consumes. ONNX Runtime does not remove them: with all graph
+  optimizations enabled it constant-folds the QuantizeLinear nodes, but the 70
+  dead DequantizeLinear nodes remain. The sidecar reports them as
+  `unused_output_nodes`.
+- With `per_channel=True` the uint8 weights get zero point 128 on every channel
+  (symmetric), although the helper's `WeightSymmetric` setting is `false`.
+- Running these models on the NPU is not yet tested.
+
 ## Implications
 
 **Works natively on ARM64:**
