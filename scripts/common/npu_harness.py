@@ -27,7 +27,6 @@ import json
 import math
 import platform
 import re
-import shutil
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -185,9 +184,7 @@ class NpuHarness:
         self.log_dir, self.cache_dir = log_dir, cache_dir
         self.warmup, self.runs, self.init_reps = warmup, runs, init_reps
         self.cooldown, self.cpu_threads, self.split = cooldown, cpu_threads, split
-        if log_dir.exists():
-            shutil.rmtree(log_dir)
-        log_dir.mkdir(parents=True)
+        log_dir.mkdir(parents=True, exist_ok=False)  # one directory per run, never reused
         cache_dir.mkdir(parents=True, exist_ok=True)
         self._inputs: dict[str, list[np.ndarray]] = {}
         self.timing_order: list[str] = []

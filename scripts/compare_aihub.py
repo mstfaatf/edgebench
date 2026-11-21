@@ -20,8 +20,11 @@ Configurations:
 - CPU: our FP32, per-tensor INT8, per-channel s8w INT8; AI Hub float, AI Hub w8a8
 - NPU (strict): our per-tensor INT8, our per-channel s8w INT8, AI Hub w8a8
 
-The summary (including a graph comparison from ``common/qdq_inspect.py``) is
-written to ``benchmarks/results/local/feasibility/aihub_comparison_mobilenetv2.json``.
+Each run writes a summary (including a graph comparison from
+``common/qdq_inspect.py``) to
+``benchmarks/results/local/feasibility/aihub_comparison_mobilenetv2_<UTC timestamp>.json``
+(copied to ``aihub_comparison_mobilenetv2_latest.json``), with logs and profiles
+in the matching ``aihub_comparison_mobilenetv2_<timestamp>/`` directory.
 
 ``--qnn-profile`` additionally runs each NPU model with the QNN EP's detailed
 profiler and records per-op HTP cycles (where the time goes on the NPU).
@@ -42,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common.cli import add_timing_args, harness_kwargs  # noqa: E402
 from common.platform_guard import NonNativeInterpreterError, require_native_arm64  # noqa: E402
+from common.results_io import FEASIBILITY_DIR, new_run  # noqa: E402
 
 OURS = {
     "fp32": "mobilenetv2_fp32_b1.onnx",
@@ -130,9 +134,9 @@ def main() -> int:
         RunConfig("npu_aihub_w8a8", "npu", aihub_w8a8, adapter=u8, cpu_reference="cpu_aihub_w8a8"),
     ]
 
-    out_path = Path(args.output or REPO_ROOT / "benchmarks" / "results" / "local" / "feasibility"
-                    / "aihub_comparison_mobilenetv2.json").resolve()
-    h = NpuHarness(out_path.parent / "aihub_comparison_logs", REPO_ROOT / "cache" / "qnn",
+    out = new_run(Path(args.output_dir) if args.output_dir else FEASIBILITY_DIR,
+                  "aihub_comparison_mobilenetv2")
+    h = NpuHarness(out.run_dir, REPO_ROOT / "cache" / "qnn",
                    **harness_kwargs(args))
     try:
         h.setup()
@@ -176,8 +180,7 @@ def main() -> int:
                if sidecar.is_file() else None,
                "graph_comparison": graphs, "heldout_imagenet_val_cpu": heldout,
                "results": results}
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    out.write(summary)
     h.print_tables(results)
 
     print("\n== Agreement with own float model (1000 / 10) ==")
@@ -196,7 +199,7 @@ def main() -> int:
               f"weights {g['weights']['type']} per-channel {g['weights']['per_channel']}, "
               f"activations {g['activation_quantize_types']}, I/O {g['graph_input_type']}"
               f"/{g['graph_output_type']}")
-    print(f"wrote {out_path}")
+    print(f"wrote {out.summary} (and {out.latest.name})")
 
     npu_ok = all(r.get("placement", {}).get("all_nodes_on_qnn")
                  for k, r in results.items() if k.startswith("npu_"))

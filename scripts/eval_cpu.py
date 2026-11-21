@@ -15,17 +15,18 @@ Note on the numbers: most Imagenette val images are taken from the ImageNet-1k
 is optimistic. Comparisons between FP32 and INT8 are unaffected. The summary
 records how many eval images come from ImageNet val.
 
-A JSON summary is written to ``benchmarks/results/local/feasibility/``.
+Each run writes a new summary,
+``benchmarks/results/local/feasibility/cpu_accuracy_mobilenetv2_<UTC timestamp>.json``,
+and copies it to ``cpu_accuracy_mobilenetv2_latest.json``.
 
 Usage:
-    python scripts/eval_cpu.py [--output PATH]
+    python scripts/eval_cpu.py [--output-dir DIR]
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import platform
 import sys
 from datetime import datetime, timezone
@@ -35,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common import accuracy as acc  # noqa: E402
 from common.platform_guard import NonNativeInterpreterError, require_native_arm64  # noqa: E402
+from common.results_io import FEASIBILITY_DIR, new_run  # noqa: E402
 from common.preprocess import (  # noqa: E402
     IMAGENETTE_ROOT,
     PREPROCESS_DESCRIPTION,
@@ -53,9 +55,6 @@ MODELS = {
     "int8_qdq_per_channel_s8w": "mobilenetv2_int8qdq_pc_s8w_b1.onnx",
 }
 EVAL_SPLIT = "eval"
-DEFAULT_OUTPUT = (
-    REPO_ROOT / "benchmarks" / "results" / "local" / "feasibility" / "cpu_accuracy_mobilenetv2.json"
-)
 
 
 def sha256_of(path: Path) -> str:
@@ -64,7 +63,7 @@ def sha256_of(path: Path) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--output-dir", type=Path, default=FEASIBILITY_DIR)
     args = parser.parse_args()
 
     try:
@@ -124,9 +123,8 @@ def main() -> int:
         "results": results,
     }
 
-    out = args.output.resolve()
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    out = new_run(args.output_dir, "cpu_accuracy_mobilenetv2")
+    out.write(summary)
 
     print(f"\n{'model':<26} {'top1/1000':>10} {'top1/10':>9} {'agree/1000':>11} {'agree/10':>9}")
     for key, r in results.items():
@@ -136,7 +134,7 @@ def main() -> int:
         print(f"{key:<26} {r['top1_1000']:>10.4f} {r['top1_imagenette10']:>9.4f} {a1000:>11} {a10:>9}")
     print(f"\n{from_imagenet_val} of {len(images)} eval images are from ImageNet val "
           "(the rest are ImageNet train images)")
-    print(f"wrote {out}")
+    print(f"wrote {out.summary} (and {out.latest.name})")
     return 0
 
 

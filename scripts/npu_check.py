@@ -30,8 +30,9 @@ NPU with the three INT8 QDQ models; QNN NPU with the FP32 model and
 model is also placed in strict mode. All NPU sessions use
 ``htp_performance_mode=burst``.
 
-Results go to ``benchmarks/results/local/feasibility/npu_check_mobilenetv2.json``,
-with session logs and profiles next to it in ``npu_check_logs/``. EP context
+Each run writes ``benchmarks/results/local/feasibility/npu_check_mobilenetv2_<UTC
+timestamp>.json`` (copied to ``npu_check_mobilenetv2_latest.json``), with session
+logs and profiles in the matching ``npu_check_mobilenetv2_<timestamp>/`` directory. EP context
 caches are written to ``cache/qnn/``. Run it plugged in; the power source and
 Windows power mode are recorded.
 
@@ -40,13 +41,12 @@ The machinery is shared with ``scripts/compare_aihub.py`` and lives in
 
 Usage:
     python scripts/npu_check.py [--warmup N] [--runs N] [--init-reps N] [--cooldown S]
-                                [--rounds N] [--cpu-threads N] [--output PATH]
+                                [--rounds N] [--cpu-threads N] [--output-dir DIR]
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -54,6 +54,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common.cli import add_timing_args, harness_kwargs  # noqa: E402
 from common.platform_guard import NonNativeInterpreterError, require_native_arm64  # noqa: E402
+from common.results_io import FEASIBILITY_DIR, new_run  # noqa: E402
 
 FP32 = "mobilenetv2_fp32_b1.onnx"
 INT8 = {
@@ -103,9 +104,9 @@ def main() -> int:
                   cpu_reference="cpu_fp32"),
     ]
 
-    out_path = Path(args.output or REPO_ROOT / "benchmarks" / "results" / "local" / "feasibility"
-                    / "npu_check_mobilenetv2.json").resolve()
-    h = NpuHarness(out_path.parent / "npu_check_logs", REPO_ROOT / "cache" / "qnn",
+    out = new_run(Path(args.output_dir) if args.output_dir else FEASIBILITY_DIR,
+                  "npu_check_mobilenetv2")
+    h = NpuHarness(out.run_dir, REPO_ROOT / "cache" / "qnn",
                    **harness_kwargs(args))
     try:
         h.setup()
@@ -139,10 +140,9 @@ def main() -> int:
     print("\nloaded ONNX Runtime / QNN modules (with an NPU session alive):")
     for m in summary["dll_paths"]["loaded_modules_with_npu_session"]:
         print(f"  {m}")
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    out.write(summary)
     h.print_tables(results)
-    print(f"wrote {out_path}")
+    print(f"wrote {out.summary} (and {out.latest.name})")
 
     npu_ok = all(r.get("placement", {}).get("all_nodes_on_qnn")
                  for k, r in results.items() if k.startswith("npu_"))

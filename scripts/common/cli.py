@@ -18,7 +18,9 @@ def add_timing_args(parser: argparse.ArgumentParser, *, rounds: int = 1) -> None
                         help="intra-op threads for CPU timing sessions (0 = ORT default, one "
                              "per core); the default thread pool is very sensitive to "
                              "background load")
-    parser.add_argument("--output", type=str, default=None, help="summary JSON path")
+    parser.add_argument("--output-dir", type=str, default=None,
+                        help="directory for the timestamped summary and run files "
+                             "(default: benchmarks/results/local/feasibility)")
 
 
 def harness_kwargs(args: argparse.Namespace) -> dict:

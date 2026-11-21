@@ -193,8 +193,11 @@ graph, the ONNX Runtime version, and the model's SHA256.
 Runs the FP32 model and the three INT8 models on the `eval` split with the CPU
 execution provider and prints top-1 accuracy (over all 1000 classes, and
 restricted to the 10 Imagenette classes) and each INT8 model's top-1 agreement
-with FP32. The summary is saved to
-`benchmarks/results/local/feasibility/cpu_accuracy_mobilenetv2.json`.
+with FP32. Each run saves a new summary,
+`benchmarks/results/local/feasibility/cpu_accuracy_mobilenetv2_<timestamp>.json`
+(UTC, `YYYYmmdd-HHMMSS`), and copies it to `cpu_accuracy_mobilenetv2_latest.json`.
+Earlier summaries are never overwritten; the measurement scripts below follow the
+same scheme.
 
 ### 5. Check the models on the NPU
 
@@ -208,8 +211,9 @@ that every node is placed on and executed by the QNN EP, compares accuracy
 with the CPU, and measures session creation (with and without an EP context
 cache) and single-image latency as a sanity check. Run it plugged in. Takes a
 few minutes. The summary goes to
-`benchmarks/results/local/feasibility/npu_check_mobilenetv2.json`, with session
-logs and profiles in `npu_check_logs/` next to it. EP context caches are written
+`benchmarks/results/local/feasibility/npu_check_mobilenetv2_<timestamp>.json`
+(and `npu_check_mobilenetv2_latest.json`), with session logs and profiles in the
+matching `npu_check_mobilenetv2_<timestamp>/` directory. EP context caches are written
 to `cache/qnn/` (not committed; they are specific to the device and the QNN SDK
 version). Results are discussed in [feasibility.md](feasibility.md).
 
@@ -236,7 +240,9 @@ per-channel s8w INT8 models. The AI Hub model takes a uint8 image and
 normalizes internally, so it receives the shared preprocessing's [0, 1] tensor
 quantized to uint8, and its uint8 output is dequantized. Timing runs 3 rounds
 with the model order rotated. The summary goes to
-`benchmarks/results/local/feasibility/aihub_comparison_mobilenetv2.json`.
+`benchmarks/results/local/feasibility/aihub_comparison_mobilenetv2_<timestamp>.json`
+(and `aihub_comparison_mobilenetv2_latest.json`), with logs in the matching
+`aihub_comparison_mobilenetv2_<timestamp>/` directory.
 
 ## Building the C++ tools
 
@@ -333,13 +339,14 @@ $probe = '.\build\arm64-release\bin\Release\ort_probe.exe'
 
 To compare C++ with Python on identical inputs, write reference tensors first
 (10 preprocessed eval images and Python outputs for `cpu_fp32`, `cpu_s8w`,
-`npu_s8w`, `npu_fp16`, into `data/ort_probe_reference/`, not committed), then
-point the probe at them:
+`npu_s8w`, `npu_fp16`). Each run writes a new
+`data/ort_probe_reference/<timestamp>/` and refreshes
+`data/ort_probe_reference/latest/` (not committed). Then point the probe at it:
 
 ```powershell
 .\.venv\Scripts\python.exe tools\ort_probe\make_reference.py
 & $probe --model models\mobilenetv2\mobilenetv2_int8qdq_pc_s8w_b1.onnx --target npu `
-         --reference-dir data\ort_probe_reference --reference-config npu_s8w
+         --reference-dir data\ort_probe_reference\latest --reference-config npu_s8w
 ```
 
 The probe exits with 0 if everything passed, 1 if a check failed (comparison,
@@ -349,7 +356,10 @@ directory by full path before any ONNX Runtime call and refuses to run with any
 other copy. Windows ships an unrelated, older `onnxruntime.dll` in `System32`.
 
 `scripts\npu_overhead.py` uses the probe to compare C++ and Python NPU latency
-and to split it into accelerator time and host-side overhead.
+and to split it into accelerator time and host-side overhead. It reads the
+reference inputs from `data/ort_probe_reference/latest/` and writes
+`npu_overhead_mobilenetv2_<timestamp>.json` (and `_latest.json`) plus a matching
+run directory with the probe's JSON output to `benchmarks/results/local/feasibility/`.
 
 `tools\ort_probe\reference.py` is a quick Python check with an input filled
 with 0.5; `ort_probe --fill 0.5` runs the same input from C++.

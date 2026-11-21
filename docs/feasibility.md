@@ -346,7 +346,9 @@ C++ (`ort_probe`, median of 3 creations; context build measured once):
 cooldown between configurations. The script was run twice on the same day with
 identical settings. Run B is the JSON summary kept in
 `benchmarks/results/local/feasibility/`. Run A was recorded in an earlier
-revision of this note; its summary file was overwritten by run B.
+revision of this note; its summary file was overwritten by run B. The scripts
+now write a new timestamped summary per run, so later runs no longer replace
+earlier ones.
 
 | Configuration | Run A mean | Run A p50 / p95 / min | Run B mean | Run B p50 / p95 / min |
 |---|---|---|---|---|
@@ -666,5 +668,5 @@ The full sequence is in [setup.md](setup.md):
    `tools/ort_probe/make_reference.py` and `scripts/npu_overhead.py`;
 4. the rejection check: `tools/qnn_rejection_check.py`.
 
-The scripts write their JSON summaries to `benchmarks/results/local/feasibility/`
-(not committed).
+The scripts write one timestamped JSON summary per run, plus a `<name>_latest.json`
+copy, to `benchmarks/results/local/feasibility/` (not committed).

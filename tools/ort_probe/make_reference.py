@@ -24,10 +24,13 @@ Every config is also run in a second, independent session; the largest
 difference between the two (``repeat_max_abs_diff`` in the manifest) is the
 run-to-run variation that bounds a fair C++-vs-Python tolerance.
 
-The default output directory, ``data/ort_probe_reference/``, is not committed.
+Each run writes a new directory ``data/ort_probe_reference/<UTC timestamp>/``
+(never overwritten) and refreshes ``data/ort_probe_reference/latest/`` as a copy
+of it; ``ort_probe --reference-dir`` and ``scripts/npu_overhead.py`` use
+``latest/``. ``data/`` is not committed.
 
 Usage:
-    python tools/ort_probe/make_reference.py [--out DIR]
+    python tools/ort_probe/make_reference.py [--out-root DIR]
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ import argparse
 import gc
 import hashlib
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -55,7 +59,7 @@ CONFIGS = {
     "npu_s8w": (S8W, "npu", {}),
     "npu_fp16": (FP32, "npu", {"enable_htp_fp16_precision": "1"}),
 }
-DEFAULT_OUT = REPO_ROOT / "data" / "ort_probe_reference"
+DEFAULT_OUT_ROOT = REPO_ROOT / "data" / "ort_probe_reference"
 
 
 def sha256_of(path: Path) -> str:
@@ -64,7 +68,7 @@ def sha256_of(path: Path) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("--out-root", type=Path, default=DEFAULT_OUT_ROOT)
     args = parser.parse_args()
 
     try:
@@ -88,8 +92,11 @@ def main() -> int:
             images.append(p)
     inputs = [load_image(IMAGENETTE_ROOT / p) for p in images]
 
-    out = args.out.resolve()
-    out.mkdir(parents=True, exist_ok=True)
+    from common.results_io import run_stamp
+
+    root = args.out_root.resolve()
+    out = root / run_stamp()
+    out.mkdir(parents=True, exist_ok=False)  # never overwrite an earlier reference set
     rows = []
     for i, (image, x) in enumerate(zip(images, inputs)):
         rel = f"inputs/normalized/{i:02d}.f32"
@@ -160,7 +167,11 @@ def main() -> int:
         "configs": configs,
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    print(f"wrote {len(rows)} tensors, index.tsv and manifest.json to {out}")
+    latest = root / "latest"
+    if latest.exists():
+        shutil.rmtree(latest)
+    shutil.copytree(out, latest)
+    print(f"wrote {len(rows)} tensors, index.tsv and manifest.json to {out} (copied to {latest})")
     return 0
 
 

@@ -26,7 +26,11 @@ p50 minus the median accelerator execute time per inference.
 Latency here is model execution only: preprocessing (decode, resize,
 normalization) is not timed.
 
-Results go to ``benchmarks/results/local/feasibility/npu_overhead_mobilenetv2.json``.
+Each run writes ``benchmarks/results/local/feasibility/npu_overhead_mobilenetv2_<UTC
+timestamp>.json`` (copied to ``npu_overhead_mobilenetv2_latest.json``); probe
+JSON summaries, QNN profiles and logs go to the matching
+``npu_overhead_mobilenetv2_<timestamp>/`` directory. Inputs come from the latest
+reference set, ``data/ort_probe_reference/latest/``.
 
 Usage:
     python scripts/npu_overhead.py [--probe PATH] [--rounds N] [--runs N] [--warmup N]
@@ -47,6 +51,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common.cli import add_timing_args  # noqa: E402
 from common.platform_guard import NonNativeInterpreterError, require_native_arm64  # noqa: E402
+from common.results_io import FEASIBILITY_DIR, new_run  # noqa: E402
 
 CPU_THREADS = 4
 NPU_CONFIGS = ["cpp_npu_run", "cpp_npu_iobinding", "py_npu_run", "py_npu_iobinding"]
@@ -78,14 +83,12 @@ def main() -> int:
 
     probe = (args.probe or REPO_ROOT / "build" / "arm64-release" / "bin" / "Release"
              / "ort_probe.exe").resolve()
-    ref_dir = REPO_ROOT / "data" / "ort_probe_reference"
+    ref_dir = REPO_ROOT / "data" / "ort_probe_reference" / "latest"
     s8w = REPO_ROOT / "models" / "mobilenetv2" / "mobilenetv2_int8qdq_pc_s8w_b1.onnx"
     fp32 = REPO_ROOT / "models" / "mobilenetv2" / "mobilenetv2_fp32_b1.onnx"
     ctx = REPO_ROOT / "cache" / "qnn" / "overhead_s8w_ctx.onnx"
-    out_path = Path(args.output or REPO_ROOT / "benchmarks" / "results" / "local" / "feasibility"
-                    / "npu_overhead_mobilenetv2.json").resolve()
-    work = out_path.parent / "npu_overhead"
-    work.mkdir(parents=True, exist_ok=True)
+    out = new_run(Path(args.output_dir) if args.output_dir else FEASIBILITY_DIR,
+                  "npu_overhead_mobilenetv2")
     for p, hint in [(probe, "build the C++ tools (docs/setup.md)"),
                     (ref_dir / "index.tsv", "run tools/ort_probe/make_reference.py"),
                     (s8w, "run scripts/quantize_qnn.py")]:
@@ -93,6 +96,7 @@ def main() -> int:
             print(f"missing {p}: {hint}", file=sys.stderr)
             return 1
 
+    work = out.make_run_dir()
     power = ort_qnn.power_state()
     print(f"power: {power}")
     x = np.fromfile(ref_dir / "inputs" / "normalized" / "00.f32", dtype="<f4").reshape(1, 3, 224, 224)
@@ -240,7 +244,7 @@ def main() -> int:
         "qnn_provider_options": qnn_options,
         "strict_session_config": ort_qnn.STRICT_CONFIG,
         "cpu_intra_op_threads": CPU_THREADS,
-        "input": "data/ort_probe_reference/inputs/normalized/00.f32",
+        "input": "data/ort_probe_reference/latest/inputs/normalized/00.f32",
         "timing_method": {
             "warmup_runs": args.warmup, "timed_runs": args.runs, "rounds": args.rounds,
             "cooldown_s": args.cooldown, "order": order,
@@ -253,7 +257,7 @@ def main() -> int:
         },
         "results": results,
     }
-    out_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    out.write(summary)
 
     print("\n== NPU (s8w, strict, cached EP context): wall vs accelerator (us) ==")
     print(f"{'config':<18} {'wall p50':>9} {'wall mean':>10} {'accel':>7} {'QNN acc':>8} "
@@ -271,7 +275,7 @@ def main() -> int:
         print(f"{key:<18} mean {t['steady_mean_ms_median']:.3f}  p50 {t['steady_p50_ms_median']:.3f}  "
               f"p95 {t['steady_p95_ms_median']:.3f}  min {t['steady_min_ms_median']:.3f}  "
               f"p50 per round {[round(v, 3) for v in t['steady_p50_ms_per_round']]}")
-    print(f"\npower: {power.get('power_source')}, mode {power.get('power_mode')}; wrote {out_path}")
+    print(f"\npower: {power.get('power_source')}, mode {power.get('power_mode')}; wrote {out.summary}")
     return 0
 
 
