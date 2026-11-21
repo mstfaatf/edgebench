@@ -151,7 +151,8 @@ Exports torchvision MobileNetV2 (`IMAGENET1K_V2` weights) to
 `models/mobilenetv2/mobilenetv2_fp32_b1.onnx`: opset 17, fixed input
 `input` [1, 3, 224, 224], output `logits` [1, 1000]. The script checks the
 model with `onnx.checker`, compares it with PyTorch on an eval image, and checks
-that an input filled with 0.5 (the input `ort_probe` uses) gives top-1 class
+that an input filled with 0.5 (the input of `tools/ort_probe/reference.py` and
+`ort_probe --fill 0.5`) gives top-1 class
 677. It writes a JSON sidecar (`.json`, same name) with the export settings and
 the model's SHA256.
 

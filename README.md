@@ -5,9 +5,12 @@ CPU vs NPU inference benchmarking for Windows on Snapdragon, built on
 
 ## Status
 
-**Early development.** The build, toolchain and environment checks are in
-place, but nothing has been benchmarked yet and EdgeBench publishes no
-performance numbers at this stage.
+**Early development.** The toolchain, model pipeline and verified CPU and NPU
+execution paths (Python and C++) are in place; the benchmark engine is not
+built yet. [docs/feasibility.md](docs/feasibility.md) is the technical note on
+what works, how NPU execution is verified, and what the engine must do. Its
+latency figures are methodology sanity checks: EdgeBench publishes no
+benchmark results at this stage.
 
 ## Goals
 
@@ -43,7 +46,7 @@ performance numbers at this stage.
 | `scripts/` | Environment check, dependency fetch, dataset download, MobileNetV2 export/quantization/evaluation, NPU checks, Qualcomm AI Hub baseline comparison, result validation |
 | `tools/` | Diagnostics: `ort_probe` (C++ ONNX Runtime + QNN EP runner: strict NPU, EP context, C++ vs Python comparison, latency), `qnn_rejection_check.py` (QNN EP rejection detection) |
 | `cmake/` | Shared CMake modules |
-| `docs/` | Setup guide (incl. data and model preparation), results format, feasibility notes |
+| `docs/` | Setup guide (incl. data and model preparation), results format, feasibility note |
 
 ## Getting started
 
@@ -59,8 +62,13 @@ ctest --preset arm64-release
 .\build\arm64-release\bin\Release\edgebench.exe --version
 ```
 
-[docs/feasibility.md](docs/feasibility.md) records which parts of the toolchain
-run natively on Windows on Snapdragon.
+## Documentation
+
+- [docs/setup.md](docs/setup.md): environment, data and model preparation, C++ build
+- [docs/feasibility.md](docs/feasibility.md): feasibility note (test environment,
+  NPU verification, accuracy, initialization, latency sanity checks, C++ path,
+  verdicts, engine requirements)
+- [docs/results-schema.md](docs/results-schema.md): benchmark result file format
 
 ## License
 

@@ -123,11 +123,12 @@
     "trials": 3,
     "run_api": "sync",
     "ort_execution_mode": "sequential",
-    "intra_op_threads": null,
+    "intra_op_threads": 4,
     "inter_op_threads": null,
     "graph_optimization_level": "enable_all",
     "ep_options": {
-      "backend_path": "QnnHtp.dll"
+      "backend_path": "C:\\example\\edgebench\\QnnHtp.dll",
+      "htp_performance_mode": "burst"
     },
     "session_config": {
       "session.disable_cpu_ep_fallback": "1"
