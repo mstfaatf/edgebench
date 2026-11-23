@@ -76,7 +76,9 @@ Per trial and pooled over all trials (`aggregate`):
 - **Throughput** is 1000 / mean (sequential, one inference at a time).
 - **Trial spread**: the range and coefficient of variation of the trial means
   (`aggregate.trial_variation`). A large spread means the run should not be
-  summarized by one number.
+  summarized by one number: a coefficient of variation above 10%, or a slowest
+  trial mean more than 1.25× the fastest, produces a `trial_spread_high`
+  warning.
 
 The raw per-iteration latencies are written to a CSV file next to the result,
 linked by SHA-256, so any other statistic can be recomputed.
@@ -92,10 +94,21 @@ every run records:
 - power source, Windows power mode, power plan, battery charge and battery
   saver, at the start and at the end (a change produces a
   `power_state_changed` warning);
-- system-wide CPU utilization during the idle before each trial (more than 10%
-  produces a `background_cpu_load_high` warning);
+- background CPU load before the first trial, between trials (the idle before
+  each trial) and during each trial's measured iterations; more than 10% in any
+  sample produces a `background_cpu_load_high` warning that says when;
 - the operating system, CPU, device, ONNX Runtime version and the full path of
-  every ONNX Runtime and QNN library that was loaded.
+  every ONNX Runtime and QNN library that was loaded (a library from outside
+  the bundle directory stops the run).
+
+During a trial, the benchmark's own threads keep the CPU busy, so the
+system-wide utilization (`GetSystemTimes`) alone would mostly measure the
+benchmark itself. EdgeBench therefore subtracts its own process's CPU time over
+the same window (`GetProcessTimes`, all threads) from the system's busy time
+and divides the remainder by the system's total time, which is the window times
+the number of logical processors. What is left is the load from other
+processes. The result's `system.load` records the pre-run sample; the
+during-trial values are reported in the summary and in warnings.
 
 **Memory** is the process's own working set and private bytes (peak values,
 and the working-set change across session creation). Memory used by drivers or

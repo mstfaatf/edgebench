@@ -449,7 +449,10 @@ def v1_1_issues(doc: dict[str, Any]) -> list[Issue]:
     if doc["tool"].get("implementation") == "cpp" and load_check == "not_checked":
         report("/runtime/onnxruntime/load_check",
                 "C++ engine result without a verified ONNX Runtime load", "load_not_checked")
-    if load_check == "full_path_verified":
+    # A run that stopped because of a foreign module records that module on purpose.
+    error = doc.get("error") or {}
+    stopped_for_module = doc["status"] == "failed" and error.get("code") == "module_outside_bundle"
+    if load_check == "full_path_verified" and not stopped_for_module:
         library = runtime["onnxruntime"]["library_path"]
         if library is None:
             report("/runtime/onnxruntime/library_path",

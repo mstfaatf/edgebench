@@ -46,4 +46,14 @@ LatencyStats compute_stats(std::span<const double> latencies_ms, std::int64_t ba
 /// Spread of the trial means (non-empty).
 TrialVariation compute_trial_variation(std::span<const double> trial_means_ms);
 
+/// Trial means whose coefficient of variation exceeds this are too spread out to
+/// be summarized by one number (warning trial_spread_high).
+inline constexpr double kHighTrialMeanCv = 0.10;
+/// The same when the slowest trial mean exceeds the fastest by more than this factor.
+inline constexpr double kHighTrialMeanRatio = 1.25;
+
+/// True if the trial means are spread out by either threshold above (strictly
+/// greater). False for a single trial.
+bool trial_spread_high(const TrialVariation& variation);
+
 }  // namespace edgebench

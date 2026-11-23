@@ -105,6 +105,16 @@ struct CpuTimes {
 /// Busy fraction between two readings: ((kernel - idle) + user) / (kernel + user)
 /// over the deltas, clamped to 0..1; null if no time elapsed.
 std::optional<double> cpu_utilization(const CpuTimes& start, const CpuTimes& end);
+/// Background (other processes') utilization between two readings: the system's
+/// busy time minus `own` CPU time of the measuring process over the same window
+/// (kernel + user from GetProcessTimes, 100 ns units), divided by the system's
+/// total time. GetSystemTimes sums over all logical processors, so the total is
+/// the window times the logical processor count: own time is normalized by the
+/// processor count in the same units. Clamped to 0..1 (own time can slightly
+/// exceed the system's busy time because the counters are updated at different
+/// moments). Null if no time elapsed or any counter went backwards.
+std::optional<double> background_cpu_utilization(const CpuTimes& start, const CpuTimes& end,
+                                                 std::uint64_t own_start, std::uint64_t own_end);
 
 OsInfo query_os_info();
 /// Architecture of the running process (the machine type it was built for).
@@ -122,6 +132,10 @@ SystemInfo query_system_info();
 PowerState query_power_state();
 
 CpuTimes query_cpu_times();
+
+/// CPU time used so far by the current process, all threads (kernel + user from
+/// GetProcessTimes, 100 ns units); null if it cannot be read.
+std::optional<std::uint64_t> query_process_cpu_time();
 
 /// Sleeps for `window` and returns the system-wide CPU utilization over it.
 /// The calling process is idle during the window, so the value is background load.

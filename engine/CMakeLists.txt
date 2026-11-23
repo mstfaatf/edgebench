@@ -136,7 +136,8 @@ if(EDGEBENCH_BUILD_TESTS)
     tests/edgebench_exe_test.cpp
     tests/provider_test.cpp
     tests/test_runtime.cpp
-    tests/process_util.cpp)
+    tests/process_util.cpp
+    tests/validator.cpp)
   target_link_libraries(edgebench_bundle_tests PRIVATE edgebench_core GTest::gtest_main)
   target_compile_definitions(edgebench_bundle_tests PRIVATE
     EDGEBENCH_EXE_PATH="$<TARGET_FILE:edgebench>"

@@ -198,8 +198,8 @@ int doctor_command(const eb::DoctorOptions& options) {
     else
         std::fputs(eb::format_text(report).c_str(), stdout);
     std::fflush(stdout);
-    for (const eb::DoctorWarning& w : report.warnings)
-        eb::print_warning(w.code, w.message, w.hint);
+    // Warnings are part of the report (text or JSON) only; problems are also
+    // printed to stderr, because they decide the exit code.
     for (const eb::DoctorProblem& p : report.problems)
         eb::print_error(p.code, p.message, p.hint);
     return eb::to_int(report.exit_code);

@@ -125,6 +125,42 @@ TEST(TrialVariation, SingleTrialHasNoSpread) {
     EXPECT_FALSE(v.trial_mean_cv_ratio.has_value());
 }
 
+namespace {
+
+eb::TrialVariation variation(double min_ms, double max_ms, std::optional<double> cv) {
+    eb::TrialVariation v;
+    v.trial_mean_min_ms = min_ms;
+    v.trial_mean_max_ms = max_ms;
+    v.trial_mean_cv_ratio = cv;
+    v.trial_mean_stddev_ms = cv ? std::optional<double>(0.0) : std::nullopt;
+    return v;
+}
+
+}  // namespace
+
+TEST(TrialSpread, CoefficientOfVariationThreshold) {
+    // Ratio well inside 1.25, so only the CV decides.
+    EXPECT_FALSE(eb::trial_spread_high(variation(1.0, 1.1, 0.0999)));
+    EXPECT_FALSE(eb::trial_spread_high(variation(1.0, 1.1, 0.10)));  // strictly greater
+    EXPECT_TRUE(eb::trial_spread_high(variation(1.0, 1.1, 0.1001)));
+}
+
+TEST(TrialSpread, SlowestOverFastestThreshold) {
+    // CV well inside 10%, so only the slowest/fastest ratio decides.
+    EXPECT_FALSE(eb::trial_spread_high(variation(4.0, 4.0 * 1.2499, 0.01)));
+    EXPECT_FALSE(eb::trial_spread_high(variation(4.0, 4.0 * 1.25, 0.01)));  // strictly greater
+    EXPECT_TRUE(eb::trial_spread_high(variation(4.0, 4.0 * 1.2501, 0.01)));
+}
+
+TEST(TrialSpread, FromComputedVariation) {
+    EXPECT_FALSE(eb::trial_spread_high(eb::compute_trial_variation(std::vector<double>{2.0})));
+    EXPECT_FALSE(
+        eb::trial_spread_high(eb::compute_trial_variation(std::vector<double>{3.9, 4.0, 4.1})));
+    // The spread seen with a slow machine state: 3.77 / 10.60 / 10.35 ms.
+    EXPECT_TRUE(eb::trial_spread_high(
+        eb::compute_trial_variation(std::vector<double>{3.77, 10.60, 10.35})));
+}
+
 TEST(Stats, RejectsEmptyInput) {
     EXPECT_THROW(eb::compute_stats(std::vector<double>{}, 1), std::invalid_argument);
     EXPECT_THROW(eb::nearest_rank(std::vector<double>{}, 50), std::invalid_argument);

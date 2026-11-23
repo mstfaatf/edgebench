@@ -76,6 +76,26 @@ bool should_stop(const StopHook& hook, StopPoint point, int trial, int iteration
     return stop_requested();
 }
 
+// Every ONNX Runtime / QNN module in the process must come from the directory of
+// the onnxruntime.dll that was loaded (the bundle). Checked after each session is
+// created, when execution providers have pulled in their libraries. On failure
+// the full module list goes into the result, so the foreign module is recorded.
+Result<void> check_loaded_modules(BenchmarkResult& result) {
+    const std::filesystem::path& dll = result.runtime.onnxruntime.dll_path;
+    const std::filesystem::path bundle = dll.empty() ? executable_dir() : dll.parent_path();
+    std::vector<LoadedModule> modules = list_ort_modules();
+    const std::vector<LoadedModule> outside = find_modules_outside(modules, bundle);
+    if (outside.empty())
+        return {};
+    std::string names;
+    for (const LoadedModule& m : outside)
+        names += (names.empty() ? "" : ", ") + m.name + " (" + path_to_utf8(m.path) + ")";
+    result.runtime.loaded_modules = std::move(modules);
+    return Error{ExitCode::ort_load_failure, "module_outside_bundle",
+                 "ONNX Runtime/QNN module loaded from outside the bundle directory " +
+                     path_to_utf8(bundle) + ": " + names};
+}
+
 // One trial: fresh session, warm-up, measured iterations. Stop requests are
 // honoured before and after session creation and between iterations (never
 // inside the timed bracket).
@@ -91,6 +111,8 @@ Result<TrialResult> run_trial(Provider& provider, const RunConfig& config, const
         return with_context(created.error(), where);
     std::unique_ptr<BenchSession> session = std::move(created).value();
     result.known.session = true;
+    if (Result<void> modules = check_loaded_modules(result); !modules)
+        return with_context(modules.error(), where);
     if (should_stop(hook, StopPoint::after_session, st.trial_index, 0)) {
         out.discarded_iterations = 0;
         return interrupted_error(where + ", after session creation");
@@ -134,6 +156,10 @@ Result<TrialResult> run_trial(Provider& provider, const RunConfig& config, const
 
     out.failed_stage = "measurement";
     trial.latencies_ms.reserve(static_cast<std::size_t>(config.iterations));
+    // Background load across the measured iterations, read outside the timed brackets.
+    const CpuTimes system_start = query_cpu_times();
+    const std::optional<std::uint64_t> own_start = query_process_cpu_time();
+    const Clock::time_point measured_start = Clock::now();
     for (int i = 0; i < config.iterations; ++i) {
         if (should_stop(hook, StopPoint::measured, st.trial_index, i)) {
             out.discarded_iterations = i;
@@ -146,6 +172,19 @@ Result<TrialResult> run_trial(Provider& provider, const RunConfig& config, const
             return with_context(r.error(), where + ", measured iteration " + std::to_string(i + 1));
         }
         trial.latencies_ms.push_back(ms_between(t0, t1));
+    }
+    {
+        const Clock::time_point measured_end = Clock::now();
+        const CpuTimes system_end = query_cpu_times();
+        const std::optional<std::uint64_t> own_end = query_process_cpu_time();
+        if (own_start && own_end) {
+            if (const std::optional<double> background =
+                    background_cpu_utilization(system_start, system_end, *own_start, *own_end)) {
+                trial.during = LoadSample{
+                    *background,
+                    std::chrono::duration<double>(measured_end - measured_start).count()};
+            }
+        }
     }
 
     for (std::size_t i = 0; i < session->outputs().size(); ++i) {
@@ -281,8 +320,8 @@ BenchmarkResult failed_load_result(const RunConfig& config, const OrtLoadResult&
     return r;
 }
 
-BenchmarkResult run_benchmark(Runtime& runtime, const RunConfig& config,
-                              const ProgressFn& progress, const StopHook& hook) {
+BenchmarkResult run_benchmark(Runtime& runtime, const RunConfig& config, const ProgressFn& progress,
+                              const StopHook& hook) {
     Result<std::unique_ptr<Provider>> provider = make_provider(runtime, config);
     if (!provider) {
         BenchmarkResult r = begin_result(config);
@@ -315,12 +354,11 @@ BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunCon
     r.known.provider = true;
     if (const std::optional<int> logical = r.system.cpu.logical_processors;
         logical && config.threads > *logical) {
-        r.warnings.push_back({"threads_exceed_logical_processors",
-                              std::to_string(config.threads) +
-                                  " intra-op threads requested on a CPU with " +
-                                  std::to_string(*logical) +
-                                  " logical processors; threads will compete for cores",
-                              std::string("/config/intra_op_threads")});
+        r.warnings.push_back(
+            {"threads_exceed_logical_processors",
+             std::to_string(config.threads) + " intra-op threads requested on a CPU with " +
+                 std::to_string(*logical) + " logical processors; threads will compete for cores",
+             std::string("/config/intra_op_threads")});
     }
     if (r.failure) {
         finish_result(r);
@@ -495,6 +533,26 @@ void finish_result(BenchmarkResult& r) {
                                   std::string("/system/load")});
         }
     }
+    // Background load during the measured iterations (this process's own CPU time
+    // excluded): reported separately, because it affects the latencies directly.
+    {
+        const TrialResult* worst = nullptr;
+        for (const TrialResult& trial : r.timing.trials) {
+            if (trial.during && (!worst || trial.during->cpu_utilization_ratio >
+                                               worst->during->cpu_utilization_ratio))
+                worst = &trial;
+        }
+        if (worst && worst->during->cpu_utilization_ratio > kHighBackgroundLoad) {
+            r.warnings.push_back(
+                {"background_cpu_load_high",
+                 "Background CPU load from other processes reached " +
+                     fmt(worst->during->cpu_utilization_ratio * 100.0, 1) + "% during " +
+                     trial_label(worst->trial_index, config.trials) +
+                     " (this process's own CPU time excluded); other processes may have "
+                     "distorted the measurement.",
+                 std::nullopt});
+        }
+    }
 
     // Statistics of the completed trials.
     TimingResult& t = r.timing;
@@ -510,6 +568,18 @@ void finish_result(BenchmarkResult& r) {
         }
         t.aggregate =
             AggregateResult{compute_stats(pooled, r.batch_size), compute_trial_variation(means)};
+        if (const TrialVariation& v = t.aggregate->trial_variation; trial_spread_high(v)) {
+            r.warnings.push_back(
+                {"trial_spread_high",
+                 "Trial means range from " + fmt(v.trial_mean_min_ms) + " to " +
+                     fmt(v.trial_mean_max_ms) + " ms (" +
+                     (v.trial_mean_cv_ratio ? "CV " + fmt(*v.trial_mean_cv_ratio * 100.0, 1) + "%, "
+                                            : std::string()) +
+                     "slowest/fastest " + fmt(v.trial_mean_max_ms / v.trial_mean_min_ms, 2) +
+                     "x); the trials disagree, so one aggregate number does not describe this "
+                     "run.",
+                 std::string("/timing/aggregate/trial_variation")});
+        }
     }
 
     // Values that could not be determined.
@@ -609,6 +679,18 @@ std::string format_summary(const BenchmarkResult& r) {
         if (highest) {
             out << ", highest cooldown " << fmt(*highest * 100.0, 1) << "% (before trial "
                 << highest_trial + 1 << ")";
+        }
+        std::optional<double> during;
+        int during_trial = 0;
+        for (const TrialResult& trial : t.trials) {
+            if (trial.during && (!during || trial.during->cpu_utilization_ratio > *during)) {
+                during = trial.during->cpu_utilization_ratio;
+                during_trial = trial.trial_index;
+            }
+        }
+        if (during) {
+            out << ", highest during trials " << fmt(*during * 100.0, 1) << "% (trial "
+                << during_trial + 1 << ", own process excluded)";
         }
     }
     out << "\n";

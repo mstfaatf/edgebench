@@ -94,6 +94,27 @@ state is read again at the end; if the source, mode, plan or battery saver
 changed, the result gets a `power_state_changed` warning. If any idle sample
 shows more than 10% CPU utilization, the result gets a
 `background_cpu_load_high` warning with the highest value and when it occurred.
+
+System-wide CPU utilization is also sampled across each trial's measured
+iterations (`GetSystemTimes` before the first and after the last iteration,
+outside the timed brackets). The benchmark's own threads are busy then, so this
+process's CPU time over the same window (`GetProcessTimes`, all threads) is
+subtracted first: what remains is the load from other processes, as a fraction
+of the window times the number of logical processors. If any trial's value is
+above 10%, the result gets a second `background_cpu_load_high` warning naming
+the trial ("during trial N of M"). These during-trial values appear in the
+summary but not in the result document: `system.load` stays the pre-run sample.
+
+If the trial means are spread out, i.e. their coefficient of variation is above
+10% or the slowest trial mean is more than 1.25 times the fastest, the result
+gets a `trial_spread_high` warning (path `/timing/aggregate/trial_variation`):
+the trials disagree, so the aggregate statistics alone do not describe the run.
+
+After every session is created, the run checks that each ONNX Runtime and QNN
+module in the process comes from the bundle directory (the directory of the
+loaded `onnxruntime.dll`). A module from anywhere else stops the run with exit
+code 4 and a failed result (`error.code` `module_outside_bundle`, stage
+`session_creation`) that names the module and its path.
 The working set is read just before and just after each session's constructor
 (outside the timed bracket) for `memory.session_create_working_set_delta_bytes`,
 the median over trials; `memory.peak_working_set_bytes` and
@@ -161,7 +182,10 @@ Placement   55 nodes: CPUExecutionProvider 55 (all on the requested EP)
 - `Power`: power source, Windows power mode, power plan, battery saver and
   battery charge at the start of the run.
 - `CPU load`: system-wide CPU utilization during the idle period before trial 1
-  (`system.load`), and the highest value seen during the cooldowns.
+  (`system.load`), the highest value seen during the cooldowns, and the highest
+  background load during a trial's measured iterations (`highest during trials
+  N% (trial k, own process excluded)`). The sample above predates the
+  during-trial value.
 - `Memory`: the process working set after the last trial's session was
   released, its peak, and the median change of the working set across session
   creation. Process memory only; memory used by drivers or on an accelerator is
@@ -500,8 +524,9 @@ an ONNX Runtime/QNN module is loaded from outside the bundle directory (the
 module is named). Each problem is also printed to stderr as
 `error: [<kind>] <message>`, with a `hint:` line when there is a fix to suggest.
 Warnings (battery power, battery saver, background load over 10%, an unknown
-power mode, emulation) appear in the report as `warning: [<code>] <message>`
-and do not change the exit code.
+power mode, emulation) appear once, in the report (text or JSON), as
+`warning: [<code>] <message>`; they are not repeated on stderr and do not
+change the exit code.
 
 Sample output (Surface Laptop 7, development build):
 
@@ -618,6 +643,7 @@ to fail internally and that a test cannot provoke.
 | Session options rejected | `session_options_failed` | 3 | yes, `session_creation` | not triggerable |
 | Model is not a valid ONNX file | `session_creation_failed` (code e.g. `ORT_INVALID_PROTOBUF`) | 3 | yes, `session_creation` | `ExitPaths.InvalidModelExits3AndWritesAFailedResult`, `Cli.RunDryRunInvalidModelExits3WithOrtCode` |
 | Session creation fails on a later trial | as reported by ONNX Runtime | 3 | yes, `session_creation`, earlier trials kept | `FailurePaths.SessionCreationFailsOnTheSecondTrial` |
+| After a session is created, an ONNX Runtime/QNN module is loaded from outside the bundle directory (the directory of the loaded `onnxruntime.dll`) | `module_outside_bundle` | 4 | yes, `session_creation`, names each module and its path; `runtime.loaded_modules` lists it | `FailurePaths.ModuleOutsideTheBundleStopsTheRun` |
 | Dynamic dimension, non-float32 input, output without fixed size | `dynamic_shape`, `unsupported_input_dtype`, `unsupported_output_dtype` | 2 | no | `Cli.RunUsageErrorFromTheModelWritesNothing`, `Cli.RunDryRunRejectsDynamicAndInt64Models` |
 | Model without inputs | `no_inputs` | 2 | no | not tested (no fixture) |
 | Model inputs/outputs cannot be read, buffers cannot be bound | `session_metadata_failed`, `binding_failed` | 3 | yes, `session_creation` | not triggerable |
@@ -639,8 +665,10 @@ Warnings that do not end the run: `nondeterministic_outputs`
 `nodes_not_on_requested_ep` (`FailurePaths.NodesOffTheRequestedEpAreAWarning`),
 `threads_exceed_logical_processors`
 (`ExitPaths.ThreadsAboveLogicalProcessorsWarnEverywhere`),
-`background_cpu_load_high`, `power_state_changed`, `unknown_power_mode`,
-`value_unavailable`.
+`background_cpu_load_high` (idle and during-trial samples;
+`FailurePaths.BackgroundLoadDuringATrialIsAWarning`), `trial_spread_high`
+(`FailurePaths.TrialSpreadIsAWarningInTheResultAndSummary`, `TrialSpread.*`),
+`power_state_changed`, `unknown_power_mode`, `value_unavailable`.
 
 `edgebench doctor`:
 
@@ -649,7 +677,7 @@ Warnings that do not end the run: `nondeterministic_outputs`
 | ONNX Runtime cannot be loaded | loader kind | 4 | `Doctor.MissingDllIsReported`, `Doctor.WrongDllVersionIsReported`, `Doctor.CorruptDllIsReported`, ... |
 | An ONNX Runtime/QNN module is loaded from outside the bundle | `module_outside_bundle` | 4 | not triggerable (the loader refuses a foreign `onnxruntime.dll` first) |
 | EP devices cannot be enumerated | `ep_enumeration_failed` | 3 | not triggerable |
-| Battery, battery saver, load over 10%, unknown power mode, emulation | warning only | 0 | `DoctorWarnings.*` |
+| Battery, battery saver, load over 10%, unknown power mode, emulation | warning only, printed once in the report (not on stderr) | 0 | `DoctorWarnings.*`, `Doctor.HappyPathReportsBundledOnnxRuntime` |
 | Ctrl+C or Ctrl+Break | none | 130 | same handler mode as the `ort_probe` test |
 
 `ort_probe`:

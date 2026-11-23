@@ -71,6 +71,11 @@ struct TrialResult {
     /// Background CPU load sampled during the idle period before this trial
     /// (null if there was none: --cooldown-ms 0 after the first trial).
     std::optional<LoadSample> idle_before;
+    /// Background CPU load across the measured iterations: system-wide utilization
+    /// minus this process's own CPU time (background_cpu_utilization()). Not part of
+    /// the results schema; used for warnings and the summary. Null if a counter
+    /// could not be read.
+    std::optional<LoadSample> during;
     double session_create_ms = 0;
     std::optional<std::int64_t> session_create_working_set_delta_bytes;
     std::optional<double> first_inference_ms;  // first warm-up iteration; null without warm-up
@@ -142,8 +147,8 @@ struct BenchmarkResult {
     ModelResult model;
     std::optional<OnnxGraphSummary> graph;  // decoded model file
 
-    RunConfig config;  // as requested; the schema's config block derives from it
-    std::int64_t batch_size = 0;  // 0: unknown (written as null; failed results only)
+    RunConfig config;                 // as requested; the schema's config block derives from it
+    std::int64_t batch_size = 0;      // 0: unknown (written as null; failed results only)
     std::string input_preprocessing;  // config.input.preprocessing
 
     ExecutionResult execution;

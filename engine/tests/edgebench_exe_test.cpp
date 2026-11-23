@@ -18,6 +18,7 @@
 #include "edgebench/system_info.hpp"
 #include "edgebench/version.hpp"
 #include "process_util.hpp"
+#include "validator.hpp"
 
 namespace fs = std::filesystem;
 namespace eb = edgebench;
@@ -95,12 +96,11 @@ TEST(Doctor, HappyPathReportsBundledOnnxRuntime) {
                                         kEdgebenchExe.parent_path());
     expect_no_crash(r);
     ASSERT_EQ(r.exit_code, 0u) << describe(r);
-    // The only message allowed on stderr is the emulation warning, for an x64 build
-    // on ARM64 Windows (this test program has the same architecture as edgebench.exe).
+    // Warnings (e.g. process_emulated for an x64 build on ARM64 Windows) appear once,
+    // in the report on stdout; stderr carries only problems, and there are none.
+    EXPECT_TRUE(r.err.empty()) << describe(r);
     if (eb::query_system_info().emulated())
-        EXPECT_TRUE(r.err.starts_with("warning: [process_emulated]")) << describe(r);
-    else
-        EXPECT_TRUE(r.err.empty()) << describe(r);
+        EXPECT_TRUE(contains(r.out, "warning: [process_emulated]")) << describe(r);
     const std::string expected(eb::expected_onnxruntime_version());
     EXPECT_TRUE(contains(r.out, expected + " (C API " + std::to_string(ORT_API_VERSION) + ")"))
         << r.out;
@@ -438,15 +438,7 @@ TEST(Cli, RunStopsOnNonFiniteOutputAndWritesAFailedResult) {
     const json doc = json::parse(std::ifstream(latest));
     EXPECT_EQ(doc.at("status"), "failed");
     EXPECT_EQ(doc.at("error").at("stage"), "measurement");
-    const fs::path python = fs::path(EDGEBENCH_PYTHON).make_preferred();
-    if (fs::is_regular_file(python)) {
-        const ProcessResult v =
-            run_process(python,
-                        {(kSourceDir / "scripts" / "validate_results.py").native(), L"--strict",
-                         latest.native()},
-                        kSourceDir);
-        EXPECT_EQ(v.exit_code, 0u) << v.output;
-    }
+    eb::test::validate_or_skip(latest);
 }
 
 TEST(Cli, RunUsageErrorFromTheModelWritesNothing) {

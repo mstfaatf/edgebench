@@ -13,9 +13,15 @@
 
 #include "edgebench/benchmark.hpp"
 #include "edgebench/interrupt.hpp"
+#include "edgebench/ort_loader.hpp"
 #include "edgebench/result_files.hpp"
 #include "process_util.hpp"
 #include "test_runtime.hpp"
+#include "validator.hpp"
+
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
 
 namespace fs = std::filesystem;
 namespace eb = edgebench;
@@ -26,7 +32,6 @@ namespace {
 
 const fs::path kSourceDir = fs::path(EDGEBENCH_SOURCE_DIR).make_preferred();
 const fs::path kFixtures = kSourceDir / "engine" / "tests" / "fixtures" / "models";
-const fs::path kPython = fs::path(EDGEBENCH_PYTHON).make_preferred();
 
 // Clears the process-wide stop flag before and after each test.
 struct StopGuard {
@@ -80,14 +85,7 @@ json write_and_validate(const eb::BenchmarkResult& r) {
     EXPECT_TRUE(written) << (written ? "" : written.error().message);
     if (!written)
         return {};
-    if (fs::is_regular_file(kPython)) {
-        const eb::test::ProcessResult v =
-            eb::test::run_process(kPython,
-                                  {(kSourceDir / "scripts" / "validate_results.py").native(),
-                                   L"--strict", written.value().result_file.native()},
-                                  kSourceDir);
-        EXPECT_EQ(v.exit_code, 0u) << v.output;
-    }
+    eb::test::validate_or_skip(written.value().result_file);
     return written.value().document;
 }
 
@@ -412,4 +410,131 @@ TEST(FailurePaths, NodesOffTheRequestedEpAreAWarning) {
     ASSERT_NE(w, nullptr);
     EXPECT_EQ(w->message, "1 of 3 nodes are not on CPUExecutionProvider");
     EXPECT_NE(eb::format_summary(r).find("(NOT all on the requested EP)"), std::string::npos);
+}
+
+// --------------------------------------------------------------------------- foreign modules
+
+namespace {
+
+// Loads a copy of a system DLL under an ONNX Runtime-like name from a temporary
+// directory, i.e. outside the bundle, for as long as it lives.
+class ForeignModule {
+public:
+    ForeignModule() : dir_(L"edgebench_foreign_module") {
+        path_ = dir_.path() / "onnxruntime_foreign_test.dll";
+        fs::copy_file(LR"(C:\Windows\System32\version.dll)", path_);
+        module_ = LoadLibraryExW(path_.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+    }
+    ~ForeignModule() {
+        if (module_)
+            FreeLibrary(module_);
+    }
+    ForeignModule(const ForeignModule&) = delete;
+    ForeignModule& operator=(const ForeignModule&) = delete;
+    bool loaded() const { return module_ != nullptr; }
+    const fs::path& path() const { return path_; }
+
+private:
+    eb::test::TempDir dir_;  // destroyed after the module is freed
+    fs::path path_;
+    HMODULE module_ = nullptr;
+};
+
+}  // namespace
+
+TEST(FailurePaths, ModuleOutsideTheBundleStopsTheRun) {
+    const eb::RunConfig c = short_run(2);
+    const std::unique_ptr<eb::Provider> p = real_provider(c);
+    eb::BenchmarkResult r;
+    std::string resolved;
+    {
+        ForeignModule foreign;
+        ASSERT_TRUE(foreign.loaded());
+        resolved = eb::path_to_utf8(eb::resolve_path(foreign.path()));
+        r = run(*p, c);
+    }
+    ASSERT_TRUE(r.failure.has_value());
+    EXPECT_EQ(r.failure->error.exit_code, eb::ExitCode::ort_load_failure);
+    EXPECT_EQ(r.failure->error.kind, "module_outside_bundle");
+    EXPECT_EQ(r.failure->stage, "session_creation");
+    const std::string& m = r.failure->error.message;
+    EXPECT_NE(m.find("trial 1 of 2"), std::string::npos) << m;
+    EXPECT_NE(m.find("onnxruntime_foreign_test.dll (" + resolved + ")"), std::string::npos) << m;
+    EXPECT_TRUE(r.timing.trials.empty());
+    EXPECT_FALSE(r.known.placement);
+    EXPECT_TRUE(std::any_of(
+        r.runtime.loaded_modules.begin(), r.runtime.loaded_modules.end(),
+        [](const eb::LoadedModule& lm) { return lm.name == "onnxruntime_foreign_test.dll"; }));
+    const json doc = write_and_validate(r);
+    ASSERT_FALSE(doc.empty());
+    EXPECT_EQ(doc.at("status"), "failed");
+    EXPECT_EQ(doc.at("error").at("code"), "module_outside_bundle");
+    EXPECT_EQ(doc.at("error").at("stage"), "session_creation");
+}
+
+// --------------------------------------------------------------------------- warnings from trial
+// data
+
+namespace {
+
+eb::TrialResult fake_trial(int index, double latency_ms) {
+    eb::TrialResult t;
+    t.trial_index = index;
+    t.sequence = index;
+    t.session_create_ms = 10.0;
+    t.latencies_ms.assign(20, latency_ms);
+    t.stats = eb::compute_stats(t.latencies_ms, 1);
+    return t;
+}
+
+eb::BenchmarkResult result_with_trials(std::vector<eb::TrialResult> trials) {
+    eb::BenchmarkResult r;
+    r.config = short_run(static_cast<int>(trials.size()));
+    r.batch_size = 1;
+    for (const eb::TrialResult& t : trials)
+        r.timing.session_init.cold_ms.push_back(t.session_create_ms);
+    r.timing.trials = std::move(trials);
+    return r;
+}
+
+}  // namespace
+
+TEST(FailurePaths, TrialSpreadIsAWarningInTheResultAndSummary) {
+    eb::BenchmarkResult r = result_with_trials({fake_trial(0, 3.8), fake_trial(1, 9.6)});
+    eb::finish_result(r);
+    const eb::ResultWarning* w = find_warning(r, "trial_spread_high");
+    ASSERT_NE(w, nullptr);
+    EXPECT_EQ(w->path, std::optional<std::string>("/timing/aggregate/trial_variation"));
+    EXPECT_NE(w->message.find("3.8000 to 9.6000 ms"), std::string::npos) << w->message;
+    EXPECT_NE(eb::format_summary(r).find("[trial_spread_high]"), std::string::npos);
+
+    eb::BenchmarkResult steady = result_with_trials({fake_trial(0, 3.8), fake_trial(1, 3.9)});
+    eb::finish_result(steady);
+    EXPECT_FALSE(has_warning(steady, "trial_spread_high"));
+}
+
+TEST(FailurePaths, BackgroundLoadDuringATrialIsAWarning) {
+    std::vector<eb::TrialResult> trials{fake_trial(0, 4.0), fake_trial(1, 4.0)};
+    trials[0].during = eb::LoadSample{0.02, 0.8};
+    trials[1].during = eb::LoadSample{0.18, 0.8};
+    eb::BenchmarkResult r = result_with_trials(std::move(trials));
+    eb::finish_result(r);
+    const eb::ResultWarning* w = nullptr;
+    for (const eb::ResultWarning& x : r.warnings) {
+        if (x.code == "background_cpu_load_high" && x.message.find("during") != std::string::npos)
+            w = &x;
+    }
+    ASSERT_NE(w, nullptr);
+    EXPECT_NE(w->message.find("18.0% during trial 2 of 2"), std::string::npos) << w->message;
+    EXPECT_NE(eb::format_summary(r).find("highest during trials 18.0% (trial 2"), std::string::npos)
+        << eb::format_summary(r);
+
+    std::vector<eb::TrialResult> quiet{fake_trial(0, 4.0)};
+    quiet[0].during = eb::LoadSample{0.10, 0.8};  // not above the threshold
+    eb::BenchmarkResult q = result_with_trials(std::move(quiet));
+    eb::finish_result(q);
+    for (const eb::ResultWarning& x : q.warnings) {
+        if (x.code == "background_cpu_load_high")
+            ADD_FAILURE() << x.message;
+    }
 }

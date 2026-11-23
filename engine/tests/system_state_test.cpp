@@ -94,6 +94,63 @@ TEST(CpuUtilization, NoElapsedTimeOrBackwards) {
     EXPECT_FALSE(eb::cpu_utilization({10, 10, 10}, {5, 20, 20}).has_value());
 }
 
+// Background utilization: system busy time minus the measuring process's own CPU
+// time, over the system total ({idle, kernel, user}; kernel includes idle).
+// Below, 1000 units elapse: 500 idle, so 500 busy.
+TEST(BackgroundCpuUtilization, ZeroOwnTimeIsTheSystemUtilization) {
+    EXPECT_DOUBLE_EQ(*eb::background_cpu_utilization({0, 0, 0}, {500, 700, 300}, 40, 40), 0.5);
+    EXPECT_DOUBLE_EQ(*eb::background_cpu_utilization({0, 0, 0}, {500, 700, 300}, 40, 40),
+                     *eb::cpu_utilization({0, 0, 0}, {500, 700, 300}));
+}
+
+TEST(BackgroundCpuUtilization, OwnTimeEqualToAllBusyTimeLeavesNoBackground) {
+    EXPECT_EQ(*eb::background_cpu_utilization({0, 0, 0}, {500, 700, 300}, 100, 600), 0.0);
+}
+
+TEST(BackgroundCpuUtilization, NormalCaseSubtractsOwnTime) {
+    // 500 busy, 200 of them ours: 300 of 1000 from other processes.
+    EXPECT_DOUBLE_EQ(*eb::background_cpu_utilization({0, 0, 0}, {500, 700, 300}, 1000, 1200), 0.3);
+}
+
+TEST(BackgroundCpuUtilization, NormalizedByTheLogicalProcessorCount) {
+    // 1 s on 4 logical processors: the system total is 4 s (40,000,000 units).
+    // This process used one full processor (1 s), others 0.5 s: 0.5 / 4.
+    const std::uint64_t second = 10'000'000;
+    const eb::CpuTimes start{0, 0, 0};
+    const eb::CpuTimes end{static_cast<std::uint64_t>(2.5 * second),
+                           static_cast<std::uint64_t>(3.0 * second), 1 * second};
+    EXPECT_DOUBLE_EQ(*eb::background_cpu_utilization(start, end, 0, second), 0.125);
+}
+
+TEST(BackgroundCpuUtilization, OwnTimeAboveBusyTimeClampsToZero) {
+    // The counters are updated at different moments: our own time can exceed the
+    // system's busy time slightly.
+    EXPECT_EQ(*eb::background_cpu_utilization({0, 0, 0}, {500, 700, 300}, 0, 510), 0.0);
+}
+
+TEST(BackgroundCpuUtilization, ClockEdgeCases) {
+    // No elapsed system time.
+    EXPECT_FALSE(eb::background_cpu_utilization({5, 5, 5}, {5, 5, 5}, 0, 0).has_value());
+    // System counters going backwards (not two readings of one system).
+    EXPECT_FALSE(eb::background_cpu_utilization({10, 10, 10}, {5, 20, 20}, 0, 0).has_value());
+    EXPECT_FALSE(eb::background_cpu_utilization({0, 10, 10}, {0, 20, 5}, 0, 0).has_value());
+    // Own CPU time going backwards.
+    EXPECT_FALSE(eb::background_cpu_utilization({0, 0, 0}, {500, 700, 300}, 10, 5).has_value());
+    // Only idle time elapsed, own time zero: no background load.
+    EXPECT_EQ(*eb::background_cpu_utilization({0, 0, 0}, {1000, 1000, 0}, 7, 7), 0.0);
+}
+
+TEST(BackgroundCpuUtilization, ProcessCpuTimeIsReadable) {
+    const std::optional<std::uint64_t> a = eb::query_process_cpu_time();
+    ASSERT_TRUE(a.has_value());
+    volatile double sink = 0;
+    for (int i = 0; i < 2'000'000; ++i)
+        sink = sink + 1.0;
+    const std::optional<std::uint64_t> b = eb::query_process_cpu_time();
+    ASSERT_TRUE(b.has_value());
+    EXPECT_GE(*b, *a);
+}
+
 TEST(CpuUtilization, LiveSampleIsARatio) {
     const eb::LoadSample s = eb::sample_cpu_load(std::chrono::milliseconds(50));
     EXPECT_GE(s.cpu_utilization_ratio, 0.0);

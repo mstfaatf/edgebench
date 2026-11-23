@@ -322,6 +322,22 @@ std::optional<double> cpu_utilization(const CpuTimes& a, const CpuTimes& b) {
     return std::clamp(static_cast<double>(busy) / static_cast<double>(total), 0.0, 1.0);
 }
 
+std::optional<double> background_cpu_utilization(const CpuTimes& a, const CpuTimes& b,
+                                                 std::uint64_t own_start, std::uint64_t own_end) {
+    if (b.idle < a.idle || b.kernel < a.kernel || b.user < a.user || own_end < own_start)
+        return std::nullopt;
+    const std::uint64_t idle = b.idle - a.idle;
+    const std::uint64_t kernel = b.kernel - a.kernel;  // includes idle
+    const std::uint64_t user = b.user - a.user;
+    const std::uint64_t total = kernel + user;
+    if (total == 0)
+        return std::nullopt;
+    const std::uint64_t busy = (kernel >= idle ? kernel - idle : 0) + user;
+    const std::uint64_t own = own_end - own_start;
+    const std::uint64_t others = busy > own ? busy - own : 0;
+    return std::clamp(static_cast<double>(others) / static_cast<double>(total), 0.0, 1.0);
+}
+
 // ----------------------------------------------------------------- queries
 
 namespace {
@@ -403,6 +419,13 @@ CpuTimes query_cpu_times() {
     if (!GetSystemTimes(&idle, &kernel, &user))
         return {};
     return {filetime_u64(idle), filetime_u64(kernel), filetime_u64(user)};
+}
+
+std::optional<std::uint64_t> query_process_cpu_time() {
+    FILETIME creation{}, exit{}, kernel{}, user{};
+    if (!GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernel, &user))
+        return std::nullopt;
+    return filetime_u64(kernel) + filetime_u64(user);
 }
 
 LoadSample sample_cpu_load(std::chrono::milliseconds window) {

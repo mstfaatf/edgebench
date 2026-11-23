@@ -19,6 +19,7 @@
 #include "edgebench/sha256.hpp"
 #include "process_util.hpp"
 #include "test_runtime.hpp"
+#include "validator.hpp"
 
 namespace fs = std::filesystem;
 namespace eb = edgebench;
@@ -28,7 +29,6 @@ namespace {
 
 const fs::path kSourceDir = fs::path(EDGEBENCH_SOURCE_DIR).make_preferred();
 const fs::path kFixtures = kSourceDir / "engine" / "tests" / "fixtures" / "models";
-const fs::path kPython = fs::path(EDGEBENCH_PYTHON).make_preferred();
 
 eb::Runtime& runtime() {
     return eb::test::shared_runtime();
@@ -92,10 +92,7 @@ eb::BenchmarkResult run(const eb::RunConfig& c, RecordingProvider* recorder = nu
 
 // Runs scripts/validate_results.py --strict on `path`; returns its stdout + stderr.
 eb::test::ProcessResult validate(const fs::path& path) {
-    return eb::test::run_process(
-        kPython,
-        {(kSourceDir / "scripts" / "validate_results.py").native(), L"--strict", path.native()},
-        kSourceDir);
+    return eb::test::run_validator(path);
 }
 
 std::string read_file(const fs::path& p) {
@@ -360,8 +357,8 @@ TEST(ResultFiles, RealRunWritesValidatedFiles) {
     EXPECT_EQ(sum[3][0], "aggregate");
     check_row(sum[3], doc.at("timing").at("aggregate").at("stats"));
 
-    if (!fs::is_regular_file(kPython))
-        GTEST_SKIP() << kPython << " not found: schema validation skipped";
+    if (const std::string& why = eb::test::validator_unavailable_reason(); !why.empty())
+        GTEST_SKIP() << why;
     const eb::test::ProcessResult v = validate(w.result_file);
     EXPECT_EQ(v.exit_code, 0u) << v.output;
     EXPECT_NE(v.out.find("1 passed, 0 failed, 0 with warnings"), std::string::npos) << v.output;
@@ -371,9 +368,9 @@ TEST(ResultFiles, RealRunWritesValidatedFiles) {
             EXPECT_TRUE(warn.path == "/runtime/ep_device/driver_version" ||
                         warn.path == "/system/load")  // --load-sample-ms 0
                 << warn.message;
-        else  // the machine's state may legitimately trigger these
+        else  // the machine's state may legitimately trigger these (short trials vary)
             EXPECT_TRUE(warn.code == "background_cpu_load_high" ||
-                        warn.code == "power_state_changed")
+                        warn.code == "power_state_changed" || warn.code == "trial_spread_high")
                 << warn.code << ": " << warn.message;
     }
 }
@@ -412,8 +409,8 @@ TEST(ResultFiles, FailedRunWritesAValidFailedResult) {
     EXPECT_FALSE(doc.at("runtime").is_null());  // partial data is kept
     EXPECT_FALSE(doc.at("model").is_null());
     EXPECT_TRUE(doc.at("execution").at("verification_method").is_null());
-    if (!fs::is_regular_file(kPython))
-        GTEST_SKIP() << kPython << " not found";
+    if (const std::string& why = eb::test::validator_unavailable_reason(); !why.empty())
+        GTEST_SKIP() << why;
     const eb::test::ProcessResult v = validate(written.value().result_file);
     EXPECT_EQ(v.exit_code, 0u) << v.output;
 }
@@ -435,8 +432,8 @@ TEST(ResultFiles, FailedLoadResultHasNoRuntime) {
     EXPECT_TRUE(doc.at("runtime").is_null());
     EXPECT_EQ(doc.at("model").at("inputs").at(0).at("shape"), (json{1, 4}));  // from the file
     EXPECT_EQ(doc.at("config").at("batch_size"), 1);
-    if (!fs::is_regular_file(kPython))
-        GTEST_SKIP() << kPython << " not found";
+    if (const std::string& why = eb::test::validator_unavailable_reason(); !why.empty())
+        GTEST_SKIP() << why;
     EXPECT_EQ(validate(written.value().result_file).exit_code, 0u);
 }
 

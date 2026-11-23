@@ -11,6 +11,7 @@
 
 #include "edgebench/exit_codes.hpp"
 #include "process_util.hpp"
+#include "validator.hpp"
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -31,7 +32,6 @@ const fs::path kEdgebenchExe = fs::path(EDGEBENCH_EXE_PATH).make_preferred();
 const fs::path kSignalHelper = fs::path(EDGEBENCH_SIGNAL_HELPER_PATH).make_preferred();
 const fs::path kSourceDir = fs::path(EDGEBENCH_SOURCE_DIR).make_preferred();
 const fs::path kFixtures = kSourceDir / "engine" / "tests" / "fixtures" / "models";
-const fs::path kPython = fs::path(EDGEBENCH_PYTHON).make_preferred();
 
 uint32_t code(ExitCode c) {
     return static_cast<uint32_t>(eb::to_int(c));
@@ -65,13 +65,7 @@ fs::path latest_in(const fs::path& dir) {
 }
 
 void expect_valid(const fs::path& result) {
-    if (!fs::is_regular_file(kPython))
-        return;
-    const ProcessResult v = run_process(
-        kPython,
-        {(kSourceDir / "scripts" / "validate_results.py").native(), L"--strict", result.native()},
-        kSourceDir);
-    EXPECT_EQ(v.exit_code, 0u) << v.output;
+    eb::test::validate_or_skip(result);
 }
 
 #define SKIP_WITHOUT_CONSOLE()              \

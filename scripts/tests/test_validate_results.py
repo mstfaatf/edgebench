@@ -306,6 +306,19 @@ def test_invalid_fixture_fails_for_the_intended_reason(validators, path):
     assert (issue.severity, issue.code, issue.path) == (expect["severity"], expect["code"], expect["path"]), str(issue)
 
 
+def test_run_stopped_for_a_foreign_module_may_record_it(validators):
+    """A failed run whose error is module_outside_bundle records the module on purpose."""
+    doc, base, _ = build_fixture(INVALID_FIXTURES / "module_outside_bundle.json")
+    schema = validators.for_version("1.1.0").schema
+    assert any(i.code == "module_outside_bundle" for i in vr.consistency_issues(doc, base, schema))
+    doc["status"] = "failed"
+    doc["error"] = {"stage": "session_creation", "code": "module_outside_bundle",
+                    "message": "onnxruntime.dll loaded from outside the bundle directory"}
+    assert not any(i.code == "module_outside_bundle" for i in vr.consistency_issues(doc, base, schema))
+    doc["error"]["code"] = "ORT_FAIL"  # any other failure: the rule applies again
+    assert any(i.code == "module_outside_bundle" for i in vr.consistency_issues(doc, base, schema))
+
+
 def test_every_v1_1_rule_has_a_fixture():
     codes = {load(p)["expect"]["code"] for p in FIXTURES}
     assert set(vr.V1_1_RULES) <= codes, set(vr.V1_1_RULES) - codes

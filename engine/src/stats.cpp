@@ -80,4 +80,11 @@ TrialVariation compute_trial_variation(std::span<const double> trial_means_ms) {
     return v;
 }
 
+bool trial_spread_high(const TrialVariation& v) {
+    if (v.trial_mean_cv_ratio && *v.trial_mean_cv_ratio > kHighTrialMeanCv)
+        return true;
+    return v.trial_mean_min_ms > 0 &&
+           v.trial_mean_max_ms > kHighTrialMeanRatio * v.trial_mean_min_ms;
+}
+
 }  // namespace edgebench
