@@ -379,3 +379,21 @@ def test_successful_result_still_requires_device_list(validators):
     doc["runtime"]["ep_devices"] = None
     paths = {i.path for i in vr.validate_document(doc, validators, CPU_110)}
     assert "/runtime/ep_devices" in paths
+
+
+def test_cli_prints_non_ascii_paths_on_a_legacy_code_page(tmp_path):
+    # Windows runners give a child Python a cp1252 stdout, which cannot encode
+    # every path; the validator must still report and exit 0.
+    import os
+    import subprocess
+    import sys
+
+    target = tmp_path / "测试 dir"
+    target.mkdir()
+    shutil.copy(V110 / "example-cpu-fp32.json", target)
+    env = dict(os.environ, PYTHONIOENCODING="cp1252", PYTHONUTF8="0")
+    result = subprocess.run(
+        [sys.executable, str(vr.REPO_ROOT / "scripts" / "validate_results.py"), "--strict", str(target)],
+        capture_output=True, env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert b"PASS " in result.stdout

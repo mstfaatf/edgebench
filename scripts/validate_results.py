@@ -564,6 +564,17 @@ def collect_files(paths: Iterable[Path]) -> list[Path]:
     return files
 
 
+def make_output_safe() -> None:
+    """Never fail on printing: replace characters the console encoding cannot show.
+
+    On Windows, stdout of a child process (or a console with a legacy code page)
+    may use a code page such as cp1252, which cannot encode every path.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("paths", nargs="+", type=Path, metavar="FILE_OR_DIR")
@@ -571,6 +582,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--schema", type=Path,
                         help="validate every file against this schema file instead of the one "
                              "matching its schema_version")
+    make_output_safe()
     args = parser.parse_args(argv)
 
     try:

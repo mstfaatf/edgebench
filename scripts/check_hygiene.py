@@ -157,10 +157,22 @@ def ref_exists(root: Path, ref: str) -> bool:
 # --------------------------------------------------------------------------- main
 
 
+def make_output_safe() -> None:
+    """Never fail on printing: replace characters the console encoding cannot show.
+
+    On Windows, stdout of a child process (or a console with a legacy code page)
+    may use a code page such as cp1252, which cannot encode every path.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--base", default="origin/main",
                         help="branch whose commits only produce a report (default: origin/main)")
+    make_output_safe()
     args = parser.parse_args(argv)
 
     try:

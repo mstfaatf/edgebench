@@ -70,10 +70,22 @@ def markdown(coverage: dict[str, tuple[int, int]], prefix: str | None) -> str:
     return "\n".join(out)
 
 
+def make_output_safe() -> None:
+    """Never fail on printing: replace characters the console encoding cannot show.
+
+    On Windows, stdout of a child process (or a console with a legacy code page)
+    may use a code page such as cp1252, which cannot encode every path.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("report", type=Path, help="Cobertura XML file")
     parser.add_argument("--prefix", help="only files under this directory, e.g. engine/src")
+    make_output_safe()
     args = parser.parse_args(argv)
     if not args.report.is_file():
         print(f"error: {args.report} does not exist", file=sys.stderr)
