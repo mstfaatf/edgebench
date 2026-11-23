@@ -55,7 +55,9 @@ WORDING_EXCLUDED = {"scripts/check_hygiene.py"}
 EXCLUDED_PREFIXES = ("third_party/",)
 
 MAX_FILE_BYTES = 1024 * 1024
-LARGE_FILE_ALLOWLIST: set[str] = set()
+# Text files that are large by nature. Each entry is reviewed: the full ImageNetV2
+# manifest has one row (path, label, SHA256) per image, 10,000 rows.
+LARGE_FILE_ALLOWLIST: set[str] = {"datasets/imagenetv2-matched-frequency/eval-full.tsv"}
 
 # Bytes read to decide whether a file is binary (a NUL byte means binary).
 BINARY_SNIFF_BYTES = 8192

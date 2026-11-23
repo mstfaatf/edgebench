@@ -74,8 +74,8 @@ def test_files(tmp_path):
     ]
 
 
-def test_large_file_allowlist_is_empty():
-    assert hy.LARGE_FILE_ALLOWLIST == set()
+def test_large_file_allowlist_holds_only_the_full_evaluation_manifest():
+    assert hy.LARGE_FILE_ALLOWLIST == {"datasets/imagenetv2-matched-frequency/eval-full.tsv"}
 
 
 def test_commit_messages():

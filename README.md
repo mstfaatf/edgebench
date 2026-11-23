@@ -104,8 +104,8 @@ Tests carry CTest labels by what they need: `unit` (nothing), `ort` (the ONNX
 Runtime DLLs), `models` (locally prepared models), `npu` (the NPU) and
 `schema` (the Python environment). Continuous integration builds with
 `/W4 /WX` and runs `unit` and `ort` on Windows x64 and ARM64 runners, line
-coverage on x64, and the result validator tests and a repository hygiene check
-on Linux. See [Test labels](docs/setup.md#test-labels) and
+coverage on x64, and the result validator, dataset manifest and repository
+hygiene tests on Linux. See [Test labels](docs/setup.md#test-labels) and
 [Continuous integration](docs/setup.md#continuous-integration).
 
 ## Documentation
@@ -130,6 +130,7 @@ on Linux. See [Test labels](docs/setup.md#test-labels) and
 | `tools/` | Diagnostics: `ort_probe` (C++ CPU/NPU runner), QNN rejection check |
 | `scripts/` | Dependency fetch, data and model preparation, NPU checks, result validation |
 | `schemas/` | JSON Schema for result files, one file per version |
+| `datasets/` | Manifests of the evaluation and calibration images (path, label, SHA256); the images are downloaded, not committed |
 | `benchmarks/` | Configurations and results (`results/published/` is committed, `results/local/` is not) |
 | `ml/`, `dashboard/` | Model training/export pipelines and the static dashboard (planned) |
 | `docs/` | Documentation |

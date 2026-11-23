@@ -66,7 +66,14 @@ Exported and quantized models are written to `models/`, which is not committed.
 
 | Dataset | Used by | License | Source |
 |---|---|---|---|
-| Imagenette (`imagenette2-320`) | `scripts/get_data.py`, accuracy and calibration scripts | Repository: Apache-2.0; the images are a subset of ImageNet: see upstream for their terms | <https://github.com/fastai/imagenette> |
+| ImageNetV2 matched-frequency (`imagenetv2-matched-frequency.tar.gz`, Hugging Face revision `d626240b`) | `scripts/get_data.py`, accuracy evaluation | Code repository and Hugging Face dataset card: MIT; the images were collected from Flickr for use under the same terms as ImageNet (non-commercial research and educational use): see upstream | <https://github.com/modestyachts/ImageNetV2>, <https://huggingface.co/datasets/vaishaal/ImageNetV2>, <https://www.image-net.org/download.php> |
+| Imagenette (`imagenette2-320`) | `scripts/get_data.py`, calibration and the feasibility accuracy scripts | Repository: Apache-2.0; the images are a subset of ImageNet: see upstream for their terms | <https://github.com/fastai/imagenette> |
 
-The archive, the extracted images and the split lists derived from them are
-kept under `data/`, which is not committed.
+The archives, the extracted images and the split lists derived from them are
+kept under `data/`, which is not committed. The committed manifests in
+`datasets/` list only paths, class indices and SHA-256 hashes of the images.
+
+`scripts/common/imagenet_classes.json` (ImageNet-1k class index, WordNet ID and
+name) combines the WordNet IDs from ImageNetV2's `data/metadata/class_info.json`
+(MIT) with the category names from torchvision's weights metadata
+(BSD-3-Clause).

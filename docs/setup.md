@@ -48,7 +48,7 @@ The ARM64 build is the one tagged `-arm64`. Confirm it with `sysconfig`:
 > | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `scripts/export_mobilenetv2.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `scripts/npu_overhead.py`, `tools/qnn_rejection_check.py`, `tools/ort_probe/reference.py`, `tools/ort_probe/make_reference.py` |
 > | Environment diagnostic | Runs and reports the problem prominently | `scripts/check_env.py` |
 > | Downloads and platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/get_data.py`, `scripts/get_aihub_baseline.py`, `scripts/validate_results.py`, `scripts/make_test_models.py`, `scripts/check_hygiene.py`, `scripts/coverage_summary.py`, and the tests in `scripts/tests/` |
-> | Shared modules in `scripts/common/` | Not checked themselves. `npu_harness.py` and `ort_qnn.py` load ONNX Runtime and are imported only by guarded scripts, after the check; the others (`preprocess.py`, `accuracy.py`, `qnn_log.py`, `onnx_prune.py`, `qdq_inspect.py`, `results_io.py`, `cli.py`) do not | – |
+> | Shared modules in `scripts/common/` | Not checked themselves. `npu_harness.py` and `ort_qnn.py` load ONNX Runtime and are imported only by guarded scripts, after the check; the others (`preprocess.py`, `manifests.py`, `accuracy.py`, `qnn_log.py`, `onnx_prune.py`, `qdq_inspect.py`, `results_io.py`, `cli.py`) do not | – |
 >
 > The C++ build accepts ARM64 (the measurement build) and x64 (CPU only, for
 > continuous integration; it reports emulation at run time), and rejects
@@ -132,34 +132,83 @@ benchmarks. Run them from the repository root, in order. Nothing they produce
 is committed: `data/`, `models/` (except its README), `cache/` and
 `benchmarks/results/local/` are gitignored.
 
-### 1. Download Imagenette and build the splits
+### 1. Download the datasets
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\get_data.py
+.\.venv\Scripts\python.exe scripts\get_data.py --dataset all
 ```
 
-Downloads [Imagenette](https://github.com/fastai/imagenette) (`imagenette2-320.tgz`,
-~340 MB, 10 ImageNet classes) into `data/downloads/`, verifies its SHA256
-(pinned in the script; checked again on every run), and extracts it to
-`data/imagenette/imagenette2-320/`. It then writes two seeded, deterministic
-image lists to `data/imagenette/splits/`:
+`--dataset imagenette` (the default) and `--dataset imagenetv2` fetch one of
+the two. Archives go to `data/downloads/` and are pinned by SHA256 in the
+script. The images are never committed; what is committed is a manifest per
+split in [`datasets/`](../datasets/README.md): every image's relative path,
+ImageNet-1k class index and SHA256, so anyone can confirm they have exactly the
+same images.
 
-| Split | Source | Size | Used for |
-|---|---|---|---|
-| `calibration.txt` | Imagenette train | 200 (20 per class) | Static quantization calibration |
-| `eval.txt` | Imagenette val | 500 (50 per class) | Accuracy measurement |
+| Split | Manifest | Source | Size | Used for |
+|---|---|---|---|---|
+| eval-full | `datasets/imagenetv2-matched-frequency/eval-full.tsv` | ImageNetV2 matched-frequency | 10,000 (10 per class) | Published accuracy |
+| eval-quick | `datasets/imagenetv2-matched-frequency/eval-quick.tsv` | Subset of eval-full | 1,000 (1 per class, seed 20261123) | Fast iteration |
+| calibration | `datasets/imagenette/calibration.tsv` | Imagenette train | 200 (20 per class, seed 20261120) | Static quantization calibration |
 
-The mapping from Imagenette WordNet IDs to ImageNet-1k class indices is in
+**ImageNetV2.** [ImageNetV2](https://github.com/modestyachts/ImageNetV2) is a
+test set for ImageNet-1k classifiers, built by its authors after the original
+ImageNet with the same collection process, so it shares no images with the
+ImageNet training set. The matched-frequency variant has 10 images for each of
+the 1,000 classes. It is the accuracy set for published results.
+`get_data.py --dataset imagenetv2` downloads
+`imagenetv2-matched-frequency.tar.gz` (1.26 GB; despite the name, an
+uncompressed tar) from the dataset's Hugging Face repository
+([vaishaal/ImageNetV2](https://huggingface.co/datasets/vaishaal/ImageNetV2), the
+location linked from the ImageNetV2 README) at a pinned revision, checks the
+SHA256 that Hugging Face publishes for it, extracts it to `data/imagenetv2/`
+and hashes every image against `eval-full.tsv`. Later runs skip the download and
+only compare the file list with the manifest; `--verify` hashes the archive (if
+still present) and all images again, `--force-extract` extracts again. The
+archive can be deleted after extraction.
+
+ImageNetV2 names its class directories `0` to `999` after the ImageNet-1k class
+index, in the order torchvision's ImageNet weights use (WordNet IDs sorted).
+Read them as integers: a generic image-folder loader sorts them as strings
+(`0, 1, 10, 100, ...`) and mislabels 988 of the 1,000 classes. The class list
+(index, WordNet ID, torchvision name) is committed as
+`scripts/common/imagenet_classes.json`; the tests check it against the
+torchvision weights metadata and the Imagenette mapping.
+
+eval-quick takes one image per class from eval-full with Python's
+`random.Random(20261123)`, visiting classes in index order and each class's
+images in path order (`scripts/common/manifests.py`, `stratified_sample`).
+
+**Imagenette.** [Imagenette](https://github.com/fastai/imagenette)
+(`imagenette2-320.tgz`, ~340 MB, 10 ImageNet classes) is extracted to
+`data/imagenette/imagenette2-320/` (its archive is verified on every run). The
+script writes two seeded image lists to `data/imagenette/splits/`:
+`calibration.txt` (the calibration split above) and `eval.txt` (500 val images,
+50 per class), and checks the calibration images against their manifest. The
+mapping from Imagenette WordNet IDs to ImageNet-1k class indices is in
 `scripts/common/imagenette_classes.json`.
 
 > Most Imagenette val images are drawn from the ImageNet-1k *train* set, which
-> ImageNet-pretrained weights were trained on. Absolute accuracy on `eval` is
-> therefore optimistic; it is meant for comparing variants of the same model
-> (FP32 vs INT8, CPU vs NPU), not as an ImageNet accuracy figure.
+> ImageNet-pretrained weights were trained on, so accuracy on `eval.txt` is
+> optimistic. It was used for the variant comparisons (FP32 vs INT8, CPU vs
+> NPU) in [feasibility.md](feasibility.md) and is kept for those scripts;
+> published accuracy uses ImageNetV2.
+
+Calibration and evaluation images must not overlap. The calibration images come
+from a different dataset, and the check compares file contents (SHA256), not
+names: `get_data.py --dataset imagenetv2` and the manifest tests fail on any
+image shared by `calibration.tsv` and `eval-full.tsv`. That comparison only
+catches byte-identical files; a re-encoded copy of the same photo would have a
+different hash.
 
 All scripts that feed images to a model use the same preprocessing,
 `scripts/common/preprocess.py` (resize shorter side to 256, center crop 224,
 scale to [0, 1], ImageNet mean/std normalization, NCHW float32).
+Normalization is a separate step (`normalize()`, or `load_image(...,
+normalized=False)` to skip it), for models that take [0, 1] input or have the
+normalization folded into their first convolution. The tests check the output
+against torchvision's transforms (synthetic images, and ImageNetV2 images when
+downloaded) and pin its SHA256 for a fixed input.
 
 ### 2. Export the FP32 model
 
@@ -507,7 +556,7 @@ the `unit` and `ort` labels only, never `models` or `npu`.
 
 | Job | Runner | What it does |
 |---|---|---|
-| `python (validator, hygiene)` | `ubuntu-latest`, Python 3.12 | Installs `requirements-ci.txt` (jsonschema and pytest, pinned); runs the validator, hygiene-check and coverage-summary tests; validates `docs/examples/` and `benchmarks/results/published/` with `--strict`; runs the hygiene check |
+| `python (validator, hygiene)` | `ubuntu-latest`, Python 3.12 | Installs `requirements-ci.txt` (jsonschema and pytest, pinned); runs the validator, hygiene-check, coverage-summary and dataset-manifest tests; validates `docs/examples/` and `benchmarks/results/published/` with `--strict`; runs the hygiene check |
 | `windows-x64` | `windows-latest` | MSVC x64 environment; fetches the x64 ONNX Runtime; `x64` preset, Release, `/W4 /WX`; `ctest -L "unit\|ort"`; uploads the CTest log on failure |
 | `windows-arm64` | `windows-11-arm` | The same for ARM64 (`arm64-ninja` preset); the QNN files are bundled, but there is no NPU, so no `npu` tests run |
 | `coverage (x64)` | `windows-latest` | x64 Debug build; the `unit` and `ort` tests under [OpenCppCoverage](https://github.com/OpenCppCoverage/OpenCppCoverage) 0.9.9.0 (installer pinned by SHA256), including child processes, filtered to `engine/src`; uploads the HTML and Cobertura report (`coverage-x64` artifact) and prints per-file line coverage in the job summary. Report only, no threshold |
@@ -522,7 +571,7 @@ To run the same checks locally:
 
 ```powershell
 # python job (any OS; with the full .venv or a venv with requirements-ci.txt)
-python -m pytest scripts/tests/test_validate_results.py scripts/tests/test_check_hygiene.py scripts/tests/test_coverage_summary.py
+python -m pytest scripts/tests/test_validate_results.py scripts/tests/test_check_hygiene.py scripts/tests/test_coverage_summary.py scripts/tests/test_manifests.py
 python scripts/validate_results.py --strict docs/examples benchmarks/results/published
 python scripts/check_hygiene.py
 
@@ -535,7 +584,8 @@ ctest --preset x64-release -L "unit|ort" --output-on-failure
 `scripts/check_hygiene.py` (standard library only) fails if a local-only notes
 file is tracked, if a tracked text file contains development-process wording
 (phase or prompt numbers, names of AI tools or assistants, attribution
-trailers), or if a tracked file is larger than 1 MiB (the allowlist is empty).
+trailers), or if a tracked file is larger than 1 MiB (the only allowed exception is the full ImageNetV2 manifest,
+`datasets/imagenetv2-matched-frequency/eval-full.tsv`).
 It also scans commit messages: those not yet on `origin/main` (or `--base REF`)
 must be clean; older ones are only reported. The patterns are defined once, at
 the top of the script. A line can be exempted with the marker `hygiene: allow`,
