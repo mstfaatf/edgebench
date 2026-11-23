@@ -55,6 +55,10 @@ ctest --preset arm64-release -L "unit|ort"
 .\build\arm64-release\bin\Release\edgebench.exe doctor
 ```
 
+Until the Python environment (`.venv`, see the setup guide) exists, the tests
+that check written result files with the Python validator skip that check, and
+the `schema` test is not added; configure again after creating it.
+
 To benchmark a model you need an ONNX file with fixed input shapes. The
 [setup guide](docs/setup.md#preparing-data-and-models) creates MobileNetV2 FP32
 and INT8 models with a Python environment (`scripts\export_mobilenetv2.py`,

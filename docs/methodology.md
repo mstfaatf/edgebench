@@ -26,7 +26,8 @@ value per trial) and is never mixed into the iteration latencies.
 A run is a number of **trials**. Every trial:
 
 1. idles for the same period (`--cooldown-ms`, default 2 s) while sampling
-   background CPU load; the first trial idles too;
+   background CPU load; the first trial idles too (with `--cooldown-ms 0`, only
+   the first trial idles, for `--load-sample-ms`);
 2. creates a **fresh session**;
 3. runs warm-up iterations (the first one is timed and reported separately as
    `first_inference_ms`, the rest are untimed);
@@ -37,10 +38,12 @@ Fresh sessions make each trial independent of the previous one's caches and
 allocations. The equal idle before every trial matters because session creation
 and the first iterations are much slower after the CPU has dropped to a low
 power state; without it the first trial was systematically faster than the
-rest ([cli.md](cli.md#what-run-measures)). When several configurations are
-compared, a scheduler **rotates the order** every round, so that no
+rest ([cli.md](cli.md#what-run-measures)). Trials are ordered by a scheduler
+that, for several configurations, **rotates the order** every round, so that no
 configuration always runs first or last
-([architecture.md](architecture.md#trial-loop-and-scheduling)).
+([architecture.md](architecture.md#trial-loop-and-scheduling)). `edgebench run`
+benchmarks one configuration; benchmarking several configurations in one
+interleaved run is planned.
 
 Node placement (which execution provider runs each node) is recorded after the
 last trial in a separate session with verbose logging, so it can never warm up

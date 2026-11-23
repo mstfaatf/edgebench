@@ -28,6 +28,11 @@ CLI::Validator choice(ParseFn parse, std::string choices, std::string what) {
         "{" + choices + "}");
 }
 
+// " (lo to hi)" for an option's help text, from the limits that validate() enforces.
+std::string range(int lo, int hi) {
+    return " (" + std::to_string(lo) + " to " + std::to_string(hi) + ")";
+}
+
 }  // namespace
 
 std::string version_text() {
@@ -49,8 +54,8 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
     // ---------------------------------------------------------------- run
     CLI::App* run = app.add_subcommand(
         "run",
-        "Benchmark a model. With --dry-run, validate the options, load ONNX Runtime and "
-        "print the resolved configuration as JSON.");
+        "Benchmark a model. With --dry-run, validate the options, create the session, run "
+        "one inference and print the resolved configuration as JSON.");
     RunConfig defaults;
     std::string model, provider = "cpu", binding = "iobinding", input = "random", graph = "all";
     std::string label, name, format = "summary", output_dir = defaults.output_dir.string();
@@ -63,7 +68,8 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
         ->type_name("NAME")
         ->check(choice(parse_provider, std::string(supported_providers()), "provider"))
         ->capture_default_str();
-    run->add_option("--threads", cfg.threads, "CPU intra-op threads (>= 1); always recorded")
+    run->add_option("--threads", cfg.threads,
+                    "CPU intra-op threads" + range(1, kMaxThreads) + "; always recorded")
         ->type_name("N")
         ->capture_default_str();
     run->add_option("--binding", binding,
@@ -71,17 +77,20 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
         ->type_name("MODE")
         ->check(choice(parse_binding, "run, iobinding", "binding"))
         ->capture_default_str();
-    run->add_option("--warmup", cfg.warmup, "Unmeasured iterations before each trial (>= 0)")
+    run->add_option("--warmup", cfg.warmup,
+                    "Unmeasured iterations before each trial" + range(0, kMaxWarmup))
         ->type_name("N")
         ->capture_default_str();
-    run->add_option("--iterations", cfg.iterations, "Measured iterations per trial (>= 1)")
+    run->add_option("--iterations", cfg.iterations,
+                    "Measured iterations per trial" + range(1, kMaxIterations))
         ->type_name("N")
         ->capture_default_str();
-    run->add_option("--trials", cfg.trials, "Number of trials (>= 1)")
+    run->add_option("--trials", cfg.trials, "Number of trials" + range(1, kMaxTrials))
         ->type_name("N")
         ->capture_default_str();
     run->add_option("--cooldown-ms", cfg.cooldown_ms,
-                    "Idle period before every trial in ms, sampling background CPU load (>= 0)")
+                    "Idle period before every trial in ms, sampling background CPU load" +
+                        range(0, kMaxCooldownMs))
         ->type_name("N")
         ->capture_default_str();
     run->add_option("--input", input, "Input data: random or constant")
@@ -101,7 +110,8 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
     CLI::Option* label_opt =
         run->add_option("--label", label, "Name for the run")->type_name("TEXT");
     run->add_option("--load-sample-ms", cfg.load_sample_ms,
-                    "Background-load sample before trial 1 when --cooldown-ms is 0 (0: none)")
+                    "Background-load sample in ms before trial 1 when --cooldown-ms is 0" +
+                        range(0, kMaxLoadSampleMs) + "; 0: none")
         ->type_name("N")
         ->capture_default_str();
     run->add_option("--output-dir", output_dir, "Directory for result files")
@@ -116,7 +126,8 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
         ->check(choice(parse_output_format, "summary, json", "format"))
         ->capture_default_str();
     run->add_flag("--dry-run", cfg.dry_run,
-                  "Validate, load ONNX Runtime, print the resolved configuration as JSON");
+                  "Validate, create the session, run one inference, print the resolved "
+                  "configuration as JSON");
 
     // ---------------------------------------------------------------- doctor
     CLI::App* doctor = app.add_subcommand(
@@ -147,9 +158,9 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
             message.erase(0, app_prefix.size());
         const std::vector<CLI::App*> selected = app.get_subcommands();
         if (selected.empty()) {  // no or unknown command: show the commands
-            result.err = format_error("usage_error", message,
-                                      "Run 'edgebench --help' for the commands.") +
-                         "\n" + app.help();
+            result.err =
+                format_error("usage_error", message, "Run 'edgebench --help' for the commands.") +
+                "\n" + app.help();
         } else {
             result.err = format_error(
                 "usage_error", message,
@@ -182,10 +193,9 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
             for (std::size_t i = 0; i < errors.size(); ++i) {
                 const ConfigError& e = errors[i];
                 // One hint, after the last error.
-                result.err += format_error(e.kind, "--" + e.field + ": " + e.message,
-                                           i + 1 == errors.size()
-                                               ? "Run 'edgebench run --help' for the options."
-                                               : "");
+                result.err += format_error(
+                    e.kind, "--" + e.field + ": " + e.message,
+                    i + 1 == errors.size() ? "Run 'edgebench run --help' for the options." : "");
             }
             result.exit = ExitCode::usage_error;
         }

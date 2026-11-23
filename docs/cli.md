@@ -2,7 +2,7 @@
 
 ```text
 edgebench run --model <file.onnx> [options]    benchmark a model
-edgebench doctor [--json]                      check the build, the machine and ONNX Runtime
+edgebench doctor [--json] [--load-sample-ms N] check the build, the machine and ONNX Runtime
 edgebench --version | --help
 edgebench <command> --help
 ```
