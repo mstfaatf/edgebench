@@ -1,0 +1,20 @@
+# Minimal Python environment for the platform-independent checks: the results
+# validator and its tests (scripts/validate_results.py, scripts/tests/), on any OS
+# and architecture. Versions match requirements.txt.
+#
+#   python -m pip install --only-binary=:all: -r requirements-ci.txt
+
+jsonschema==4.26.0
+pytest==9.2.0
+
+# Transitive dependencies
+attrs==26.1.0
+colorama==0.4.6; sys_platform == "win32"
+iniconfig==2.3.1
+jsonschema-specifications==2025.9.1
+packaging==26.3
+pluggy==1.7.0
+Pygments==2.21.0
+referencing==0.37.0
+rpds-py==2026.9.1
+typing_extensions==4.16.0

@@ -72,7 +72,6 @@ bool same_file_path(const fs::path& a, const fs::path& b) {
     return is_same_path(resolve_path(a).native(), resolve_path(b).native());
 }
 
-
 std::mutex g_load_mutex;
 std::optional<OrtLoadResult> g_loaded;  // set after the first successful load
 
@@ -103,9 +102,9 @@ std::string_view load_error_hint(OrtLoadError error) {
         case OrtLoadError::dll_not_found:
         case OrtLoadError::entry_point_missing:
         case OrtLoadError::version_mismatch:
-            return "The build copies the bundled ONNX Runtime (third_party/onnxruntime/lib) next "
-                   "to the executable; rebuild, or copy onnxruntime.dll and "
-                   "onnxruntime_providers_shared.dll from there.";
+            return "The build copies the bundled ONNX Runtime (lib/ of the package fetched by "
+                   "scripts/fetch_deps.ps1) next to the executable; rebuild, or copy "
+                   "onnxruntime.dll and onnxruntime_providers_shared.dll from there.";
         case OrtLoadError::load_failed:
             return "Check that the DLL is an ONNX Runtime build for this architecture and not "
                    "damaged; re-run scripts/fetch_deps.ps1 -Force and rebuild.";
@@ -316,11 +315,10 @@ OrtLoadResult load_onnxruntime(const fs::path& bundle_dir) {
 
     const OrtApi* api = api_base->GetApi(ORT_API_VERSION);
     if (!api) {
-        return fail_and_unload(OrtLoadError::api_version_unsupported,
-                               dll + " (ONNX Runtime " + r.ort_version +
-                                   ") does not provide C API version " +
-                                   std::to_string(ORT_API_VERSION) +
-                                   ", which EdgeBench's headers were built for");
+        return fail_and_unload(
+            OrtLoadError::api_version_unsupported,
+            dll + " (ONNX Runtime " + r.ort_version + ") does not provide C API version " +
+                std::to_string(ORT_API_VERSION) + ", which EdgeBench's headers were built for");
     }
 
     Ort::InitApi(api);

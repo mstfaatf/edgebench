@@ -440,7 +440,7 @@ TEST(ResultFiles, FailedLoadResultHasNoRuntime) {
     EXPECT_EQ(validate(written.value().result_file).exit_code, 0u);
 }
 
-TEST(OnnxInspect, MobileNetV2Models) {
+TEST(OnnxInspectModels, MobileNetV2) {
     const fs::path models = kSourceDir / "models" / "mobilenetv2";
     const fs::path fp32 = models / "mobilenetv2_fp32_b1.onnx";
     const fs::path s8w = models / "mobilenetv2_int8qdq_pc_s8w_b1.onnx";

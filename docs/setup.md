@@ -1,8 +1,10 @@
 # Setup
 
-EdgeBench targets Windows on Snapdragon (Windows 11 ARM64). Everything, Python
-and C++, must run as **native ARM64** code. Results produced under x64
-emulation are not representative and will be mislabeled.
+EdgeBench targets Windows on Snapdragon (Windows 11 ARM64). Everything that
+measures, Python and C++, must run as **native ARM64** code. Results produced
+under x64 emulation are not representative and will be mislabeled. (A CPU-only
+x64 build of the engine exists for continuous integration; see
+[x64 and Ninja builds](#x64-and-ninja-builds-cpu-only).)
 
 ## Python
 
@@ -45,11 +47,12 @@ The ARM64 build is the one tagged `-arm64`. Confirm it with `sysconfig`:
 > |---|---|---|
 > | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `scripts/export_mobilenetv2.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `scripts/npu_overhead.py`, `tools/qnn_rejection_check.py`, `tools/ort_probe/reference.py`, `tools/ort_probe/make_reference.py` |
 > | Environment diagnostic | Runs and reports the problem prominently | `scripts/check_env.py` |
-> | Downloads and platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/get_data.py`, `scripts/get_aihub_baseline.py`, `scripts/validate_results.py`, `scripts/make_test_models.py`, and the tests in `scripts/tests/` |
+> | Downloads and platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/get_data.py`, `scripts/get_aihub_baseline.py`, `scripts/validate_results.py`, `scripts/make_test_models.py`, `scripts/check_hygiene.py`, `scripts/coverage_summary.py`, and the tests in `scripts/tests/` |
 > | Shared modules in `scripts/common/` | Not checked themselves. `npu_harness.py` and `ort_qnn.py` load ONNX Runtime and are imported only by guarded scripts, after the check; the others (`preprocess.py`, `accuracy.py`, `qnn_log.py`, `onnx_prune.py`, `qdq_inspect.py`, `results_io.py`, `cli.py`) do not | – |
 >
-> The C++ build has the equivalent check at configure time
-> (`cmake/RequireNativeArm64.cmake`).
+> The C++ build accepts ARM64 (the measurement build) and x64 (CPU only, for
+> continuous integration; it reports emulation at run time), and rejects
+> anything else at configure time (`cmake/TargetArchitecture.cmake`).
 >
 > Results from emulated or non-Snapdragon machines would be mislabeled, so only
 > the first kind is blocked. Tooling that just reads or checks files must keep
@@ -313,6 +316,7 @@ not committed):
 |---|---|---|
 | ONNX Runtime 1.32.0 (headers, win-arm64 `onnxruntime.dll`/`.lib`) | NuGet `Microsoft.ML.OnnxRuntime` | `third_party/onnxruntime/` |
 | QNN execution provider 2.8.0 (plugin EP + QNN SDK 2.52.0 backends) | GitHub release `onnxruntime/onnxruntime-qnn`, `onnxruntime-qnn-2.8.0-win-arm64.zip` | `third_party/onnxruntime-qnn/` |
+| With `-Arch x64`: ONNX Runtime 1.32.0 (headers, win-x64 DLL/`.lib`), no QNN | the same NuGet package and SHA256 | `third_party/onnxruntime-x64/` |
 
 [`github.com/onnxruntime/onnxruntime-qnn`](https://github.com/onnxruntime/onnxruntime-qnn)
 is maintained by Qualcomm and is the official source of the QNN plugin
@@ -335,16 +339,41 @@ ctest --preset arm64-release
 `edgebench doctor` checks the build, the machine and the bundled ONNX Runtime
 (see [How the executables find ONNX Runtime](#how-the-executables-find-onnx-runtime));
 [cli.md](cli.md) describes every command and exit code.
-Tests carry a CTest label: `unit` tests need no ONNX Runtime DLLs; `ort_bundle`
-tests load the bundled DLLs and run `edgebench.exe` and `ort_probe.exe` (including
-with a missing, wrong, or damaged `onnxruntime.dll`); `schema` runs the
-results-schema tests. To run only the unit tests: `ctest --preset arm64-release -L unit`.
+
+#### Test labels
+
+Every test carries a CTest label saying what it needs, so each environment can
+select the tests it can run:
+
+| Label | Needs | Tests |
+|---|---|---|
+| `unit` | nothing beyond the build: no ONNX Runtime DLL | `edgebench_tests`, `ort_probe_tests` |
+| `ort` | the bundled ONNX Runtime for the build's architecture (x64 or ARM64) and the committed fixture models in `engine/tests/fixtures/models/` | `edgebench_bundle_tests` (loader, `doctor`, `run`, `ort_probe.exe`, exit paths, missing/wrong/damaged `onnxruntime.dll`) |
+| `models` | additionally the exported models (`models/`) or reference data (`data/ort_probe_reference/`); see [Preparing data and models](#preparing-data-and-models) | `edgebench_bundle_tests` suites ending in `Models`; they skip when the files are missing |
+| `npu` | the QNN execution provider, its backend and an NPU (ARM64 Snapdragon only) | `edgebench_bundle_tests` suites ending in `Npu` (none yet) |
+| `schema` | the Python environment (`EDGEBENCH_PYTHON`, default `.venv`) | `results_schema_tests` (the validator suite through pytest) |
+
+In the ONNX Runtime test program the label follows the test suite name (see
+`edgebench_discover_ort_tests()` in `engine/CMakeLists.txt`): suites ending in
+`Models` get `models`, suites ending in `Npu` get `npu`, all others `ort`. Name
+new suites accordingly. Commands per environment:
+
+| Environment | Command |
+|---|---|
+| Snapdragon device, everything prepared | `ctest --preset arm64-release` |
+| ARM64 without models or NPU | `ctest --preset arm64-release -L "unit\|ort\|schema"` |
+| x64 build (CI, or an x64 machine) | `ctest --preset x64-release -L "unit\|ort"` |
+| No ONNX Runtime at all | `ctest --preset <preset> -L unit` |
+
+Tests that need a model or reference file skip (not fail) when it is missing;
+tests that send console control events skip without a console.
 
 The presets use the Visual Studio 2022 generator with the ARM64-hosted toolset,
 so no `vcvarsall`/ARM64 compiler environment is needed, only `cmake` on `PATH`.
-Configuration fails with a clear message if the compiler does not target
-native ARM64. Third-party C++ libraries are downloaded at configure time,
-pinned by release tag and SHA256:
+Configuration fails with a clear message if the compiler targets neither ARM64
+nor x64 (`cmake/TargetArchitecture.cmake`). Third-party C++ libraries are
+downloaded at configure time into `build/_downloads/` (shared by all build
+directories, `EDGEBENCH_DOWNLOAD_DIR`), pinned by release tag and SHA256:
 
 | Library | Version | Used for |
 |---|---|---|
@@ -359,6 +388,34 @@ DLLs. Project code (engine and tools) is compiled with `/W4 /WX`. If the
 repository is checked out under `%TEMP%`, MSBuild prints warning MSB8029 about
 intermediate directories in a temporary folder; it is harmless, but a checkout
 elsewhere avoids it.
+
+### x64 and Ninja builds (CPU only)
+
+Measurements come from the native ARM64 build. An x64 build exists so the engine
+and its tests also build and run on x64 machines, in particular the hosted
+continuous-integration runners. It uses the win-x64 ONNX Runtime from the same
+NuGet package and has no QNN execution provider: `edgebench` offers the CPU
+provider only, and `ort_probe --target npu` stops with
+`error: [qnn_ep_not_bundled]` (exit 4). On Windows on Arm an x64 build runs under
+emulation; `edgebench doctor` reports that as the `process_emulated` warning, and
+its timings do not describe the device.
+
+The `x64` and `arm64-ninja` presets use the Ninja Multi-Config generator and the
+compiler of the current MSVC developer environment, whose target architecture
+decides the build's (any Visual Studio version with that toolset works). From
+the repository root:
+
+```powershell
+# x64 developer environment (on an ARM64 machine this uses the emulated x64-hosted compiler)
+& 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Launch-VsDevShell.ps1' -Arch amd64 -SkipAutomaticLocation
+powershell -ExecutionPolicy Bypass -File scripts\fetch_deps.ps1 -Arch x64
+cmake --preset x64
+cmake --build --preset x64-release      # or x64-debug
+ctest --preset x64-release -L "unit|ort"
+```
+
+`arm64-ninja` / `arm64-ninja-release` work the same way from an ARM64 developer
+environment (`-Arch arm64`). Build directories: `build/x64/`, `build/arm64-ninja/`.
 
 ### How the executables find ONNX Runtime
 
@@ -441,3 +498,48 @@ run directory with the probe's JSON output to `benchmarks/results/local/feasibil
 
 `tools\ort_probe\reference.py` is a quick Python check with an input filled
 with 0.5; `ort_probe --fill 0.5` runs the same input from C++.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on pushes to `main`, pull requests to `main`, and
+on demand. Hosted runners have neither the exported models nor an NPU, so CI runs
+the `unit` and `ort` labels only, never `models` or `npu`.
+
+| Job | Runner | What it does |
+|---|---|---|
+| `python (validator, hygiene)` | `ubuntu-latest`, Python 3.12 | Installs `requirements-ci.txt` (jsonschema and pytest, pinned); runs the validator, hygiene-check and coverage-summary tests; validates `docs/examples/` and `benchmarks/results/published/` with `--strict`; runs the hygiene check |
+| `windows-x64` | `windows-latest` | MSVC x64 environment; fetches the x64 ONNX Runtime; `x64` preset, Release, `/W4 /WX`; `ctest -L "unit\|ort"`; uploads the CTest log on failure |
+| `windows-arm64` | `windows-11-arm` | The same for ARM64 (`arm64-ninja` preset); the QNN files are bundled, but there is no NPU, so no `npu` tests run |
+| `coverage (x64)` | `windows-latest` | x64 Debug build; the `unit` and `ort` tests under [OpenCppCoverage](https://github.com/OpenCppCoverage/OpenCppCoverage) 0.9.9.0 (installer pinned by SHA256), including child processes, filtered to `engine/src`; uploads the HTML and Cobertura report (`coverage-x64` artifact) and prints per-file line coverage in the job summary. Report only, no threshold |
+
+`third_party/` is cached per architecture, keyed by the hash of
+`scripts/fetch_deps.ps1`; `build/_downloads/` is cached keyed by the CMake files.
+The Windows jobs pass a venv with `requirements-ci.txt` as `EDGEBENCH_PYTHON`, so
+the engine tests that validate the result files they write run there too.
+Third-party actions are pinned to full commit SHAs.
+
+To run the same checks locally:
+
+```powershell
+# python job (any OS; with the full .venv or a venv with requirements-ci.txt)
+python -m pytest scripts/tests/test_validate_results.py scripts/tests/test_check_hygiene.py scripts/tests/test_coverage_summary.py
+python scripts/validate_results.py --strict docs/examples benchmarks/results/published
+python scripts/check_hygiene.py
+
+# windows-x64 job: see "x64 and Ninja builds" above
+ctest --preset x64-release -L "unit|ort" --output-on-failure
+```
+
+### Hygiene check
+
+`scripts/check_hygiene.py` (standard library only) fails if a local-only notes
+file is tracked, if a tracked text file contains development-process wording
+(phase or prompt numbers, names of AI tools or assistants, attribution
+trailers), or if a tracked file is larger than 1 MiB (the allowlist is empty).
+It also scans commit messages: those not yet on `origin/main` (or `--base REF`)
+must be clean; older ones are only reported. The patterns are defined once, at
+the top of the script. A line can be exempted with the marker `hygiene: allow`,
+for genuine false positives only; there are none at present.
+
+OpenCppCoverage instruments x64 processes only, so coverage is measured on the
+x64 build; the code under test is the same as on ARM64.

@@ -8,8 +8,11 @@
 #   find_package(OnnxRuntime REQUIRED COMPONENTS QNN)
 #
 # Hints (cache variables):
-#   OnnxRuntime_ROOT   ONNX Runtime package root   (default: <repo>/third_party/onnxruntime)
-#   QnnEp_ROOT         QNN EP package root         (default: <repo>/third_party/onnxruntime-qnn)
+#   OnnxRuntime_ROOT   ONNX Runtime package root   (default: <repo>/third_party/onnxruntime
+#                      for ARM64, <repo>/third_party/onnxruntime-x64 for x64; chosen from
+#                      EDGEBENCH_TARGET_ARCH, see cmake/TargetArchitecture.cmake)
+#   QnnEp_ROOT         QNN EP package root         (default: <repo>/third_party/onnxruntime-qnn;
+#                      ARM64 only)
 #
 # Results:
 #   OnnxRuntime::OnnxRuntime     imported shared library target. Everything linking it
@@ -23,9 +26,16 @@
 # Functions:
 #   onnxruntime_copy_runtime_files(<target> [QNN])
 #     Adds a post-build step copying the runtime files next to <target>'s output.
+#     QNN also copies the QNN files when the QNN component was found (ARM64 builds);
+#     on x64 it copies ONNX Runtime alone.
 
 get_filename_component(_ort_repo_root "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
-set(OnnxRuntime_ROOT "${_ort_repo_root}/third_party/onnxruntime" CACHE PATH "ONNX Runtime package root")
+if(EDGEBENCH_TARGET_ARCH STREQUAL "x64")
+  set(_ort_default_root "${_ort_repo_root}/third_party/onnxruntime-x64")
+else()
+  set(_ort_default_root "${_ort_repo_root}/third_party/onnxruntime")
+endif()
+set(OnnxRuntime_ROOT "${_ort_default_root}" CACHE PATH "ONNX Runtime package root")
 set(QnnEp_ROOT "${_ort_repo_root}/third_party/onnxruntime-qnn" CACHE PATH "QNN execution provider package root")
 
 find_path(OnnxRuntime_INCLUDE_DIR onnxruntime_cxx_api.h
@@ -65,7 +75,7 @@ find_package_handle_standard_args(OnnxRuntime
   VERSION_VAR OnnxRuntime_VERSION
   HANDLE_COMPONENTS
   REASON_FAILURE_MESSAGE
-    "Run: powershell -ExecutionPolicy Bypass -File scripts/fetch_deps.ps1")
+    "Run: powershell -ExecutionPolicy Bypass -File scripts/fetch_deps.ps1 -Arch ${EDGEBENCH_TARGET_ARCH}")
 
 if(OnnxRuntime_FOUND)
   set(OnnxRuntime_RUNTIME_FILES "${OnnxRuntime_DLL}")
@@ -110,10 +120,7 @@ mark_as_advanced(OnnxRuntime_INCLUDE_DIR OnnxRuntime_IMPLIB OnnxRuntime_DLL
 function(onnxruntime_copy_runtime_files target)
   cmake_parse_arguments(PARSE_ARGV 1 _arg "QNN" "" "")
   set(_files ${OnnxRuntime_RUNTIME_FILES})
-  if(_arg_QNN)
-    if(NOT OnnxRuntime_QNN_FOUND)
-      message(FATAL_ERROR "onnxruntime_copy_runtime_files(${target} QNN): QNN component not found")
-    endif()
+  if(_arg_QNN AND OnnxRuntime_QNN_FOUND)
     list(APPEND _files ${OnnxRuntime_QNN_RUNTIME_FILES})
   endif()
   add_custom_command(TARGET ${target} POST_BUILD

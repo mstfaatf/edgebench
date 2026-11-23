@@ -14,7 +14,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-include(RequireNativeArm64)
+include(TargetArchitecture)
 include(EdgeBenchWarnings)
 
 # Put all executables in one directory per configuration so the runtime DLLs
@@ -26,7 +26,12 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 # version in requirements.txt (and scripts/fetch_deps.ps1), so the C++ engine and
 # the Python tooling run the same ONNX Runtime.
 set(EDGEBENCH_ONNXRUNTIME_VERSION 1.32.0)
-find_package(OnnxRuntime ${EDGEBENCH_ONNXRUNTIME_VERSION} EXACT REQUIRED COMPONENTS QNN)
+# The QNN execution provider (NPU) exists for ARM64 only; x64 builds are CPU-only.
+if(EDGEBENCH_TARGET_ARCH STREQUAL "arm64")
+  find_package(OnnxRuntime ${EDGEBENCH_ONNXRUNTIME_VERSION} EXACT REQUIRED COMPONENTS QNN)
+else()
+  find_package(OnnxRuntime ${EDGEBENCH_ONNXRUNTIME_VERSION} EXACT REQUIRED)
+endif()
 message(STATUS "ONNX Runtime ${OnnxRuntime_VERSION}: ${OnnxRuntime_ROOT}")
 
 # Results schema version the engine writes (generated into engine/src/version_config.hpp).
@@ -41,10 +46,15 @@ endif()
 
 # Third-party C++ libraries, pinned by release tag and SHA256 (versions are listed in
 # docs/setup.md). SYSTEM makes their headers external, so /W4 /WX does not apply to them.
+# Downloaded archives are kept in EDGEBENCH_DOWNLOAD_DIR, outside the build tree,
+# so a fresh build directory reuses them (each is re-verified against its hash).
 include(FetchContent)
+set(EDGEBENCH_DOWNLOAD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/build/_downloads"
+  CACHE PATH "Directory for the third-party archives downloaded at configure time")
 FetchContent_Declare(cli11
   URL https://github.com/CLIUtils/CLI11/releases/download/v2.7.2/CLI11-2.7.2-Source.tar.gz
   URL_HASH SHA256=0cb0ef44c4c7129ea972505ee81e6d09c71b2e7fe59ca3a13c47d8a994d682b2
+  DOWNLOAD_DIR "${EDGEBENCH_DOWNLOAD_DIR}"
   DOWNLOAD_EXTRACT_TIMESTAMP TRUE
   SYSTEM)
 set(CLI11_PRECOMPILED OFF CACHE BOOL "" FORCE)
@@ -55,6 +65,7 @@ set(CLI11_INSTALL OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(nlohmann_json
   URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
   URL_HASH SHA256=42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa
+  DOWNLOAD_DIR "${EDGEBENCH_DOWNLOAD_DIR}"
   DOWNLOAD_EXTRACT_TIMESTAMP TRUE
   SYSTEM)
 set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
@@ -69,6 +80,7 @@ if(EDGEBENCH_BUILD_TESTS)
   FetchContent_Declare(googletest
     URL https://github.com/google/googletest/archive/refs/tags/v1.18.0.tar.gz
     URL_HASH SHA256=6e3191c1455468b3fc35a417fb565c1c5071aee1b7e7f85e30cf48a98d37d8b5
+    DOWNLOAD_DIR "${EDGEBENCH_DOWNLOAD_DIR}"
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     SYSTEM)
   # Match the project's dynamic CRT (/MD) and keep gmock/install out of the build.

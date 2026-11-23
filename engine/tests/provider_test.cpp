@@ -1,6 +1,9 @@
 // CpuProvider and OrtBenchSession against the bundled ONNX Runtime: fixture
 // models, input generation, Run vs IoBinding, node placement, and agreement with
 // the Python (onnxruntime) reference outputs.
+//
+// Suites ending in "Models" use the exported MobileNetV2 models and reference data
+// (ctest label `models`, skipped when absent); the rest use only committed fixtures.
 
 #include <gtest/gtest.h>
 
@@ -63,6 +66,47 @@ eb::Error session_error(const eb::RunConfig& config) {
 std::vector<std::byte> copy_output(const eb::BenchSession& s, std::size_t i) {
     const eb::TensorView v = s.output(i);
     return {v.bytes.begin(), v.bytes.end()};
+}
+
+void expect_placement_all_cpu(const fs::path& model) {
+    const eb::RunConfig c = config_for(model, eb::RunBinding::run);
+    auto provider = eb::make_provider(runtime(), c);
+    ASSERT_TRUE(provider.ok());
+    const auto placed = provider.value()->record_placement(model, c);
+    ASSERT_TRUE(placed.ok()) << placed.error().message;
+    const eb::NodeAssignment& p = placed.value();
+    EXPECT_GT(p.total_nodes, 0) << model;
+    EXPECT_TRUE(p.all_on("CPUExecutionProvider")) << model;
+    EXPECT_EQ(p.nodes_by_ep.size(), 1u) << model;
+    EXPECT_EQ(p.verification_method, "node_assignment");
+    ::testing::Test::RecordProperty(model.filename().string() + "_nodes", p.total_nodes);
+}
+
+void expect_run_and_iobinding_identical(const fs::path& model) {
+    auto run = make_session(config_for(model, eb::RunBinding::run));
+    auto bound = make_session(config_for(model, eb::RunBinding::iobinding_preallocated));
+    ASSERT_EQ(run->input_data(0).size(), bound->input_data(0).size());
+    EXPECT_EQ(std::memcmp(run->input_data(0).data(), bound->input_data(0).data(),
+                          run->input_data(0).size_bytes()),
+              0);  // same seed, same inputs
+    ASSERT_TRUE(run->run_once().ok());
+    ASSERT_TRUE(bound->run_once().ok());
+    for (std::size_t i = 0; i < run->outputs().size(); ++i)
+        EXPECT_EQ(copy_output(*run, i), copy_output(*bound, i)) << model << " output " << i;
+}
+
+void expect_iobinding_reuses_buffers(const fs::path& model) {
+    auto s = make_session(config_for(model, eb::RunBinding::iobinding_preallocated));
+    const float* input = s->input_data(0).data();
+    ASSERT_TRUE(s->run_once().ok());
+    const std::byte* output = s->output(0).bytes.data();
+    const std::vector<std::byte> first = copy_output(*s, 0);
+    for (int i = 0; i < 5; ++i) {
+        ASSERT_TRUE(s->run_once().ok());
+        EXPECT_EQ(s->input_data(0).data(), input);
+        EXPECT_EQ(s->output(0).bytes.data(), output);
+        EXPECT_EQ(copy_output(*s, 0), first);  // same input, same output
+    }
 }
 
 // --------------------------------------------------------------------------- reference data
@@ -162,21 +206,13 @@ TEST(CpuProvider, SessionOnFixedFixture) {
 }
 
 TEST(CpuProvider, NodePlacementIsAllCpu) {
-    for (const fs::path& model : {kFixtures / "fixed_float32.onnx", kFp32}) {
-        if (!fs::is_regular_file(model))
-            continue;
-        const eb::RunConfig c = config_for(model, eb::RunBinding::run);
-        auto provider = eb::make_provider(runtime(), c);
-        ASSERT_TRUE(provider.ok());
-        const auto placed = provider.value()->record_placement(model, c);
-        ASSERT_TRUE(placed.ok()) << placed.error().message;
-        const eb::NodeAssignment& p = placed.value();
-        EXPECT_GT(p.total_nodes, 0) << model;
-        EXPECT_TRUE(p.all_on("CPUExecutionProvider")) << model;
-        EXPECT_EQ(p.nodes_by_ep.size(), 1u) << model;
-        EXPECT_EQ(p.verification_method, "node_assignment");
-        RecordProperty(model.filename().string() + "_nodes", p.total_nodes);
-    }
+    expect_placement_all_cpu(kFixtures / "fixed_float32.onnx");
+}
+
+TEST(CpuProviderModels, NodePlacementIsAllCpu) {
+    if (!fs::is_regular_file(kFp32))
+        GTEST_SKIP() << kFp32 << " is not present (see docs/setup.md)";
+    expect_placement_all_cpu(kFp32);
 }
 
 TEST(CpuProvider, DynamicBatchIsAUsageError) {
@@ -234,35 +270,25 @@ TEST(CpuProvider, ConstantInputs) {
 // --------------------------------------------------------------------------- run modes
 
 TEST(CpuProvider, RunAndIoBindingAreBitIdentical) {
-    for (const fs::path& model : {kFixtures / "fixed_float32.onnx", kFp32, kS8w}) {
+    expect_run_and_iobinding_identical(kFixtures / "fixed_float32.onnx");
+}
+
+TEST(CpuProviderModels, RunAndIoBindingAreBitIdentical) {
+    for (const fs::path& model : {kFp32, kS8w}) {
         if (!fs::is_regular_file(model))
-            continue;
-        auto run = make_session(config_for(model, eb::RunBinding::run));
-        auto bound = make_session(config_for(model, eb::RunBinding::iobinding_preallocated));
-        ASSERT_EQ(run->input_data(0).size(), bound->input_data(0).size());
-        EXPECT_EQ(std::memcmp(run->input_data(0).data(), bound->input_data(0).data(),
-                              run->input_data(0).size_bytes()),
-                  0);  // same seed, same inputs
-        ASSERT_TRUE(run->run_once().ok());
-        ASSERT_TRUE(bound->run_once().ok());
-        for (std::size_t i = 0; i < run->outputs().size(); ++i)
-            EXPECT_EQ(copy_output(*run, i), copy_output(*bound, i)) << model << " output " << i;
+            GTEST_SKIP() << model << " is not present (see docs/setup.md)";
+        expect_run_and_iobinding_identical(model);
     }
 }
 
 TEST(CpuProvider, IoBindingReusesItsBuffers) {
-    const fs::path model = fs::is_regular_file(kFp32) ? kFp32 : kFixtures / "fixed_float32.onnx";
-    auto s = make_session(config_for(model, eb::RunBinding::iobinding_preallocated));
-    const float* input = s->input_data(0).data();
-    ASSERT_TRUE(s->run_once().ok());
-    const std::byte* output = s->output(0).bytes.data();
-    const std::vector<std::byte> first = copy_output(*s, 0);
-    for (int i = 0; i < 5; ++i) {
-        ASSERT_TRUE(s->run_once().ok());
-        EXPECT_EQ(s->input_data(0).data(), input);
-        EXPECT_EQ(s->output(0).bytes.data(), output);
-        EXPECT_EQ(copy_output(*s, 0), first);  // same input, same output
-    }
+    expect_iobinding_reuses_buffers(kFixtures / "fixed_float32.onnx");
+}
+
+TEST(CpuProviderModels, IoBindingReusesItsBuffers) {
+    if (!fs::is_regular_file(kFp32))
+        GTEST_SKIP() << kFp32 << " is not present (see docs/setup.md)";
+    expect_iobinding_reuses_buffers(kFp32);
 }
 
 TEST(CpuProvider, IoBindingSeesInputChanges) {
@@ -284,9 +310,9 @@ struct ReferenceCase {
     eb::RunBinding binding;
 };
 
-class PythonReference : public ::testing::TestWithParam<ReferenceCase> {};
+class PythonReferenceModels : public ::testing::TestWithParam<ReferenceCase> {};
 
-TEST_P(PythonReference, MatchesOrtProbeTolerance) {
+TEST_P(PythonReferenceModels, MatchesOrtProbeTolerance) {
     const ReferenceCase& c = GetParam();
     if (!fs::is_regular_file(c.model) || !fs::is_regular_file(kReference / "index.tsv"))
         GTEST_SKIP() << "model or reference data not present (see docs/setup.md)";
@@ -328,7 +354,7 @@ TEST_P(PythonReference, MatchesOrtProbeTolerance) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    CpuProvider, PythonReference,
+    CpuProvider, PythonReferenceModels,
     ::testing::Values(
         ReferenceCase{"fp32_run", kFp32, "cpu_fp32", eb::RunBinding::run},
         ReferenceCase{"fp32_iobinding", kFp32, "cpu_fp32", eb::RunBinding::iobinding_preallocated},

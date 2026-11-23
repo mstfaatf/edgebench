@@ -15,6 +15,7 @@
 #include "edgebench/exit_codes.hpp"
 #include "edgebench/ort_loader.hpp"
 #include "edgebench/sha256.hpp"
+#include "edgebench/system_info.hpp"
 #include "edgebench/version.hpp"
 #include "process_util.hpp"
 
@@ -94,7 +95,12 @@ TEST(Doctor, HappyPathReportsBundledOnnxRuntime) {
                                         kEdgebenchExe.parent_path());
     expect_no_crash(r);
     ASSERT_EQ(r.exit_code, 0u) << describe(r);
-    EXPECT_TRUE(r.err.empty()) << describe(r);
+    // The only message allowed on stderr is the emulation warning, for an x64 build
+    // on ARM64 Windows (this test program has the same architecture as edgebench.exe).
+    if (eb::query_system_info().emulated())
+        EXPECT_TRUE(r.err.starts_with("warning: [process_emulated]")) << describe(r);
+    else
+        EXPECT_TRUE(r.err.empty()) << describe(r);
     const std::string expected(eb::expected_onnxruntime_version());
     EXPECT_TRUE(contains(r.out, expected + " (C API " + std::to_string(ORT_API_VERSION) + ")"))
         << r.out;
@@ -128,9 +134,11 @@ TEST(Doctor, JsonOutputParses) {
     for (const json& d : j.at("runtime").at("ep_devices"))
         cpu_ep |= d.at("ep_name") == "CPUExecutionProvider" && d.at("device_type") == "CPU";
     EXPECT_TRUE(cpu_ep) << j.at("runtime").at("ep_devices").dump();
-    EXPECT_EQ(j.at("system").at("process_architecture"),
-              j.at("system").at("os").at("architecture"));
-    EXPECT_EQ(j.at("process_emulated"), false);
+    const bool emulated = eb::query_system_info().emulated();
+    EXPECT_EQ(
+        j.at("system").at("process_architecture") == j.at("system").at("os").at("architecture"),
+        !emulated);
+    EXPECT_EQ(j.at("process_emulated"), emulated);
     const json& power = j.at("system").at("power");
     for (const char* key :
          {"source", "power_mode", "power_plan", "battery_percent", "battery_saver"})
@@ -270,7 +278,7 @@ TEST(Cli, UsageErrorsExit2OnStderr) {
     EXPECT_TRUE(contains(npu.err, "supported providers: cpu")) << describe(npu);
 }
 
-TEST(Cli, RunDryRunPrintsResolvedConfig) {
+TEST(CliModels, RunDryRunPrintsResolvedConfig) {
     if (!fs::is_regular_file(kFp32Model))
         GTEST_SKIP() << kFp32Model << " is not present (see docs/setup.md)";
     const ProcessResult r = run_process(
@@ -356,7 +364,8 @@ TEST(Cli, RunDryRunNeedsOnnxRuntime) {
         iso.exe, {L"run", L"--model", iso.dummy_model().native(), L"--dry-run"}, iso.dir.path());
     expect_no_crash(r);
     EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
-    EXPECT_TRUE(contains(r.err, "error: [dll_not_found] cannot load ONNX Runtime: ")) << describe(r);
+    EXPECT_TRUE(contains(r.err, "error: [dll_not_found] cannot load ONNX Runtime: "))
+        << describe(r);
 }
 
 // A short run of the fixture model into `out` (no cooldown, no load sample).
@@ -471,7 +480,8 @@ TEST(Cli, RunLoadFailureWritesAFailedResult) {
     const ProcessResult r = run_process(iso.exe, args, iso.dir.path());
     expect_no_crash(r);
     EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
-    EXPECT_TRUE(contains(r.err, "error: [dll_not_found] cannot load ONNX Runtime: ")) << describe(r);
+    EXPECT_TRUE(contains(r.err, "error: [dll_not_found] cannot load ONNX Runtime: "))
+        << describe(r);
     const json doc = json::parse(std::ifstream(out / "fixture_cpu_iobinding_t4_latest.json"));
     EXPECT_EQ(doc.at("status"), "failed");
     EXPECT_EQ(doc.at("error").at("stage"), "environment");
@@ -487,7 +497,8 @@ TEST(OrtProbe, LoadFailureExits4) {
     const ProcessResult r = run_process(probe, {L"--model", L"any.onnx"}, dir.path());
     expect_no_crash(r);
     EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
-    EXPECT_TRUE(contains(r.err, "error: [dll_not_found] cannot load ONNX Runtime: ")) << describe(r);
+    EXPECT_TRUE(contains(r.err, "error: [dll_not_found] cannot load ONNX Runtime: "))
+        << describe(r);
 }
 
 TEST(OrtProbe, JsonRefusesToOverwrite) {
@@ -516,6 +527,35 @@ TEST(OrtProbe, JsonWritesANewFile) {
     EXPECT_EQ(r.exit_code, 0u) << describe(r);
     const json doc = json::parse(std::ifstream(target));
     EXPECT_EQ(doc.at("result"), "ok");
+}
+
+// A bundle without the QNN execution provider (as in x64 builds): the CPU target
+// works, the NPU target fails with an explanation instead of an ONNX Runtime error.
+TEST(OrtProbe, WithoutTheQnnEpOnlyTheCpuTargetWorks) {
+    TempDir dir;
+    const fs::path built = fs::path(EDGEBENCH_ORT_PROBE_PATH).make_preferred();
+    for (const wchar_t* name :
+         {L"ort_probe.exe", L"onnxruntime.dll", L"onnxruntime_providers_shared.dll"})
+        fs::copy_file(built.parent_path() / name, dir.path() / name);
+    const fs::path probe = dir.path() / "ort_probe.exe";
+    const std::wstring model = (kFixtureDir / "fixed_float32.onnx").native();
+
+    const ProcessResult cpu =
+        run_process(probe, {L"--model", model, L"--target", L"cpu"}, dir.path());
+    expect_no_crash(cpu);
+    EXPECT_EQ(cpu.exit_code, 0u) << describe(cpu);
+    EXPECT_TRUE(contains(cpu.out, "not bundled (CPU-only build)")) << describe(cpu);
+
+    const ProcessResult npu =
+        run_process(probe, {L"--model", model, L"--target", L"npu"}, dir.path());
+    expect_no_crash(npu);
+    EXPECT_EQ(npu.exit_code, code(ExitCode::ort_load_failure)) << describe(npu);
+    EXPECT_TRUE(contains(npu.err,
+                         "error: [qnn_ep_not_bundled] --target npu needs the QNN "
+                         "execution provider"))
+        << describe(npu);
+    EXPECT_TRUE(contains(npu.err, "hint: The QNN execution provider is bundled with ARM64 builds"))
+        << describe(npu);
 }
 #endif
 

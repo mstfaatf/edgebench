@@ -251,9 +251,25 @@ int RunProbe(const Options& o) {
 
     // ---------------------------------------------------------------- devices
     Section("EP devices");
+    // The QNN execution provider is bundled with ARM64 builds only; without it the
+    // probe can still check the CPU EP.
     const fs::path qnn_lib = exe_dir / kQnnEpLibrary;
-    env.RegisterExecutionProviderLibrary(kQnnEpName, qnn_lib.native());
-    std::printf("  registered %s from %s\n", kQnnEpName, qnn_lib.string().c_str());
+    const bool qnn_registered = fs::is_regular_file(qnn_lib);
+    if (qnn_registered) {
+        env.RegisterExecutionProviderLibrary(kQnnEpName, qnn_lib.native());
+        std::printf("  registered %s from %s\n", kQnnEpName, qnn_lib.string().c_str());
+    } else if (o.target == Target::kNpu) {
+        j.EndObject().EndObject();
+        edgebench::print_error(
+            "qnn_ep_not_bundled",
+            "--target npu needs the QNN execution provider, but " +
+                edgebench::path_to_utf8(qnn_lib) + " does not exist",
+            "The QNN execution provider is bundled with ARM64 builds only; use --target cpu, or "
+            "build with an arm64 preset.");
+        return kExitOrtLoadFailure;
+    } else {
+        std::printf("  %s not bundled (CPU-only build): CPU devices only\n", kQnnEpLibrary);
+    }
     const std::vector<Ort::ConstEpDevice> devices = env.GetEpDevices();
     PrintDevices(devices);
     std::optional<Ort::ConstEpDevice> npu;
@@ -529,7 +545,8 @@ int RunProbe(const Options& o) {
     }
 
     runner.reset();  // release sessions before unregistering the EP library
-    env.UnregisterExecutionProviderLibrary(kQnnEpName);
+    if (qnn_registered)
+        env.UnregisterExecutionProviderLibrary(kQnnEpName);
 
     j.Key("result").String(report.failed ? "failed" : "ok").EndObject();
     const bool json_written = o.json.empty() || WriteJsonFile(o.json, j.str());

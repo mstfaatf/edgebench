@@ -662,6 +662,7 @@ Warnings that do not end the run: `nondeterministic_outputs`
 | `--json` cannot be written | `write_failed` | 6 | not tested |
 | ONNX Runtime cannot be loaded | loader kind | 4 | `OrtProbe.LoadFailureExits4` |
 | `onnxruntime.dll` not from the exe directory; an ORT/QNN module loaded from elsewhere | `foreign_module_loaded`; `module_outside_bundle` | 4 | not triggerable for the probe (the loader check is tested with `PreloadHelper.*`) |
+| `--target npu` in a build without the QNN execution provider (x64) | `qnn_ep_not_bundled` | 4 | `OrtProbe.WithoutTheQnnEpOnlyTheCpuTargetWorks` |
 | Output comparison or device selection fails | `device_selection_failed`, check output | 1 | manual (NPU) |
 | ONNX Runtime error, e.g. strict mode refusing a session | `ort_runtime_error` with the ORT code | 3 | manual (`tools/qnn_rejection_check.py`, NPU) |
 | Ctrl+C or Ctrl+Break | none | 130 | `ExitPaths.OrtProbeCtrlBreakExits130WithoutWriting` |

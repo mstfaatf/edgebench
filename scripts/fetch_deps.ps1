@@ -7,20 +7,31 @@
     Fetches pinned, checksum-verified archives into third_party/downloads/ and
     extracts them into:
 
+        -Arch arm64 (default)
         third_party/onnxruntime/        include/ and lib/ (win-arm64) from the
                                         Microsoft.ML.OnnxRuntime NuGet package
         third_party/onnxruntime-qnn/    QNN plugin EP + QNN backend DLLs from the
                                         onnxruntime-qnn GitHub release
 
-    Safe to re-run: archives already present with the expected SHA256 are not
-    downloaded again, and an extracted directory is reused if it was produced
-    from the same archive. Use -Force to re-extract.
+        -Arch x64 (CPU-only builds, e.g. continuous integration)
+        third_party/onnxruntime-x64/    include/ and lib/ (win-x64) from the same
+                                        NuGet package; the QNN execution provider
+                                        exists for ARM64 only and is not fetched
+
+    Safe to re-run: a directory already extracted from the expected archive is
+    left alone (the archive is not even downloaded), and archives already present
+    with the expected SHA256 are not downloaded again. Use -Force to re-extract.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\fetch_deps.ps1
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File scripts\fetch_deps.ps1 -Arch x64
 #>
 [CmdletBinding()]
 param(
+    [ValidateSet('arm64', 'x64')]
+    [string]$Arch = 'arm64',
     [switch]$Force
 )
 
@@ -32,9 +43,10 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $OrtVersion = '1.32.0'
 $QnnVersion = '2.8.0'
 
-$Deps = @(
-    @{
-        Name    = 'onnxruntime'
+# One NuGet package holds the ONNX Runtime binaries for both architectures.
+function New-OrtDependency([string]$Name, [string]$Runtime) {
+    return @{
+        Name    = $Name
         Version = $OrtVersion
         Url     = "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/$OrtVersion/microsoft.ml.onnxruntime.$OrtVersion.nupkg"
         File    = "microsoft.ml.onnxruntime.$OrtVersion.nupkg"
@@ -42,11 +54,15 @@ $Deps = @(
         # Archive prefix -> destination subdirectory
         Extract = [ordered]@{
             'build/native/include/'         = 'include'
-            'runtimes/win-arm64/native/'    = 'lib'
+            "runtimes/$Runtime/native/"     = 'lib'
             'LICENSE'                       = '.'
             'ThirdPartyNotices.txt'         = '.'
         }
-    },
+    }
+}
+
+$Deps = if ($Arch -eq 'x64') { @(New-OrtDependency 'onnxruntime-x64' 'win-x64') } else { @(
+    (New-OrtDependency 'onnxruntime' 'win-arm64'),
     @{
         Name    = 'onnxruntime-qnn'
         Version = $QnnVersion
@@ -57,7 +73,7 @@ $Deps = @(
             ''  = '.'   # everything, flat
         }
     }
-)
+) }
 
 $RepoRoot    = Split-Path -Parent $PSScriptRoot
 $ThirdParty  = Join-Path $RepoRoot 'third_party'
@@ -95,15 +111,16 @@ function Get-VerifiedArchive($Dep) {
     return $path
 }
 
+function Test-Extracted($Dep) {
+    $marker = Join-Path (Join-Path $ThirdParty $Dep.Name) '.fetched'
+    return (Test-Path -LiteralPath $marker) -and
+        ((Get-Content -LiteralPath $marker -Raw).Trim() -eq "$($Dep.Version) $($Dep.Sha256)")
+}
+
 function Expand-Dependency($Dep, [string]$Archive) {
     $dest   = Join-Path $ThirdParty $Dep.Name
     $marker = Join-Path $dest '.fetched'
     $stamp  = "$($Dep.Version) $($Dep.Sha256)"
-    if (-not $Force -and (Test-Path -LiteralPath $marker) -and
-        ((Get-Content -LiteralPath $marker -Raw).Trim() -eq $stamp)) {
-        Write-Host "  up to date: third_party\$($Dep.Name) ($($Dep.Version))"
-        return
-    }
     if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
@@ -139,8 +156,13 @@ function Expand-Dependency($Dep, [string]$Archive) {
     Write-Host "  extracted $count files -> third_party\$($Dep.Name)"
 }
 
+Write-Host "Architecture: $Arch"
 foreach ($dep in $Deps) {
     Write-Host "$($dep.Name) $($dep.Version)"
+    if (-not $Force -and (Test-Extracted $dep)) {
+        Write-Host "  up to date: third_party\$($dep.Name) ($($dep.Version))"
+        continue
+    }
     $archive = Get-VerifiedArchive $dep
     Expand-Dependency $dep $archive
 }

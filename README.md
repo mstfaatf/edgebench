@@ -1,5 +1,7 @@
 # EdgeBench
 
+[![CI](https://github.com/mstfaatf/edgebench/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mstfaatf/edgebench/actions/workflows/ci.yml)
+
 CPU vs NPU inference benchmarking for Windows on Snapdragon, built on
 [ONNX Runtime](https://onnxruntime.ai/).
 
@@ -27,7 +29,9 @@ benchmark results at this stage.
 
 ## Supported platforms
 
-- Windows 11 on Snapdragon (ARM64), native ARM64 builds only.
+- Windows 11 on Snapdragon (ARM64), native ARM64 builds for measurements.
+- A CPU-only x64 build exists for continuous integration; it is not used for
+  measurements.
 - Designed to work on other Snapdragon devices by detecting the available
   execution providers and devices at run time.
 - So far only tested on a Snapdragon X Plus (Surface Laptop 7).
@@ -62,9 +66,16 @@ ctest --preset arm64-release
 .\build\arm64-release\bin\Release\edgebench.exe doctor
 ```
 
+Tests carry CTest labels by what they need (`unit`, `ort`, `models`, `npu`,
+`schema`); continuous integration runs `unit` and `ort` on Windows x64 and ARM64
+runners, plus the Python validator suite and a repository hygiene check on Linux.
+See [Test labels](docs/setup.md#test-labels) and
+[Continuous integration](docs/setup.md#continuous-integration).
+
 ## Documentation
 
-- [docs/setup.md](docs/setup.md): environment, data and model preparation, C++ build
+- [docs/setup.md](docs/setup.md): environment, data and model preparation, C++ build,
+  tests and continuous integration
 - [docs/cli.md](docs/cli.md): `edgebench` commands, options and exit codes
 - [docs/architecture.md](docs/architecture.md): engine structure (Runtime, Provider, BenchSession)
 - [docs/feasibility.md](docs/feasibility.md): feasibility note (test environment,

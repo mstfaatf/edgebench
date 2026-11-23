@@ -72,10 +72,28 @@ onnxruntime_copy_runtime_files(edgebench QNN)
 
 # --- Tests ------------------------------------------------------------------
 #
-# ctest labels:
-#   unit        no ONNX Runtime DLLs needed
-#   ort_bundle  needs the bundled ONNX Runtime next to the executables (and runs
-#               edgebench.exe); exclude with `ctest -LE ort_bundle`
+# ctest labels (docs/setup.md, "Tests"):
+#   unit    no ONNX Runtime DLL needed
+#   ort     the bundled ONNX Runtime for the build's architecture and the committed
+#           fixture models only
+#   models  exported models or reference data (models/, data/ort_probe_reference/);
+#           also needs the bundled ONNX Runtime
+#   npu     the QNN execution provider, its backend and an NPU (ARM64 Snapdragon only)
+#   schema  the Python results-schema and validator suite (root CMakeLists.txt)
+#
+# In the ONNX Runtime test programs the label follows the test suite name: suites
+# ending in "Models" get `models`, suites ending in "Npu" get `npu`, all others
+# `ort`. CI runs `ctest -L "unit|ort"`.
+
+# Registers the tests of an ONNX Runtime test program under the ort/models/npu labels.
+function(edgebench_discover_ort_tests target)
+  gtest_discover_tests(${target} DISCOVERY_MODE PRE_TEST
+    TEST_FILTER "-*Models.*:*Npu.*" PROPERTIES LABELS ort)
+  gtest_discover_tests(${target} DISCOVERY_MODE PRE_TEST
+    TEST_FILTER "*Models.*" PROPERTIES LABELS models)
+  gtest_discover_tests(${target} DISCOVERY_MODE PRE_TEST
+    TEST_FILTER "*Npu.*" PROPERTIES LABELS npu)
+endfunction()
 
 if(EDGEBENCH_BUILD_TESTS)
   add_executable(edgebench_tests
@@ -135,6 +153,5 @@ if(EDGEBENCH_BUILD_TESTS)
   endif()
   edgebench_set_warnings(edgebench_bundle_tests)
   onnxruntime_copy_runtime_files(edgebench_bundle_tests)
-  gtest_discover_tests(edgebench_bundle_tests DISCOVERY_MODE PRE_TEST
-    PROPERTIES LABELS ort_bundle)
+  edgebench_discover_ort_tests(edgebench_bundle_tests)
 endif()
