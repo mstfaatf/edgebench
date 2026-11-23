@@ -161,19 +161,19 @@ Model       mobilenetv2_fp32_b1.onnx (fp32, 13992263 bytes, sha256 163fa832dc77)
 Provider    CPUExecutionProvider, 4 intra-op threads, binding iobinding_preallocated, graph optimization enable_all
 Trials      3 x 200 measured iterations (20 warm-up, 2000 ms cooldown), batch size 1
 Input       random
-Session     create ms: 58.9 22.3 57.5  (median 57.5)
-First run   6.854 ms (first warm-up iteration of trial 1)
+Session     create ms: 65.6 50.8 54.6  (median 54.6)
+First run   7.734 ms (first warm-up iteration of trial 1)
 Power       ac, mode Balanced, plan Balanced, battery saver off, battery 80%
-CPU load    pre-run 5.1% over 2.0 s, highest cooldown 7.4% (before trial 2)
-Memory      working set 37.7 MiB after the last trial, peak 64.1 MiB, session-create delta +21.0 MiB (median) (process only)
+CPU load    pre-run 7.1% over 2.0 s, highest cooldown 7.5% (before trial 2), highest during trials 9.1% (trial 1, own process excluded)
+Memory      working set 39.2 MiB after the last trial, peak 64.5 MiB, session-create delta +21.0 MiB (median) (process only)
 
 ms               mean        p50        p95        p99        min        max inferences/s
-trial 1        3.9743     3.9131     4.4830     4.8493     3.5862     5.0992        251.6
-trial 2        4.1811     3.9320     4.5574     6.1728     3.5681    37.6502        239.2
-trial 3        4.0761     3.9642     4.6493     4.9814     3.6605     6.9566        245.3
-aggregate      4.0772     3.9428     4.5840     5.0992     3.5681    37.6502        245.3
+trial 1        4.3883     4.0223     4.7335    15.0211     3.6030    26.1895        227.9
+trial 2        4.0326     3.9751     4.4864     4.7538     3.5880     4.8543        248.0
+trial 3        4.0293     4.0011     4.4871     4.7743     3.5916     5.1914        248.2
+aggregate      4.1501     4.0038     4.6084     5.2121     3.5880    26.1895        241.0
 
-Trial means 3.9743 .. 4.1811 ms, CV 2.54%
+Trial means 4.0293 .. 4.3883 ms, CV 4.97%
 Placement   55 nodes: CPUExecutionProvider 55 (all on the requested EP)
 ```
 
@@ -184,8 +184,7 @@ Placement   55 nodes: CPUExecutionProvider 55 (all on the requested EP)
 - `CPU load`: system-wide CPU utilization during the idle period before trial 1
   (`system.load`), the highest value seen during the cooldowns, and the highest
   background load during a trial's measured iterations (`highest during trials
-  N% (trial k, own process excluded)`). The sample above predates the
-  during-trial value.
+  N% (trial k, own process excluded)`).
 - `Memory`: the process working set after the last trial's session was
   released, its peak, and the median change of the working set across session
   creation. Process memory only; memory used by drivers or on an accelerator is
