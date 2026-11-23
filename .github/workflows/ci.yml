@@ -187,6 +187,9 @@ jobs:
 
       # Coverage of engine/src from every test program and every child process
       # they start (edgebench.exe, the helpers). No threshold: report only.
+      # ExitPaths.UnhandledExceptionIsReportedAndExits1 is excluded here (it runs
+      # in the windows jobs): OpenCppCoverage is a debugger, and Windows passes an
+      # unhandled exception to the debugger instead of the process's own filter.
       - name: Test (unit, ort) under OpenCppCoverage
         shell: pwsh
         run: |
@@ -195,7 +198,8 @@ jobs:
             --modules "$env:GITHUB_WORKSPACE\build\x64" `
             --export_type "html:coverage\html" `
             --export_type "cobertura:coverage\coverage.xml" `
-            -- ctest --preset x64-debug -L "unit|ort" --output-on-failure
+            -- ctest --preset x64-debug -L "unit|ort" --output-on-failure `
+               -E "^ExitPaths\.UnhandledExceptionIsReportedAndExits1$"
           $code = $LASTEXITCODE
           if ($code -ne 0) { Write-Warning "ctest under OpenCppCoverage exited with $code" }
           exit $code
