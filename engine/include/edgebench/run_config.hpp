@@ -13,6 +13,14 @@
 namespace edgebench {
 
 enum class ProviderKind { cpu };
+
+// Upper bounds of the run options (docs/cli.md); larger values are usage errors.
+inline constexpr int kMaxIterations = 1'000'000;
+inline constexpr int kMaxTrials = 1'000;
+inline constexpr int kMaxWarmup = 100'000;
+inline constexpr int kMaxCooldownMs = 600'000;
+inline constexpr int kMaxLoadSampleMs = 600'000;
+inline constexpr int kMaxThreads = 256;
 enum class RunBinding { run, iobinding_preallocated };
 enum class InputKind { random, constant };
 enum class GraphOptLevel { disable_all, enable_basic, enable_extended, enable_all };
@@ -49,6 +57,7 @@ struct RunConfig {
 struct ConfigError {
     std::string field;
     std::string message;
+    std::string kind = "usage_error";  // error kind printed with it, e.g. "model_unreadable"
     friend bool operator==(const ConfigError&, const ConfigError&) = default;
 };
 

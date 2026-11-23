@@ -175,7 +175,7 @@ TEST(CliRun, ModelErrors) {
 
 TEST(CliRun, InvalidNumbers) {
     TempModel model;
-    expect_usage_error(parse(run_args(model, {"--threads", "0"})), "--threads: must be at least 1");
+    expect_usage_error(parse(run_args(model, {"--threads", "0"})), "error: [usage_error] --threads: must be between 1 and 256 (got 0)");
     expect_usage_error(parse(run_args(model, {"--threads", "-1"})), "--threads");
     expect_usage_error(parse(run_args(model, {"--threads", "four"})), "--threads");
     expect_usage_error(parse(run_args(model, {"--iterations", "0"})), "--iterations");

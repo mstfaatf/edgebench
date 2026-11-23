@@ -1,6 +1,6 @@
 """Generate the tiny ONNX models used by the C++ tests.
 
-Writes four models to engine/tests/fixtures/models/ (committed, a few hundred
+Writes the models to engine/tests/fixtures/models/ (committed, a few hundred
 bytes each):
 
 - fixed_float32.onnx: input "x" float32 [1, 4] -> MatMul (4x3) -> Add -> Relu ->
@@ -9,6 +9,8 @@ bytes each):
 - int64_input.onnx: input "ids" int64 [1, 4] -> Cast to float32 -> output "y" [1, 4].
 - nan_output.onnx: input "x" float32 [1, 4] -> Sqrt(x - 2) -> output "y" [1, 4]. Every
   generated input lies in [0, 1), so every output value is NaN.
+- runtime_error.onnx: input "x" float32 [1, 4] -> Gather(axis 1, index 7) -> output "y"
+  [1, 1]. The session is created, but every Run() fails: the index is out of range.
 
 Weights are fixed constants, so the output is byte-identical on every run.
 Only needs the onnx package (no ONNX Runtime), so it runs on any platform:
@@ -84,11 +86,23 @@ def nan_output() -> onnx.ModelProto:
     return _model(graph)
 
 
+def runtime_error() -> onnx.ModelProto:
+    index = helper.make_tensor("index", TensorProto.INT64, [1], [7])
+    nodes = [helper.make_node("Gather", ["x", "index"], ["y"], name="gather", axis=1)]
+    graph = helper.make_graph(
+        nodes, "runtime_error",
+        [helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 4])],
+        [helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 1])],
+        initializer=[index])
+    return _model(graph)
+
+
 MODELS = {
     "fixed_float32.onnx": lambda: dense_relu(1),
     "dynamic_batch.onnx": lambda: dense_relu("batch"),
     "int64_input.onnx": int64_input,
     "nan_output.onnx": nan_output,
+    "runtime_error.onnx": runtime_error,
 }
 
 

@@ -7,6 +7,7 @@
 #include <exception>
 #include <sstream>
 
+#include "edgebench/diagnostics.hpp"
 #include "edgebench/runtime.hpp"
 
 namespace edgebench {
@@ -50,6 +51,44 @@ void row(std::ostringstream& out, const char* label, const std::string& value) {
 
 }  // namespace
 
+std::vector<DoctorWarning> system_state_warnings(const SystemInfo& system) {
+    std::vector<DoctorWarning> warnings;
+    const PowerState power = system.power.value_or(PowerState{});
+    if (power.source == "battery") {
+        warnings.push_back({"battery_power",
+                            "running on battery power, which can throttle the CPU and NPU",
+                            "Plug in before benchmarking."});
+    }
+    if (power.battery_saver.value_or(false)) {
+        warnings.push_back({"battery_saver_on", "battery saver is on, which limits performance",
+                            "Turn battery saver off before benchmarking."});
+    }
+    if (system.load && system.load->cpu_utilization_ratio > 0.10) {
+        char pct[16];
+        std::snprintf(pct, sizeof(pct), "%.1f%%", system.load->cpu_utilization_ratio * 100.0);
+        warnings.push_back({"background_cpu_load_high",
+                            std::string("background CPU load is ") + pct +
+                                " (over 10%), which distorts CPU timings",
+                            "Close background apps before benchmarking."});
+    }
+    if (power.power_mode && !power.power_mode_known) {
+        warnings.push_back(
+            {"unknown_power_mode",
+             "the power mode overlay " + *power.power_mode + " is not a known Windows power mode",
+             ""});
+    }
+    if (system.emulated()) {
+        warnings.push_back(
+            {"process_emulated",
+             "this is a " + std::string(to_string(system.process_architecture)) +
+                 " build running under emulation on " +
+                 std::string(to_string(system.os.architecture)) +
+                 " Windows; timings would not represent native performance",
+             "Use the native " + std::string(to_string(system.os.architecture)) + " build."});
+    }
+    return warnings;
+}
+
 DoctorReport run_doctor(std::chrono::milliseconds load_sample) {
     DoctorReport r;
     r.build = build_info();
@@ -57,42 +96,14 @@ DoctorReport run_doctor(std::chrono::milliseconds load_sample) {
     r.system.power = query_power_state();
     if (load_sample.count() > 0)
         r.system.load = sample_cpu_load(load_sample);
-    const PowerState& power = *r.system.power;
-    if (power.source == "battery") {
-        r.warnings.push_back(
-            "running on battery power, which can throttle the CPU and NPU. "
-            "Plug in before benchmarking.");
-    }
-    if (power.battery_saver.value_or(false)) {
-        r.warnings.push_back(
-            "battery saver is on, which limits performance. Turn it off "
-            "before benchmarking.");
-    }
-    if (r.system.load && r.system.load->cpu_utilization_ratio > 0.10) {
-        char pct[16];
-        std::snprintf(pct, sizeof(pct), "%.1f%%", r.system.load->cpu_utilization_ratio * 100.0);
-        r.warnings.push_back(std::string("background CPU load is ") + pct +
-                             " (over 10%), which distorts CPU timings. Close background apps "
-                             "before benchmarking.");
-    }
-    if (power.power_mode && !power.power_mode_known) {
-        r.warnings.push_back("the power mode overlay " + *power.power_mode +
-                             " is not a known Windows power mode.");
-    }
+    r.warnings = system_state_warnings(r.system);
     r.bundle_dir = executable_dir();
-    if (r.system.emulated()) {
-        r.warnings.push_back(
-            "this is a " + std::string(to_string(r.system.process_architecture)) +
-            " build running under emulation on " +
-            std::string(to_string(r.system.os.architecture)) +
-            " Windows; timings would not represent native performance. Use the native " +
-            std::string(to_string(r.system.os.architecture)) + " build.");
-    }
 
     r.onnxruntime = load_onnxruntime(r.bundle_dir);
     if (!r.onnxruntime.ok()) {
-        r.problems.push_back(
-            {std::string(to_string(r.onnxruntime.error_kind)), r.onnxruntime.message});
+        r.problems.push_back({std::string(to_string(r.onnxruntime.error_kind)),
+                              r.onnxruntime.message,
+                              std::string(load_error_hint(r.onnxruntime.error_kind))});
     } else {
         try {
             Result<std::unique_ptr<Runtime>> runtime = Runtime::create(r.onnxruntime);
@@ -100,9 +111,9 @@ DoctorReport run_doctor(std::chrono::milliseconds load_sample) {
                 throw std::runtime_error(runtime.error().message);
             r.ep_devices = runtime.value()->ep_devices();
         } catch (const Ort::Exception& e) {
-            r.problems.push_back({"ep_enumeration_failed", e.what()});
+            r.problems.push_back({"ep_enumeration_failed", e.what(), ""});
         } catch (const std::exception& e) {
-            r.problems.push_back({"ep_enumeration_failed", e.what()});
+            r.problems.push_back({"ep_enumeration_failed", e.what(), ""});
         }
     }
 
@@ -115,10 +126,11 @@ DoctorReport run_doctor(std::chrono::milliseconds load_sample) {
             inside &= o.path != m.path;
         r.modules.push_back({m, inside});
         if (!inside) {
-            r.problems.push_back({"module_outside_bundle", m.name + " is loaded from " +
-                                                               path_to_utf8(m.path) +
-                                                               ", outside the bundle directory " +
-                                                               path_to_utf8(r.bundle_dir)});
+            r.problems.push_back(
+                {"module_outside_bundle",
+                 m.name + " is loaded from " + path_to_utf8(m.path) +
+                     ", outside the bundle directory " + path_to_utf8(r.bundle_dir),
+                 std::string(load_error_hint(OrtLoadError::foreign_module_loaded))});
         }
     }
 
@@ -230,8 +242,8 @@ std::string format_text(const DoctorReport& r) {
     }
 
     out << "\n";
-    for (const std::string& w : r.warnings)
-        out << "warning: " << w << "\n";
+    for (const DoctorWarning& w : r.warnings)
+        out << format_warning(w.code, w.message, w.hint);
     for (const DoctorProblem& p : r.problems)
         out << "problem [" << p.code << "]: " << p.message << "\n";
     out << "Result: "
@@ -260,7 +272,7 @@ nlohmann::ordered_json to_json(const DoctorReport& r) {
     }
     json problems = json::array();
     for (const DoctorProblem& p : r.problems)
-        problems.push_back({{"code", p.code}, {"message", p.message}});
+        problems.push_back({{"code", p.code}, {"message", p.message}, {"hint", p.hint}});
 
     return {
         {"tool",
@@ -290,7 +302,13 @@ nlohmann::ordered_json to_json(const DoctorReport& r) {
                                    : json(nullptr)},
           {"loaded_modules", modules},
           {"ep_devices", devices}}},
-        {"warnings", r.warnings},
+        {"warnings",
+         [&r] {
+             json warnings = json::array();
+             for (const DoctorWarning& w : r.warnings)
+                 warnings.push_back({{"code", w.code}, {"message", w.message}, {"hint", w.hint}});
+             return warnings;
+         }()},
         {"problems", problems},
         {"result", r.exit_code == ExitCode::success ? "ok" : "failed"},
         {"exit_code", to_int(r.exit_code)},

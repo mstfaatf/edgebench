@@ -67,7 +67,7 @@ json runtime_json(const BenchmarkResult& r) {
         return nullptr;
     const OrtLoadResult& ort = r.runtime.onnxruntime;
     const ProviderDescription& p = r.runtime.provider;
-    json execution_provider;
+    json execution_provider = nullptr;  // no provider was created
     json ep_device = nullptr;
     if (r.known.provider) {
         execution_provider = {{"name", p.execution_provider},
@@ -89,17 +89,16 @@ json runtime_json(const BenchmarkResult& r) {
                   {"candidate_count", p.ep_device->candidate_count}}},
             };
         }
-    } else {  // the provider could not be created: record what was requested
-        execution_provider = {{"name", execution_provider_name(r.config.provider)},
-                              {"version", nullptr},
-                              {"library_path", nullptr}};
     }
     json modules = json::array();
     for (const LoadedModule& m : r.runtime.loaded_modules)
         modules.push_back({{"name", m.name}, {"path", path_to_utf8(m.path)}});
-    json devices = json::array();
-    for (const EpDeviceInfo& d : r.runtime.ep_devices)
-        devices.push_back(to_json(d));
+    json devices = nullptr;
+    if (r.runtime.ep_devices) {
+        devices = json::array();
+        for (const EpDeviceInfo& d : *r.runtime.ep_devices)
+            devices.push_back(to_json(d));
+    }
     return {
         {"onnxruntime",
          {{"version", ort.ort_version},
@@ -152,7 +151,7 @@ json config_json(const BenchmarkResult& r) {
           {"device_type", device_type_name(c.provider)},
           {"compute_precision", nullptr}}},
         {"strict_mode", false},
-        {"batch_size", r.batch_size > 0 ? r.batch_size : 1},
+        {"batch_size", r.batch_size > 0 ? json(r.batch_size) : json(nullptr)},
         {"input",
          {{"kind", schema_name(c.input)},
           {"constant_value",

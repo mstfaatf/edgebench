@@ -1,5 +1,7 @@
 #include "edgebench/runtime.hpp"
 
+#include "edgebench/diagnostics.hpp"
+
 #include <cstdio>
 #include <stdexcept>
 
@@ -39,8 +41,9 @@ void ORT_API_CALL Runtime::log_callback(void* param, OrtLoggingLevel severity, c
         }
     }
     if (severity >= ORT_LOGGING_LEVEL_WARNING) {
-        const char* level = severity >= ORT_LOGGING_LEVEL_ERROR ? "error" : "warning";
-        std::fprintf(stderr, "onnxruntime %s: %s\n", level, text);
+        // ONNX Runtime's own log lines; failures are reported separately as errors.
+        print_warning(severity >= ORT_LOGGING_LEVEL_ERROR ? "onnxruntime_error" : "onnxruntime",
+                      text);
     }
 }
 

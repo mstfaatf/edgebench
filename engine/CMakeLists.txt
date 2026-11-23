@@ -23,11 +23,14 @@ add_library(edgebench_core STATIC
   src/benchmark.cpp
   src/cli.cpp
   src/cpu_provider.cpp
+  src/crash_handler.cpp
+  src/diagnostics.cpp
   src/doctor.cpp
   src/dry_run.cpp
   src/ep_devices.cpp
   src/exit_codes.cpp
   src/input_fill.cpp
+  src/interrupt.cpp
   src/model_info.cpp
   src/module_paths.cpp
   src/onnx_inspect.cpp
@@ -79,6 +82,7 @@ if(EDGEBENCH_BUILD_TESTS)
     tests/cli_test.cpp
     tests/core_types_test.cpp
     tests/exit_codes_test.cpp
+    tests/interrupt_test.cpp
     tests/module_paths_test.cpp
     tests/result_files_test.cpp
     tests/run_config_test.cpp
@@ -101,8 +105,15 @@ if(EDGEBENCH_BUILD_TESTS)
   target_link_libraries(edgebench_preload_helper PRIVATE edgebench_core)
   edgebench_set_warnings(edgebench_preload_helper)
 
+  # Crashes or ignores the first interrupt on request; used by the exit-path tests.
+  add_executable(edgebench_signal_helper tests/signal_helper.cpp)
+  target_link_libraries(edgebench_signal_helper PRIVATE edgebench_core)
+  edgebench_set_warnings(edgebench_signal_helper)
+
   add_executable(edgebench_bundle_tests
     tests/benchmark_test.cpp
+    tests/exit_paths_test.cpp
+    tests/failure_paths_test.cpp
     tests/ort_loader_test.cpp
     tests/edgebench_exe_test.cpp
     tests/provider_test.cpp
@@ -112,9 +123,11 @@ if(EDGEBENCH_BUILD_TESTS)
   target_compile_definitions(edgebench_bundle_tests PRIVATE
     EDGEBENCH_EXE_PATH="$<TARGET_FILE:edgebench>"
     EDGEBENCH_PRELOAD_HELPER_PATH="$<TARGET_FILE:edgebench_preload_helper>"
+    EDGEBENCH_SIGNAL_HELPER_PATH="$<TARGET_FILE:edgebench_signal_helper>"
     EDGEBENCH_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
     EDGEBENCH_PYTHON="${EDGEBENCH_PYTHON}")
-  add_dependencies(edgebench_bundle_tests edgebench edgebench_preload_helper)
+  add_dependencies(edgebench_bundle_tests edgebench edgebench_preload_helper
+    edgebench_signal_helper)
   if(EDGEBENCH_BUILD_TOOLS)
     target_compile_definitions(edgebench_bundle_tests PRIVATE
       EDGEBENCH_ORT_PROBE_PATH="$<TARGET_FILE:ort_probe>")

@@ -39,7 +39,7 @@ struct RuntimeResult {
     OrtLoadResult onnxruntime;     // version, library_path, api_version, load_check
     ProviderDescription provider;  // execution_provider, ep_device, ep_options, session_config
     std::vector<LoadedModule> loaded_modules;  // captured while the first session was alive
-    std::vector<EpDeviceInfo> ep_devices;
+    std::optional<std::vector<EpDeviceInfo>> ep_devices;  // null if not enumerated
 };
 
 struct ModelResult {
@@ -143,7 +143,7 @@ struct BenchmarkResult {
     std::optional<OnnxGraphSummary> graph;  // decoded model file
 
     RunConfig config;  // as requested; the schema's config block derives from it
-    std::int64_t batch_size = 0;
+    std::int64_t batch_size = 0;  // 0: unknown (written as null; failed results only)
     std::string input_preprocessing;  // config.input.preprocessing
 
     ExecutionResult execution;
@@ -153,6 +153,21 @@ struct BenchmarkResult {
 
 /// Receives progress messages ("idle 2000 ms before trial 1 of 3", "trial 1 of 3: ...").
 using ProgressFn = std::function<void(std::string_view)>;
+
+/// The points where a run checks for a stop request (stop_requested()).
+enum class StopPoint {
+    idle,              // the idle period before a trial
+    before_session,    // before a trial's session is created
+    after_session,     // after it was created
+    warmup,            // before a warm-up iteration
+    measured,          // before a measured iteration (outside the timed bracket)
+    before_placement,  // before the node placement session
+    after_placement,   // after it returned
+};
+
+/// Called at every stop point, just before the stop flag is checked (tests use it
+/// to raise the flag at a chosen point). `iteration` is 0 where it does not apply.
+using StopHook = std::function<void(StopPoint, int trial_index, int iteration)>;
 
 /// A result for `config` before anything runs: identity, tool, system, the
 /// power state, and the model file's facts (its hash and decoded metadata). A
@@ -173,7 +188,7 @@ BenchmarkResult failed_load_result(const RunConfig& config, const OrtLoadResult&
 
 /// Creates the provider for `config` and runs the benchmark with it.
 BenchmarkResult run_benchmark(Runtime& runtime, const RunConfig& config,
-                              const ProgressFn& progress = {});
+                              const ProgressFn& progress = {}, const StopHook& hook = {});
 
 /// Runs the benchmark described by `config` with `provider`:
 ///
@@ -193,8 +208,13 @@ BenchmarkResult run_benchmark(Runtime& runtime, const RunConfig& config,
 /// outputs whose top-1 differs from trial 0, are internal_error naming output
 /// and trial (stage measurement); session creation failures keep their exit code
 /// (usage_error for unsupported models, ort_runtime_error otherwise).
+///
+/// Interrupts (interrupt.hpp) are honoured at every StopPoint: the run ends there
+/// with error kind "interrupted" (exit code interrupted), no placement session,
+/// and only the trials that completed; a trial cut off partway is dropped with
+/// an interrupted_trial_discarded warning.
 BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunConfig& config,
-                              const ProgressFn& progress = {});
+                              const ProgressFn& progress = {}, const StopHook& hook = {});
 
 /// Human-readable summary of a result (what `edgebench run` prints).
 std::string format_summary(const BenchmarkResult& result);

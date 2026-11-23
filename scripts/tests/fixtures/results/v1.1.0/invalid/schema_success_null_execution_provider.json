@@ -1,0 +1,6 @@
+{
+  "description": "A successful result must name its execution provider; null is allowed only in failed results.",
+  "base": "docs/examples/v1.1.0/example-cpu-fp32.json",
+  "set": {"/runtime/execution_provider": null},
+  "expect": {"severity": "error", "code": "", "path": "/runtime/execution_provider"}
+}

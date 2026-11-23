@@ -42,6 +42,9 @@ enum class OrtLoadError {
 /// Stable identifier, e.g. "dll_not_found"; "none" for OrtLoadError::none.
 std::string_view to_string(OrtLoadError error);
 
+/// One-line advice on how to fix a load error (empty for OrtLoadError::none).
+std::string_view load_error_hint(OrtLoadError error);
+
 /// A loaded DLL: file name and absolute path (results schema: runtime.loaded_modules[]).
 struct LoadedModule {
     std::string name;  // UTF-8 file name, e.g. "onnxruntime.dll"

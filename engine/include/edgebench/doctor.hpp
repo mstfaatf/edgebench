@@ -21,6 +21,14 @@ namespace edgebench {
 struct DoctorProblem {
     std::string code;  // e.g. "dll_not_found", "module_outside_bundle"
     std::string message;
+    std::string hint;  // how to fix it; may be empty
+};
+
+/// Something that distorts benchmarks but does not fail the check.
+struct DoctorWarning {
+    std::string code;  // e.g. "battery_power", "background_cpu_load_high"
+    std::string message;
+    std::string hint;
 };
 
 struct ModuleCheck {
@@ -36,9 +44,13 @@ struct DoctorReport {
     std::vector<ModuleCheck> modules;                     // every ORT/QNN module in the process
     std::optional<std::vector<EpDeviceInfo>> ep_devices;  // empty if ORT is not loaded
     std::vector<DoctorProblem> problems;
-    std::vector<std::string> warnings;  // noteworthy but not failures (e.g. emulation)
+    std::vector<DoctorWarning> warnings;  // noteworthy but not failures (e.g. emulation)
     ExitCode exit_code = ExitCode::success;
 };
+
+/// Warnings about the system state that distorts timings: battery power, battery
+/// saver, background CPU load over 10%, an unknown power mode, emulation.
+std::vector<DoctorWarning> system_state_warnings(const SystemInfo& system);
 
 /// Runs every check. Sections that do not need ONNX Runtime are filled in even
 /// when it cannot be loaded.

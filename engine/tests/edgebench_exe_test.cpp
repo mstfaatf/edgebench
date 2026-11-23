@@ -356,7 +356,7 @@ TEST(Cli, RunDryRunNeedsOnnxRuntime) {
         iso.exe, {L"run", L"--model", iso.dummy_model().native(), L"--dry-run"}, iso.dir.path());
     expect_no_crash(r);
     EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
-    EXPECT_TRUE(contains(r.err, "cannot load ONNX Runtime (dll_not_found)")) << describe(r);
+    EXPECT_TRUE(contains(r.err, "error: [dll_not_found] cannot load ONNX Runtime: ")) << describe(r);
 }
 
 // A short run of the fixture model into `out` (no cooldown, no load sample).
@@ -458,7 +458,7 @@ TEST(Cli, RunWithAnUnwritableOutputDirectoryExits6AfterTheSummary) {
     EXPECT_EQ(r.exit_code, code(ExitCode::output_error)) << describe(r);
     EXPECT_TRUE(contains(r.out, "\naggregate ")) << describe(r);  // measurements not lost
     EXPECT_FALSE(contains(r.out, "Results     ")) << describe(r);
-    EXPECT_TRUE(contains(r.err, "error: cannot write the result: ")) << describe(r);
+    EXPECT_TRUE(contains(r.err, "error: [write_failed] cannot write the result: ")) << describe(r);
     EXPECT_TRUE(contains(r.err, "a_file")) << describe(r);
 }
 
@@ -471,7 +471,7 @@ TEST(Cli, RunLoadFailureWritesAFailedResult) {
     const ProcessResult r = run_process(iso.exe, args, iso.dir.path());
     expect_no_crash(r);
     EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
-    EXPECT_TRUE(contains(r.err, "cannot load ONNX Runtime (dll_not_found)")) << describe(r);
+    EXPECT_TRUE(contains(r.err, "error: [dll_not_found] cannot load ONNX Runtime: ")) << describe(r);
     const json doc = json::parse(std::ifstream(out / "fixture_cpu_iobinding_t4_latest.json"));
     EXPECT_EQ(doc.at("status"), "failed");
     EXPECT_EQ(doc.at("error").at("stage"), "environment");
@@ -487,7 +487,7 @@ TEST(OrtProbe, LoadFailureExits4) {
     const ProcessResult r = run_process(probe, {L"--model", L"any.onnx"}, dir.path());
     expect_no_crash(r);
     EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
-    EXPECT_TRUE(contains(r.err, "(dll_not_found)")) << describe(r);
+    EXPECT_TRUE(contains(r.err, "error: [dll_not_found] cannot load ONNX Runtime: ")) << describe(r);
 }
 
 TEST(OrtProbe, JsonRefusesToOverwrite) {

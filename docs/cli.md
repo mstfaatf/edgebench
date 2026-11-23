@@ -26,15 +26,15 @@ measuring or writing anything.
 
 | Option | Default | Constraints / meaning |
 |---|---|---|
-| `--model PATH` | (required) | Must exist, be a regular file, and end in `.onnx` (any case) |
+| `--model PATH` | (required) | Must exist, be a regular file that can be opened for reading, and end in `.onnx` (any case) |
 | `--provider NAME` | `cpu` | Supported providers: `cpu` |
-| `--threads N` | `4` | CPU intra-op threads, ≥ 1. Always set explicitly and recorded; there is no "ONNX Runtime default" setting, because CPU latency depends strongly on it |
+| `--threads N` | `4` | CPU intra-op threads, 1 to 256. Always set explicitly and recorded; there is no "ONNX Runtime default" setting, because CPU latency depends strongly on it. More threads than logical processors is allowed, with a `threads_exceed_logical_processors` warning |
 | `--binding MODE` | `iobinding` | `run`: `Session::Run` with input and output values created per call. `iobinding`: IoBinding with buffers allocated once. Recorded as `config.run_binding` = `run` / `iobinding_preallocated` |
-| `--warmup N` | `20` | Unmeasured iterations before each trial, ≥ 0 |
-| `--iterations N` | `200` | Measured iterations per trial, ≥ 1 |
-| `--trials N` | `3` | Number of trials, ≥ 1 |
-| `--cooldown-ms N` | `2000` | Idle period before every trial (the first included), ≥ 0; background CPU load is sampled during it |
-| `--load-sample-ms N` | `1000` | With `--cooldown-ms 0`: length of the background-load sample (and idle) before the first trial, ≥ 0. `0` takes no sample: `system.load` is null with a `value_unavailable` warning |
+| `--warmup N` | `20` | Unmeasured iterations before each trial, 0 to 100,000 |
+| `--iterations N` | `200` | Measured iterations per trial, 1 to 1,000,000 |
+| `--trials N` | `3` | Number of trials, 1 to 1,000 |
+| `--cooldown-ms N` | `2000` | Idle period before every trial (the first included), 0 to 600,000; background CPU load is sampled during it |
+| `--load-sample-ms N` | `1000` | With `--cooldown-ms 0`: length of the background-load sample (and idle) before the first trial, 0 to 600,000. `0` takes no sample: `system.load` is null with a `value_unavailable` warning |
 | `--input KIND` | `random` | `random` or `constant`; see [Input data](#input-data) |
 | `--seed N` | `0` | RNG seed (unsigned integer). Only allowed with `--input random` |
 | `--constant-value FLOAT` | `0.0` | Fill value, finite. Only allowed with `--input constant` |
@@ -46,7 +46,12 @@ measuring or writing anything.
 | `--dry-run` | off | Validate the options, create the session, run one inference, print the resolved configuration as JSON, exit 0 |
 
 All validation problems are reported together, one per line, as
-`error: --<option>: <message>`, followed by a hint to run `edgebench run --help`.
+`error: [usage_error] --<option>: <message>` (`[model_unreadable]` when the
+model exists but cannot be opened, e.g. because another process holds it
+exclusively; the message is the operating system's), followed by one
+`hint: Run 'edgebench run --help' for the options.` line. The upper bounds keep
+a run's memory and duration finite (one million iterations store 8 MB of
+latencies per trial); they are not measurement recommendations.
 
 ### What `run` measures
 
@@ -167,6 +172,35 @@ Placement   55 nodes: CPUExecutionProvider 55 (all on the requested EP)
 - `Results`: the last line, the path of the result file that was written. With
   `--format json`, stdout is only the document and the path goes to stderr.
 
+### Interrupting a run
+
+Ctrl+C, Ctrl+Break and closing the console window stop a run cleanly. The
+console handler only sets a flag and signals an event; the run checks the flag
+before and after every session creation, before every warm-up and measured
+iteration (outside the timed bracket), and during the idle periods, which are
+waits on that event and end at once. Then:
+
+- the trial in progress is dropped; a `interrupted_trial_discarded` warning
+  says how many measured iterations were discarded;
+- node placement is skipped (`execution` stays unverified);
+- a failed result is written with `error.code` `interrupted`, the stage the run
+  was in, and every completed trial (with its latency files);
+- the exit code is 130.
+
+```text
+trial 2 of 3: creating session, 20 warm-up + 200 measured iterations
+warning: [interrupted_trial_discarded] trial 2 of 3 was interrupted after 46 of 200 measured iterations; the trial is not part of the result
+error: [interrupted] interrupted by Ctrl+Break (trial 2 of 3, measured iteration 47)
+failed result written to ...\mobilenetv2_fp32_b1_cpu_iobinding_t4_20261123T012641.138Z.json
+```
+
+A second Ctrl+C or Ctrl+Break ends the process immediately with exit code 130
+and writes nothing more (an atomic write in progress leaves only a temporary
+file). When the console window is closed, Windows ends the process shortly
+after the handler returns; the handler waits up to 4 s for the result to be
+written. `--dry-run`, `doctor` and `ort_probe` have nothing to save: there the
+first Ctrl+C or Ctrl+Break exits 130 at once.
+
 ### Result files
 
 Every run that gets past argument validation writes, in `--output-dir`:
@@ -210,9 +244,13 @@ object (`stage`, `message`, `code`), keeping whatever was established before
 the failure (system, runtime, model, completed trials): ONNX Runtime could not
 be loaded (stage `environment`, exit 4), session creation or an inference failed
 (`session_creation`, `warmup` or `measurement`, exit 3), non-finite outputs or a
-changed top-1 between trials (`measurement`, exit 1). Usage errors (exit 2),
+changed top-1 between trials (`measurement`, exit 1), an interrupt (exit
+130, see [Interrupting a run](#interrupting-a-run)). Usage errors (exit 2),
 including models with dynamic shapes or unsupported input types, write
-nothing. Completed trials keep their latency files; without one, `raw` is null
+nothing; neither does an `--output-dir` that is an existing file (exit 6,
+checked before anything is measured). A failed result never contains made-up
+values: what was not established is null (for example `config.batch_size` when
+the model could not be read), with a `value_unavailable` warning. Completed trials keep their latency files; without one, `raw` is null
 and there is no run folder.
 
 If the results cannot be written, the summary has already been printed, the
@@ -460,7 +498,10 @@ Exit code 0 when every check passes. Exit code 4 when ONNX Runtime cannot be
 loaded (the report still contains every section that does not need it) or when
 an ONNX Runtime/QNN module is loaded from outside the bundle directory (the
 module is named). Each problem is also printed to stderr as
-`error: [<kind>] <message>`.
+`error: [<kind>] <message>`, with a `hint:` line when there is a fix to suggest.
+Warnings (battery power, battery saver, background load over 10%, an unknown
+power mode, emulation) appear in the report as `warning: [<code>] <message>`
+and do not change the exit code.
 
 Sample output (Surface Laptop 7, development build):
 
@@ -526,4 +567,102 @@ Shared by `edgebench` and `tools/ort_probe` (defined in
 | 3 | `ort_runtime_error` | ONNX Runtime error: session creation or inference failed |
 | 4 | `ort_load_failure` | ONNX Runtime could not be loaded (any loader error kind), or a loaded ONNX Runtime/QNN DLL is not the bundled one |
 | 5 | `strict_mode_refusal` | Strict mode refused the session: not every node can run on the requested device. Reserved for the NPU provider |
-| 6 | `output_error` | Results could not be written (`edgebench run`: after the summary was printed; `ort_probe`: the `--json` file exists or could not be written) |
+| 6 | `output_error` | Results could not be written (`edgebench run`: after the summary was printed, or before measuring if `--output-dir` is an existing file; `ort_probe`: the `--json` file exists or could not be written) |
+| 130 | `interrupted` | Stopped by Ctrl+C, Ctrl+Break or closing the console (the conventional 128 + SIGINT) |
+
+## Messages
+
+Every error, from `edgebench` and `ort_probe` alike, goes to stderr through one
+formatter (`engine/include/edgebench/diagnostics.hpp`):
+
+```text
+error: [<kind>] <message>
+hint: <what to do>                (optional, at most one line)
+warning: [<code>] <message>
+```
+
+`<kind>` is a stable identifier (the loader error kind, `usage_error`,
+`inference_failed`, ...); for failed runs it is also the result's `error.code`,
+except that ONNX Runtime errors record ONNX Runtime's own code name there (e.g.
+`ORT_INVALID_ARGUMENT`) and keep it in the message. Messages from ONNX
+Runtime's logger appear as `warning: [onnxruntime] ...` or
+`warning: [onnxruntime_error] ...`. An exception that escapes every handler is
+reported as `error: [internal_error] unexpected exception: ...` (exit 1) or,
+for an ONNX Runtime exception, `error: [ort_runtime_error] ...` with its code
+(exit 3). A crash (access violation and other structured exceptions) prints
+`error: [internal_error] unhandled exception 0x<code> at <address>` and exits 1;
+no dump is written and no Windows error dialog appears.
+
+## Exit paths
+
+Every way `edgebench` and `ort_probe` can end with an error. "Result" says
+whether a result document is written. Tests are in
+`engine/tests/exit_paths_test.cpp`, `failure_paths_test.cpp`,
+`edgebench_exe_test.cpp`, `benchmark_test.cpp`, `run_config_test.cpp` and
+`cli_test.cpp`; "not triggerable" marks paths that need ONNX Runtime or Windows
+to fail internally and that a test cannot provoke.
+
+`edgebench run`:
+
+| Case | Kind | Exit | Result | Test |
+|---|---|---|---|---|
+| Unknown option, bad value, value out of range, option repeated | `usage_error` | 2 | no | `Cli.UsageErrorsExit2OnStderr`, `CliRun.*`, `Validate.UpperBounds` |
+| No command, unknown command | `usage_error` | 2 | no | `Cli.NoCommandPrintsHelpAndFails`, `Cli.UnknownCommandPrintsHelpAndFails` |
+| Model missing, not a regular file, not `.onnx` | `usage_error` | 2 | no | `Validate.ModelMustExist`, `Validate.ModelMustBeARegularFile`, `Validate.ModelMustHaveOnnxExtension` |
+| Model exists but cannot be opened | `model_unreadable` | 2 | no | `ExitPaths.LockedModelExits2WithTheOsError`, `Validate.LockedModelIsUnreadable` |
+| `--output-dir` is an existing file | `output_dir_not_a_directory` | 6 | no (nothing measured) | `ExitPaths.OutputDirThatIsAFileExits6BeforeMeasuring` |
+| ONNX Runtime cannot be loaded | loader kind (`dll_not_found`, `version_mismatch`, ...) | 4 | yes, stage `environment` (dry run: no) | `Cli.RunLoadFailureWritesAFailedResult`, `Cli.RunDryRunNeedsOnnxRuntime` |
+| ONNX Runtime environment cannot be created | `environment_creation_failed` | 3 | yes, `environment` | not triggerable |
+| EP devices cannot be enumerated | `ep_enumeration_failed` | 3 | yes, `environment` / `ep_registration` | not triggerable |
+| No CPU EP device | `device_selection_failed` | 1 | yes, `ep_registration` | not triggerable |
+| Session options rejected | `session_options_failed` | 3 | yes, `session_creation` | not triggerable |
+| Model is not a valid ONNX file | `session_creation_failed` (code e.g. `ORT_INVALID_PROTOBUF`) | 3 | yes, `session_creation` | `ExitPaths.InvalidModelExits3AndWritesAFailedResult`, `Cli.RunDryRunInvalidModelExits3WithOrtCode` |
+| Session creation fails on a later trial | as reported by ONNX Runtime | 3 | yes, `session_creation`, earlier trials kept | `FailurePaths.SessionCreationFailsOnTheSecondTrial` |
+| Dynamic dimension, non-float32 input, output without fixed size | `dynamic_shape`, `unsupported_input_dtype`, `unsupported_output_dtype` | 2 | no | `Cli.RunUsageErrorFromTheModelWritesNothing`, `Cli.RunDryRunRejectsDynamicAndInt64Models` |
+| Model without inputs | `no_inputs` | 2 | no | not tested (no fixture) |
+| Model inputs/outputs cannot be read, buffers cannot be bound | `session_metadata_failed`, `binding_failed` | 3 | yes, `session_creation` | not triggerable |
+| An inference fails | `inference_failed` (code e.g. `ORT_INVALID_ARGUMENT`) | 3 | yes, `warmup` or `measurement` | `ExitPaths.RunFailureExits3AndWritesAFailedResult`, `FailurePaths.RunFailureDuringWarmUpAndMeasurement` |
+| An output contains NaN or infinity | `non_finite_output` | 1 | yes, `measurement` | `Cli.RunStopsOnNonFiniteOutputAndWritesAFailedResult` |
+| A trial's top-1 differs from trial 1's | `inconsistent_outputs` | 1 | yes, `measurement` | `FailurePaths.OutputsWithADifferentTop1FailTheRun` |
+| ONNX Runtime loads the model but its metadata cannot be decoded | `invalid_onnx` | 1 | yes, `model_load` | not triggerable |
+| The placement session fails | as reported by ONNX Runtime | 3 | yes, `session_creation`, all trials kept | `FailurePaths.PlacementFailureFailsTheRun` |
+| The placement session logs no placement | `placement_unavailable` | 1 | yes, `session_creation` | not triggerable |
+| Ctrl+C, Ctrl+Break, console closed | `interrupted` | 130 | yes, current stage, completed trials kept | `ExitPaths.CtrlBreakDuringARunWritesAnInterruptedResult`, `Interrupt.*` |
+| Second Ctrl+C or Ctrl+Break | none | 130 | no | `ExitPaths.SecondCtrlBreakExitsAtOnce` |
+| Ctrl+C or Ctrl+Break during `--dry-run` | none | 130 | no | same handler mode as `ExitPaths.OrtProbeCtrlBreakExits130WithoutWriting` |
+| The result cannot be written | `write_failed` | 6 (a failed run keeps its own code) | no | `Cli.RunWithAnUnwritableOutputDirectoryExits6AfterTheSummary`, `ResultFiles.*` |
+| An exception escapes | `internal_error` / `ort_runtime_error` | 1 / 3 | no | not triggerable |
+| A crash (structured exception) | `internal_error` | 1 | no | `ExitPaths.UnhandledExceptionIsReportedAndExits1` |
+
+Warnings that do not end the run: `nondeterministic_outputs`
+(`FailurePaths.OutputsDifferingWithTheSameTop1AreAWarning`),
+`nodes_not_on_requested_ep` (`FailurePaths.NodesOffTheRequestedEpAreAWarning`),
+`threads_exceed_logical_processors`
+(`ExitPaths.ThreadsAboveLogicalProcessorsWarnEverywhere`),
+`background_cpu_load_high`, `power_state_changed`, `unknown_power_mode`,
+`value_unavailable`.
+
+`edgebench doctor`:
+
+| Case | Kind | Exit | Test |
+|---|---|---|---|
+| ONNX Runtime cannot be loaded | loader kind | 4 | `Doctor.MissingDllIsReported`, `Doctor.WrongDllVersionIsReported`, `Doctor.CorruptDllIsReported`, ... |
+| An ONNX Runtime/QNN module is loaded from outside the bundle | `module_outside_bundle` | 4 | not triggerable (the loader refuses a foreign `onnxruntime.dll` first) |
+| EP devices cannot be enumerated | `ep_enumeration_failed` | 3 | not triggerable |
+| Battery, battery saver, load over 10%, unknown power mode, emulation | warning only | 0 | `DoctorWarnings.*` |
+| Ctrl+C or Ctrl+Break | none | 130 | same handler mode as the `ort_probe` test |
+
+`ort_probe`:
+
+| Case | Kind | Exit | Test |
+|---|---|---|---|
+| Bad arguments | `usage_error` | 2 | `ExitPaths.OrtProbeUsageErrorExits2`, `ParseArgs.Errors` |
+| Model or context file not found | `usage_error` | 2 | not tested |
+| `--json` file exists | `file_exists` | 6 | `OrtProbe.JsonRefusesToOverwrite` |
+| `--json` cannot be written | `write_failed` | 6 | not tested |
+| ONNX Runtime cannot be loaded | loader kind | 4 | `OrtProbe.LoadFailureExits4` |
+| `onnxruntime.dll` not from the exe directory; an ORT/QNN module loaded from elsewhere | `foreign_module_loaded`; `module_outside_bundle` | 4 | not triggerable for the probe (the loader check is tested with `PreloadHelper.*`) |
+| Output comparison or device selection fails | `device_selection_failed`, check output | 1 | manual (NPU) |
+| ONNX Runtime error, e.g. strict mode refusing a session | `ort_runtime_error` with the ORT code | 3 | manual (`tools/qnn_rejection_check.py`, NPU) |
+| Ctrl+C or Ctrl+Break | none | 130 | `ExitPaths.OrtProbeCtrlBreakExits130WithoutWriting` |
+| A crash | `internal_error` | 1 | same handler as `ExitPaths.UnhandledExceptionIsReportedAndExits1` |

@@ -134,6 +134,7 @@ TEST(Sha256, FileMatchesBuffer) {
     const eb::Result<std::string> missing = eb::sha256_file(file.path().parent_path() / "nope");
     ASSERT_FALSE(missing.ok());
     EXPECT_EQ(missing.error().exit_code, eb::ExitCode::usage_error);
+    EXPECT_EQ(missing.error().kind, "file_read_failed");
 }
 
 TEST(Sha256, LargeFileInChunks) {

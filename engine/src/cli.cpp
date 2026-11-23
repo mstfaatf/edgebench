@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <sstream>
 
+#include "edgebench/diagnostics.hpp"
 #include "edgebench/ort_loader.hpp"
 #include "edgebench/version.hpp"
 
@@ -144,13 +145,15 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
         const std::string app_prefix = "edgebench: ";  // CLI11 prefixes some messages
         if (message.rfind(app_prefix, 0) == 0)
             message.erase(0, app_prefix.size());
-        result.err = "error: " + message + "\n";
         const std::vector<CLI::App*> selected = app.get_subcommands();
-        if (selected.empty()) {
-            result.err += "\n" + app.help();  // no or unknown command: show the commands
+        if (selected.empty()) {  // no or unknown command: show the commands
+            result.err = format_error("usage_error", message,
+                                      "Run 'edgebench --help' for the commands.") +
+                         "\n" + app.help();
         } else {
-            result.err +=
-                "Run 'edgebench " + selected.front()->get_name() + " --help' for usage.\n";
+            result.err = format_error(
+                "usage_error", message,
+                "Run 'edgebench " + selected.front()->get_name() + " --help' for the options.");
         }
         result.exit = ExitCode::usage_error;
         return result;
@@ -176,9 +179,14 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
 
         const std::vector<ConfigError> errors = validate(cfg);
         if (!errors.empty()) {
-            for (const ConfigError& e : errors)
-                result.err += "error: --" + e.field + ": " + e.message + "\n";
-            result.err += "Run 'edgebench run --help' for usage.\n";
+            for (std::size_t i = 0; i < errors.size(); ++i) {
+                const ConfigError& e = errors[i];
+                // One hint, after the last error.
+                result.err += format_error(e.kind, "--" + e.field + ": " + e.message,
+                                           i + 1 == errors.size()
+                                               ? "Run 'edgebench run --help' for the options."
+                                               : "");
+            }
             result.exit = ExitCode::usage_error;
         }
         return result;
@@ -187,7 +195,9 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
         result.command = Command::doctor;
         return result;
     }
-    result.err = "error: no command given\n\n" + app.help();
+    result.err = format_error("usage_error", "no command given",
+                              "Run 'edgebench --help' for the commands.") +
+                 "\n" + app.help();
     result.exit = ExitCode::usage_error;
     return result;
 }

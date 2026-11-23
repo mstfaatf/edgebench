@@ -179,24 +179,30 @@
               }
             },
             "execution_provider": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["name", "version", "library_path"],
-              "properties": {
-                "name": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Execution provider used for the session, e.g. QNNExecutionProvider."
-                },
-                "version": {
-                  "type": ["string", "null"],
-                  "description": "EP version, e.g. 2.8.0 for the QNN plugin EP. Null for built-in EPs without their own version."
-                },
-                "library_path": {
-                  "type": ["string", "null"],
-                  "description": "Path of the plugin EP library, if the EP was registered from a library."
+              "description": "Null only in a failed result where no execution provider was created.",
+              "oneOf": [
+                {"type": "null"},
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "version", "library_path"],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Execution provider used for the session, e.g. QNNExecutionProvider."
+                    },
+                    "version": {
+                      "type": ["string", "null"],
+                      "description": "EP version, e.g. 2.8.0 for the QNN plugin EP. Null for built-in EPs without their own version."
+                    },
+                    "library_path": {
+                      "type": ["string", "null"],
+                      "description": "Path of the plugin EP library, if the EP was registered from a library."
+                    }
+                  }
                 }
-              }
+              ]
             },
             "qnn": {
               "description": "QNN-specific details. Null when the QNN EP is not used.",
@@ -282,9 +288,11 @@
               "description": "Every ONNX Runtime and QNN DLL loaded in the process (onnxruntime*.dll, Qnn*.dll), captured while the session was alive."
             },
             "ep_devices": {
-              "type": "array",
-              "items": {"$ref": "#/$defs/epDeviceInfo"},
-              "description": "Every EP device ONNX Runtime enumerated, not only the selected one."
+              "description": "Every EP device ONNX Runtime enumerated, not only the selected one. Null if the devices could not be enumerated (failed results only).",
+              "oneOf": [
+                {"type": "null"},
+                {"type": "array", "items": {"$ref": "#/$defs/epDeviceInfo"}}
+              ]
             }
           }
         }
@@ -372,7 +380,11 @@
           "type": "boolean",
           "description": "True if CPU fallback was disabled (session.disable_cpu_ep_fallback = 1)."
         },
-        "batch_size": {"type": "integer", "minimum": 1},
+        "batch_size": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Items per inference. Null only in a failed result where it could not be determined."
+        },
         "input": {
           "type": "object",
           "additionalProperties": false,
@@ -808,12 +820,18 @@
       "then": {
         "properties": {
           "error": {"type": "null"},
-          "runtime": {"type": "object"},
+          "runtime": {
+            "type": "object",
+            "properties": {"execution_provider": {"type": "object"}, "ep_devices": {"type": "array"}}
+          },
           "model": {"type": "object"},
           "execution": {"type": "object"},
           "timing": {
             "type": "object",
             "properties": {"trials": {"minItems": 1}, "aggregate": {"type": "object"}}
+          },
+          "config": {
+            "properties": {"batch_size": {"type": "integer"}}
           }
         }
       },

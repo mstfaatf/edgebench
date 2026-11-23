@@ -89,14 +89,18 @@ session that is timed.
 hash + inspect model file            (not timed; warms the file cache for every trial)
 read power state
 for each trial (scheduler order):
-    idle --cooldown-ms (1 s before the first trial if 0), sampling CPU load
+    idle --cooldown-ms (1 s before the first trial if 0), sampling CPU load   [stop: idle]
+                                                                               [stop: before_session]
     provider.create_session()        -> cold_ms[trial], working-set delta
-    warm-up 1 (timed)                -> first_inference_ms (trial 0)
+                                                                               [stop: after_session]
+    warm-up 1 (timed)                -> first_inference_ms (trial 0)          [stop: warmup, each]
     warm-up 2..n (untimed)
-    measured iterations              -> one latency per run_once()
+    measured iterations              -> one latency per run_once()            [stop: measured, each]
     finite check, compare outputs with trial 0, release the session
 read process memory
+                                                                               [stop: before_placement]
 provider.record_placement()          (after every timed session)
+                                                                               [stop: after_placement]
 read power state again               -> power_state_changed warning
 statistics: per trial, pooled aggregate, trial variation
 ```
@@ -144,12 +148,45 @@ no-replace rename, collision suffixes, atomic replacement of `<name>_latest.json
 `main` prints the summary first, then writes, so a write error (exit code 6)
 never loses the measurements. See [cli.md](cli.md#result-files).
 
+### Interrupts
+
+`interrupt.hpp` installs the console control handler. In `stop_gracefully`
+mode (a benchmark) the handler only stores the event, sets an atomic flag and
+signals a manual-reset event; a second Ctrl+C or Ctrl+Break calls
+`TerminateProcess(130)`. For a console close, logoff or shutdown it waits up to
+4 s on a second event that `main` signals once the result is written
+(`notify_shutdown_complete()`), because Windows ends the process when the
+handler returns. In `exit_immediately` mode (dry run, `doctor`, `ort_probe`) the
+first event ends the process with 130.
+
+The trial loop polls `stop_requested()` at the `[stop: ...]` points above, all
+outside the timed brackets, and the idle periods wait on the event
+(`wait_or_stop()`), so no timing changes when nobody interrupts. The polls go
+through `should_stop(hook, StopPoint, trial, iteration)`: tests pass a
+`StopHook` that calls `request_stop()` at a chosen point, which exercises
+exactly the path a real Ctrl+C takes. An interrupted run becomes a failed
+result (`interrupted`, exit 130) with the completed trials; the partial trial
+is dropped and placement is skipped.
+
 ## Errors
 
 Fallible operations return `Result<T>` (`result.hpp`): a value or an `Error`
 with the exit code ([cli.md](cli.md#exit-codes)), a stable `kind`, a message and,
 for ONNX Runtime failures, the ORT error code and name. Usage problems with the
 model are exit code 2, ONNX Runtime failures 3, load failures 4.
+
+Everything that reaches the user goes through `diagnostics.hpp`
+(`format_error`, `format_warning`, `print_error`, `print_warning`):
+`error: [<kind>] <message>`, an optional `hint:` line, and
+`warning: [<code>] <message>`, in `edgebench` and `ort_probe` alike. `wmain`
+catches `Ort::Exception` (exit 3) and `std::exception` (exit 1) as a last
+resort. `crash_handler.hpp` installs an unhandled-exception filter that writes
+`error: [internal_error] unhandled exception 0x<code> at <address>` with
+`WriteFile` from a stack buffer (no allocation in a crashed process) and ends
+the process with exit code 1; `SetErrorMode` suppresses the Windows error
+dialog, and no dump is written. The full list of failure cases with their kind,
+exit code and whether a result is written is in
+[cli.md](cli.md#exit-paths).
 
 ## Adding a provider
 

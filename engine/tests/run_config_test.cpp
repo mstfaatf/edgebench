@@ -9,6 +9,10 @@
 
 #include "test_files.hpp"
 
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+
 namespace eb = edgebench;
 namespace fs = std::filesystem;
 using eb::test::TempModel;
@@ -247,4 +251,52 @@ TEST(ResolvedConfig, ConstantInput) {
     EXPECT_EQ(input.at("kind"), "constant");
     EXPECT_EQ(input.at("constant_value"), 0.5);
     EXPECT_TRUE(input.at("seed").is_null());
+}
+
+TEST(Validate, UpperBounds) {
+    TempModel model;
+    const eb::RunConfig base = valid_config(model);
+    struct Case {
+        int eb::RunConfig::*member;
+        const char* field;
+        int largest_ok;
+    };
+    const Case cases[] = {
+        {&eb::RunConfig::iterations, "iterations", eb::kMaxIterations},
+        {&eb::RunConfig::trials, "trials", eb::kMaxTrials},
+        {&eb::RunConfig::warmup, "warmup", eb::kMaxWarmup},
+        {&eb::RunConfig::cooldown_ms, "cooldown-ms", eb::kMaxCooldownMs},
+        {&eb::RunConfig::load_sample_ms, "load-sample-ms", eb::kMaxLoadSampleMs},
+        {&eb::RunConfig::threads, "threads", eb::kMaxThreads},
+    };
+    EXPECT_EQ(eb::kMaxIterations, 1'000'000);
+    EXPECT_EQ(eb::kMaxTrials, 1'000);
+    EXPECT_EQ(eb::kMaxWarmup, 100'000);
+    EXPECT_EQ(eb::kMaxCooldownMs, 600'000);
+    EXPECT_EQ(eb::kMaxThreads, 256);
+    for (const Case& k : cases) {
+        eb::RunConfig c = base;
+        c.*k.member = k.largest_ok;
+        EXPECT_TRUE(eb::validate(c).empty()) << k.field;
+        c.*k.member = k.largest_ok + 1;
+        const std::vector<eb::ConfigError> errors = eb::validate(c);
+        ASSERT_EQ(fields(errors), std::vector<std::string>{k.field}) << k.field;
+        EXPECT_NE(errors[0].message.find("must be between"), std::string::npos)
+            << errors[0].message;
+        EXPECT_EQ(errors[0].kind, "usage_error");
+    }
+}
+
+TEST(Validate, LockedModelIsUnreadable) {
+    TempModel model;
+    // No sharing at all: every other open fails with a sharing violation.
+    HANDLE lock = CreateFileW(model.path().c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    ASSERT_NE(lock, INVALID_HANDLE_VALUE);
+    const std::vector<eb::ConfigError> errors = eb::validate(valid_config(model));
+    CloseHandle(lock);
+    ASSERT_EQ(fields(errors), std::vector<std::string>{"model"});
+    EXPECT_EQ(errors[0].kind, "model_unreadable");
+    EXPECT_NE(errors[0].message.find("for reading"), std::string::npos) << errors[0].message;
+    EXPECT_TRUE(eb::validate(valid_config(model)).empty());  // readable again
 }

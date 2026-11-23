@@ -109,7 +109,7 @@ whatever was established before the failure and leaves the rest `null`.
 |---|---|---|---|
 | `stage` | enum | no | Where the run failed: `configuration`, `environment`, `model_load`, `ep_registration`, `session_creation`, `warmup`, `measurement`, `accuracy`, `output` |
 | `message` | string | no | Human-readable error message |
-| `code` | string | yes | Error code from the failing component, e.g. an ONNX Runtime `OrtErrorCode` name |
+| `code` | string | yes | Error code from the failing component, e.g. an ONNX Runtime `OrtErrorCode` name, a loader error kind, or `interrupted` (Ctrl+C, Ctrl+Break or console close; completed trials are kept) |
 
 ### `warnings[]`
 
@@ -128,6 +128,8 @@ Recommended codes:
 | `insufficient_samples` | A statistic is `null` because there were too few samples |
 | `outlier_trial` | A trial deviates strongly from the others |
 | `power_not_on_ac` | The device was on battery during the run |
+| `interrupted_trial_discarded` | An interrupted run dropped its incomplete trial; the message gives the number of measured iterations discarded |
+| `threads_exceed_logical_processors` | `config.intra_op_threads` is larger than the logical processor count (path `/config/intra_op_threads`) |
 
 ## `tool`
 
@@ -164,6 +166,7 @@ Recommended codes:
 |---|---|---|---|
 | `onnxruntime.version` | string (semver) | no | Version reported by the loaded library (not the headers) |
 | `onnxruntime.library_path` | string | yes | Absolute path of the loaded `onnxruntime.dll` |
+| `execution_provider` | object | ¹ | In 1.1.0 `null` in a failed result when the provider was never created; required on success |
 | `execution_provider.name` | string | no | EP the session used, e.g. `QNNExecutionProvider`, `CPUExecutionProvider` |
 | `execution_provider.version` | string | yes | EP version (e.g. the QNN plugin EP version); `null` for built-in EPs without their own version |
 | `execution_provider.library_path` | string | yes | Plugin EP library, if registered from a library |
@@ -227,7 +230,7 @@ When `method` is `none`, all other quantization fields must be `null`.
 | `requested.device_type` | `CPU` \| `GPU` \| `NPU` | no | Device the user asked for |
 | `requested.compute_precision` | `fp32` \| `fp16` \| `int8` | yes | Compute precision explicitly requested from the EP (e.g. via an EP option); `null` = EP default |
 | `strict_mode` | boolean | no | `true` if CPU fallback was disabled (`session.disable_cpu_ep_fallback = 1`) |
-| `batch_size` | integer ≥ 1 | no | Items per inference |
+| `batch_size` | integer ≥ 1 | ¹ | Items per inference. In 1.1.0 `null` in a failed result when it could not be determined (the model could not be read); never a placeholder |
 | `input.kind` | `constant` \| `random` \| `dataset` | no | How inputs were generated |
 | `input.constant_value` | number | yes | Fill value for `constant` |
 | `input.seed` | integer | yes | RNG seed for `random` |
@@ -433,7 +436,7 @@ the language binding, so the key covers exactly those.
 | `runtime.onnxruntime.api_version` | integer | yes | C API version obtained from the library |
 | `runtime.onnxruntime.load_check` | `full_path_verified` \| `python_package` \| `not_checked` | no | `full_path_verified`: the C++ engine loaded `onnxruntime.dll` by absolute path from its own directory and checked its version and C API version. `python_package`: loaded through the `onnxruntime` Python package. `not_checked`: no check |
 | `runtime.loaded_modules[]` | array of `{name, path}` | no | Every ONNX Runtime and QNN DLL in the process (`onnxruntime*.dll`, `Qnn*.dll`), captured while the session was alive |
-| `runtime.ep_devices[]` | array | no | Every EP device ONNX Runtime enumerated: `{ep_name, ep_vendor, device_type, vendor, vendor_id, device_id, metadata, ep_metadata}`. `vendor` may be an empty string (the QNN EP reports it that way) |
+| `runtime.ep_devices[]` | array | ¹ | `null` in a failed result when the devices could not be enumerated; required on success. Every EP device ONNX Runtime enumerated: `{ep_name, ep_vendor, device_type, vendor, vendor_id, device_id, metadata, ep_metadata}`. `vendor` may be an empty string (the QNN EP reports it that way) |
 | `runtime.ep_device.metadata` | map string → string | no | Hardware device metadata of the selected device |
 | `runtime.ep_device.selection` | object | yes | `{method, candidate_count}`. `method`: `by_device_type` (the EP device of the requested EP whose hardware type is the requested type). `candidate_count`: how many matched; a valid selection has exactly one |
 | `runtime.qnn.backend_build` | string | yes | Build reported by the backend, e.g. `v2.52.0.261104115025` |
@@ -641,6 +644,20 @@ See [Fields added in 1.1.0](#fields-added-in-110).
 - Model and tool: `model.normalization`, `tool.implementation`.
 - Validator: warnings separate from errors (`--strict` fails on warnings) and
   the 1.1.0 rules above. CSV columns 44–47.
+
+Amended before any 1.1.0 result was published, so that failed results never
+carry made-up values (the version number is unchanged):
+
+- `config.batch_size` may be `null` in a failed result (it was `1` with a
+  warning when unknown); a successful result still requires an integer.
+- `runtime.execution_provider` may be `null` in a failed result (it held the
+  requested EP name when the provider was never created).
+- `runtime.ep_devices` may be `null` in a failed result (it was an empty list
+  when enumeration failed).
+
+A successful result with any of these `null` fails schema validation
+(fixtures `schema_success_null_batch_size.json`,
+`schema_success_null_execution_provider.json`).
 
 ### 1.0.0
 

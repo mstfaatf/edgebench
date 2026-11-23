@@ -72,12 +72,6 @@ bool same_file_path(const fs::path& a, const fs::path& b) {
     return is_same_path(resolve_path(a).native(), resolve_path(b).native());
 }
 
-std::string with_fix_hint(std::string message) {
-    return message +
-           ". The build copies the bundled ONNX Runtime (third_party/onnxruntime/lib) next to "
-           "the executable; rebuild, or copy onnxruntime.dll and "
-           "onnxruntime_providers_shared.dll from there.";
-}
 
 std::mutex g_load_mutex;
 std::optional<OrtLoadResult> g_loaded;  // set after the first successful load
@@ -102,6 +96,29 @@ std::string_view to_string(OrtLoadError error) {
             return "foreign_module_loaded";
     }
     return "unknown";
+}
+
+std::string_view load_error_hint(OrtLoadError error) {
+    switch (error) {
+        case OrtLoadError::dll_not_found:
+        case OrtLoadError::entry_point_missing:
+        case OrtLoadError::version_mismatch:
+            return "The build copies the bundled ONNX Runtime (third_party/onnxruntime/lib) next "
+                   "to the executable; rebuild, or copy onnxruntime.dll and "
+                   "onnxruntime_providers_shared.dll from there.";
+        case OrtLoadError::load_failed:
+            return "Check that the DLL is an ONNX Runtime build for this architecture and not "
+                   "damaged; re-run scripts/fetch_deps.ps1 -Force and rebuild.";
+        case OrtLoadError::api_version_unsupported:
+            return "The headers and the DLL come from different packages; re-run "
+                   "scripts/fetch_deps.ps1 -Force and rebuild.";
+        case OrtLoadError::foreign_module_loaded:
+            return "Something loaded another onnxruntime.dll first (an injected DLL, or a copy on "
+                   "PATH or in System32); remove it from the process.";
+        case OrtLoadError::none:
+            break;
+    }
+    return {};
 }
 
 std::string_view OrtLoadResult::load_check() const {
@@ -244,13 +261,12 @@ OrtLoadResult load_onnxruntime(const fs::path& bundle_dir) {
             return fail(OrtLoadError::foreign_module_loaded,
                         "an onnxruntime.dll from another location is already loaded in this "
                         "process: " +
-                            path_to_utf8(m.path) + " (expected " + dll +
-                            "). Something loaded it before EdgeBench could load the bundled copy.");
+                            path_to_utf8(m.path) + " (expected " + dll + ")");
         }
     }
 
     if (!fs::is_regular_file(r.dll_path, ec))
-        return fail(OrtLoadError::dll_not_found, with_fix_hint(dll + " not found"));
+        return fail(OrtLoadError::dll_not_found, dll + " not found");
 
     // Absolute path; the DLL's own dependencies resolve from its directory first,
     // then the system directories. The current directory and PATH are not searched.
@@ -262,14 +278,9 @@ OrtLoadResult load_onnxruntime(const fs::path& bundle_dir) {
         const std::string base = "LoadLibraryExW(" + dll + ") failed with error " +
                                  std::to_string(err) + ": " + system_error_text(err);
         if (err == ERROR_MOD_NOT_FOUND) {
-            return fail(OrtLoadError::dll_not_found,
-                        with_fix_hint(base + " (a DLL it depends on is missing)"));
+            return fail(OrtLoadError::dll_not_found, base + " (a DLL it depends on is missing)");
         }
-        return fail(OrtLoadError::load_failed,
-                    base +
-                        ". Check that it is an ONNX Runtime build for this executable's "
-                        "architecture and not damaged; re-run scripts/fetch_deps.ps1 and "
-                        "rebuild.");
+        return fail(OrtLoadError::load_failed, base);
     }
     auto fail_and_unload = [&](OrtLoadError kind, std::string message) {
         FreeLibrary(module);
@@ -290,8 +301,7 @@ OrtLoadResult load_onnxruntime(const fs::path& bundle_dir) {
     if (!api_base) {
         return fail_and_unload(
             OrtLoadError::entry_point_missing,
-            with_fix_hint(dll + " does not export OrtGetApiBase, so it is not an "
-                                "ONNX Runtime library"));
+            dll + " does not export OrtGetApiBase, so it is not an ONNX Runtime library");
     }
     const char* version = api_base->GetVersionString ? api_base->GetVersionString() : nullptr;
     r.ort_version = version ? version : "";
@@ -299,9 +309,9 @@ OrtLoadResult load_onnxruntime(const fs::path& bundle_dir) {
     if (!version_matches(r.ort_version, expected)) {
         return fail_and_unload(
             OrtLoadError::version_mismatch,
-            with_fix_hint(dll + " is ONNX Runtime " +
-                          (r.ort_version.empty() ? std::string("(no version)") : r.ort_version) +
-                          ", but EdgeBench requires ONNX Runtime " + expected));
+            dll + " is ONNX Runtime " +
+                (r.ort_version.empty() ? std::string("(no version)") : r.ort_version) +
+                ", but EdgeBench requires ONNX Runtime " + expected);
     }
 
     const OrtApi* api = api_base->GetApi(ORT_API_VERSION);
@@ -310,10 +320,7 @@ OrtLoadResult load_onnxruntime(const fs::path& bundle_dir) {
                                dll + " (ONNX Runtime " + r.ort_version +
                                    ") does not provide C API version " +
                                    std::to_string(ORT_API_VERSION) +
-                                   ", which EdgeBench's headers were built for. The headers in "
-                                   "third_party/onnxruntime/include and the DLL come from "
-                                   "different packages; re-run scripts/fetch_deps.ps1 -Force "
-                                   "and rebuild.");
+                                   ", which EdgeBench's headers were built for");
     }
 
     Ort::InitApi(api);

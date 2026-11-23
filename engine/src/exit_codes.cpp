@@ -18,6 +18,8 @@ std::string_view name(ExitCode code) noexcept {
             return "strict_mode_refusal";
         case ExitCode::output_error:
             return "output_error";
+        case ExitCode::interrupted:
+            return "interrupted";
     }
     return "unknown";
 }
@@ -40,6 +42,8 @@ std::string_view describe(ExitCode code) noexcept {
                    "device";
         case ExitCode::output_error:
             return "Results could not be written";
+        case ExitCode::interrupted:
+            return "Interrupted by Ctrl+C, Ctrl+Break or closing the console";
     }
     return "Unknown exit code";
 }

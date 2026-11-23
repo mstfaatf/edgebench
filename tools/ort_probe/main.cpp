@@ -37,7 +37,10 @@
 #include <string>
 #include <vector>
 
+#include "edgebench/crash_handler.hpp"
+#include "edgebench/diagnostics.hpp"
 #include "edgebench/exit_codes.hpp"
+#include "edgebench/interrupt.hpp"
 #include "edgebench/ort_loader.hpp"
 #include "edgebench/result_files.hpp"
 #include "ort_support.hpp"
@@ -64,7 +67,7 @@ bool WriteJsonFile(const fs::path& path, const std::string& text) {
         fs::create_directories(path.parent_path(), ec);
     const edgebench::Result<void> r = edgebench::create_file_atomically(path, text + "\n");
     if (!r) {
-        std::fprintf(stderr, "error: cannot write --json: %s\n", r.error().message.c_str());
+        edgebench::print_error(r.error().kind, "cannot write --json: " + r.error().message);
         return false;
     }
     return true;
@@ -177,7 +180,7 @@ int RunProbe(const Options& o) {
     const fs::path exe_dir = edgebench::executable_dir();
     const fs::path model = fs::absolute(o.model);
     if (!fs::is_regular_file(model)) {
-        std::fprintf(stderr, "model not found: %s\n", model.string().c_str());
+        edgebench::print_error("usage_error", "model not found: " + edgebench::path_to_utf8(model));
         return kExitUsage;
     }
 
@@ -241,7 +244,8 @@ int RunProbe(const Options& o) {
         .String(fs::current_path().string());
     if (!ort_dll_ok) {
         j.EndObject().EndObject();
-        std::fprintf(stderr, "onnxruntime.dll was not loaded from %s\n", exe_dir.string().c_str());
+        edgebench::print_error("foreign_module_loaded", "onnxruntime.dll was not loaded from " +
+                                                            edgebench::path_to_utf8(exe_dir));
         return kExitOrtLoadFailure;
     }
 
@@ -257,7 +261,7 @@ int RunProbe(const Options& o) {
         try {
             npu = SelectQnnNpu(devices);
         } catch (const DeviceSelectionError& e) {
-            std::fprintf(stderr, "device selection failed: %s\n", e.what());
+            edgebench::print_error("device_selection_failed", e.what());
             j.EndObject().EndObject();
             return kExitCheckFailed;
         }
@@ -320,7 +324,8 @@ int RunProbe(const Options& o) {
             std::printf("  EP context generation (ms): %.1f -> %s\n", *generate_ms,
                         o.context_file.string().c_str());
         } else if (!fs::is_regular_file(o.context_file)) {
-            std::fprintf(stderr, "context file not found: %s\n", o.context_file.string().c_str());
+            edgebench::print_error("usage_error", "context file not found: " +
+                                                      edgebench::path_to_utf8(o.context_file));
             return kExitUsage;
         }
         for (int rep = 0; rep < o.init_reps; ++rep) {
@@ -529,8 +534,13 @@ int RunProbe(const Options& o) {
     j.Key("result").String(report.failed ? "failed" : "ok").EndObject();
     const bool json_written = o.json.empty() || WriteJsonFile(o.json, j.str());
     std::printf("\n%s\n", report.failed ? "FAILED" : "OK");
-    if (report.foreign_module)
+    if (report.foreign_module) {
+        edgebench::print_error("module_outside_bundle",
+                               "an ONNX Runtime or QNN module was loaded from outside " +
+                                   edgebench::path_to_utf8(exe_dir) +
+                                   " (marked in the module list above)");
         return kExitOrtLoadFailure;
+    }
     if (report.failed)
         return kExitCheckFailed;
     return json_written ? kExitOk : kExitOutputError;
@@ -560,6 +570,7 @@ void WriteErrorJson(const Options& o, const std::string& code_name, int code,
 }  // namespace
 
 int main(int argc, char** argv) {
+    edgebench::install_crash_handler();
     const std::vector<std::string> args(argv + 1, argv + argc);
     const ParseResult parsed = ParseArgs(args);
     if (parsed.options.help) {
@@ -567,21 +578,27 @@ int main(int argc, char** argv) {
         return kExitOk;
     }
     if (!parsed.error.empty()) {
-        std::fprintf(stderr, "error: %s\n\n%s", parsed.error.c_str(), Usage(argv[0]).c_str());
+        edgebench::print_error("usage_error", parsed.error,
+                               "Run ort_probe --help for the options.");
+        std::fprintf(stderr, "\n%s", Usage(argv[0]).c_str());
         return kExitUsage;
     }
     const Options& o = parsed.options;
+    // Nothing to save on Ctrl+C: exit 130 at once (the --json file is written last).
+    edgebench::install_interrupt_handler(edgebench::InterruptMode::exit_immediately);
     if (!o.json.empty() && fs::exists(o.json)) {
-        std::fprintf(stderr, "error: --json %s already exists; refusing to overwrite it\n",
-                     edgebench::path_to_utf8(fs::absolute(o.json)).c_str());
+        edgebench::print_error("file_exists",
+                               "--json " + edgebench::path_to_utf8(fs::absolute(o.json)) +
+                                   " already exists; refusing to overwrite it",
+                               "Pass a new path to --json.");
         return kExitOutputError;
     }
     // Load onnxruntime.dll from next to the executable before any ONNX Runtime call.
     const edgebench::OrtLoadResult load = edgebench::load_onnxruntime();
     if (!load.ok()) {
         const std::string kind(edgebench::to_string(load.error_kind));
-        std::fprintf(stderr, "cannot use the bundled ONNX Runtime (%s): %s\n", kind.c_str(),
-                     load.message.c_str());
+        edgebench::print_error(kind, "cannot load ONNX Runtime: " + load.message,
+                               edgebench::load_error_hint(load.error_kind));
         WriteErrorJson(o, "dll_load", -1, kind + ": " + load.message);
         return kExitOrtLoadFailure;
     }
@@ -589,12 +606,14 @@ int main(int argc, char** argv) {
         return RunProbe(o);
     } catch (const Ort::Exception& e) {
         const OrtErrorCode code = e.GetOrtErrorCode();
-        std::fprintf(stderr, "\nONNX Runtime error %d (%s): %s\n", static_cast<int>(code),
-                     OrtErrorCodeName(code), e.what());
+        edgebench::print_error("ort_runtime_error",
+                               "ONNX Runtime error " + std::string(OrtErrorCodeName(code)) +
+                                   " (code " + std::to_string(static_cast<int>(code)) +
+                                   "): " + e.what());
         WriteErrorJson(o, OrtErrorCodeName(code), static_cast<int>(code), e.what());
         return kExitOrtError;
     } catch (const std::exception& e) {
-        std::fprintf(stderr, "\nerror: %s\n", e.what());
+        edgebench::print_error("internal_error", e.what());
         WriteErrorJson(o, "std::exception", -1, e.what());
         return kExitCheckFailed;
     }

@@ -352,3 +352,30 @@ def test_cli_exit_codes_by_severity(tmp_path, capsys, severity):
 ])
 def test_windows_path_within(path, directory, expected):
     assert vr._windows_path_within(path, directory) is expected
+
+
+# --- 1.1.0 amendment: unknown values in failed results are null ----------------
+
+def test_failed_result_may_have_null_batch_size_and_provider(validators):
+    doc = load(V110 / "example-failed-ort-load.json")
+    assert doc["config"]["batch_size"] is None
+    assert vr.validate_document(doc, validators, V110 / "example-failed-ort-load.json") == []
+
+
+def test_failed_result_with_runtime_but_no_provider_is_valid(validators):
+    doc = load(CPU_110)
+    doc["status"] = "failed"
+    doc["error"] = {"stage": "ep_registration", "message": "no CPU EP device", "code": "device_selection_failed"}
+    doc["runtime"]["execution_provider"] = None
+    doc["runtime"]["ep_devices"] = None
+    doc["config"]["batch_size"] = None
+    doc["timing"] = None
+    doc["execution"] = None
+    assert vr.validate_document(doc, validators, CPU_110) == []
+
+
+def test_successful_result_still_requires_device_list(validators):
+    doc = load(CPU_110)
+    doc["runtime"]["ep_devices"] = None
+    paths = {i.path for i in vr.validate_document(doc, validators, CPU_110)}
+    assert "/runtime/ep_devices" in paths

@@ -189,7 +189,7 @@ def _close(a: float, b: float) -> bool:
     return math.isclose(a, b, rel_tol=REL_TOL, abs_tol=1e-9)
 
 
-def stats_issues(stats: dict[str, Any], batch_size: int, base: str) -> list[Issue]:
+def stats_issues(stats: dict[str, Any], batch_size: int | None, base: str) -> list[Issue]:
     issues = []
     count = stats["count"]
     for key, minimum in MIN_COUNT.items():
@@ -214,6 +214,8 @@ def stats_issues(stats: dict[str, Any], batch_size: int, base: str) -> list[Issu
     if mean > 0 and not _close(stats["inferences_per_sec"], 1000.0 / mean):
         issues.append(Issue(f"{base}/inferences_per_sec",
                             f"expected 1000 / mean_ms = {1000.0 / mean:.6g}, got {stats['inferences_per_sec']}"))
+    if batch_size is None:  # unknown in a failed result: nothing to compare with
+        return issues
     expected_items = stats["inferences_per_sec"] * batch_size
     if not _close(stats["items_per_sec"], expected_items):
         issues.append(Issue(f"{base}/items_per_sec",
@@ -410,7 +412,8 @@ def v1_1_issues(doc: dict[str, Any]) -> list[Issue]:
     requested = config["requested"]
     device = requested["device_type"]
     timed = timing is not None and len(timing["trials"]) > 0
-    ep_name = runtime["execution_provider"]["name"] if runtime is not None else None
+    provider = runtime.get("execution_provider") if runtime is not None else None
+    ep_name = provider["name"] if provider is not None else None
 
     # Profiled sessions are never timed.
     profiling = config.get("profiling")

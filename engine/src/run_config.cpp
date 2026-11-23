@@ -5,6 +5,7 @@
 #include <cmath>
 #include <system_error>
 
+#include "edgebench/model_info.hpp"
 #include "edgebench/ort_loader.hpp"
 
 namespace fs = std::filesystem;
@@ -36,20 +37,22 @@ std::vector<ConfigError> validate(const RunConfig& c) {
         add("model", "not a regular file: " + path_to_utf8(c.model));
     } else if (lower(path_to_utf8(c.model.extension())) != ".onnx") {
         add("model", "must be an .onnx file: " + path_to_utf8(c.model));
+    } else if (Result<void> readable = check_file_readable(c.model); !readable) {
+        errors.push_back({"model", readable.error().message, readable.error().kind});
     }
 
-    if (c.threads < 1)
-        add("threads", "must be at least 1 (got " + std::to_string(c.threads) + ")");
-    if (c.warmup < 0)
-        add("warmup", "must be 0 or more (got " + std::to_string(c.warmup) + ")");
-    if (c.iterations < 1)
-        add("iterations", "must be at least 1 (got " + std::to_string(c.iterations) + ")");
-    if (c.trials < 1)
-        add("trials", "must be at least 1 (got " + std::to_string(c.trials) + ")");
-    if (c.cooldown_ms < 0)
-        add("cooldown-ms", "must be 0 or more (got " + std::to_string(c.cooldown_ms) + ")");
-    if (c.load_sample_ms < 0)
-        add("load-sample-ms", "must be 0 or more (got " + std::to_string(c.load_sample_ms) + ")");
+    auto range = [&add](const char* field, int value, int lo, int hi) {
+        if (value < lo || value > hi) {
+            add(field, "must be between " + std::to_string(lo) + " and " + std::to_string(hi) +
+                           " (got " + std::to_string(value) + ")");
+        }
+    };
+    range("threads", c.threads, 1, kMaxThreads);
+    range("warmup", c.warmup, 0, kMaxWarmup);
+    range("iterations", c.iterations, 1, kMaxIterations);
+    range("trials", c.trials, 1, kMaxTrials);
+    range("cooldown-ms", c.cooldown_ms, 0, kMaxCooldownMs);
+    range("load-sample-ms", c.load_sample_ms, 0, kMaxLoadSampleMs);
     if (c.name && !is_valid_result_name(*c.name)) {
         add("name",
             "may only contain letters, digits, '-', '_' and '.', and must not start "

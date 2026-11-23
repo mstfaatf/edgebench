@@ -7,6 +7,7 @@
 #include <sstream>
 #include <thread>
 
+#include "edgebench/interrupt.hpp"
 #include "edgebench/run_identity.hpp"
 #include "edgebench/runtime.hpp"
 #include "edgebench/scheduler.hpp"
@@ -56,20 +57,44 @@ std::optional<std::size_t> argmax_float(const std::vector<std::byte>& bytes) {
     return best;
 }
 
-// One trial: fresh session, warm-up, measured iterations. Returns the session's
-// final outputs through `final_outputs`.
+Error interrupted_error(const std::string& where) {
+    return Error{ExitCode::interrupted, "interrupted",
+                 "interrupted by " + stop_reason() + " (" + where + ")"};
+}
+
+// What a trial reports besides its result.
+struct TrialOutcome {
+    std::vector<std::vector<std::byte>> final_outputs;  // last iteration's outputs
+    std::string failed_stage;                           // error.stage if it failed
+    int discarded_iterations = -1;  // measured iterations dropped by an interrupt
+};
+
+// Calls the test hook, then reports whether a stop was requested.
+bool should_stop(const StopHook& hook, StopPoint point, int trial, int iteration) {
+    if (hook)
+        hook(point, trial, iteration);
+    return stop_requested();
+}
+
+// One trial: fresh session, warm-up, measured iterations. Stop requests are
+// honoured before and after session creation and between iterations (never
+// inside the timed bracket).
 Result<TrialResult> run_trial(Provider& provider, const RunConfig& config, const ScheduledTrial& st,
-                              BenchmarkResult& result,
-                              std::vector<std::vector<std::byte>>& final_outputs,
-                              std::string& failed_stage) {
+                              BenchmarkResult& result, const StopHook& hook, TrialOutcome& out) {
     const std::string where = trial_label(st.trial_index, config.trials);
-    failed_stage = "session_creation";
+    out.failed_stage = "session_creation";
+    if (should_stop(hook, StopPoint::before_session, st.trial_index, 0))
+        return interrupted_error(where + ", before session creation");
     Result<std::unique_ptr<BenchSession>> created =
         provider.create_session(result.model.file.path, config);
     if (!created)
         return with_context(created.error(), where);
     std::unique_ptr<BenchSession> session = std::move(created).value();
     result.known.session = true;
+    if (should_stop(hook, StopPoint::after_session, st.trial_index, 0)) {
+        out.discarded_iterations = 0;
+        return interrupted_error(where + ", after session creation");
+    }
 
     TrialResult trial;
     trial.trial_index = st.trial_index;
@@ -94,8 +119,12 @@ Result<TrialResult> run_trial(Provider& provider, const RunConfig& config, const
         return {};
     };
 
-    failed_stage = "warmup";
+    out.failed_stage = "warmup";
     for (int i = 0; i < config.warmup; ++i) {
+        if (should_stop(hook, StopPoint::warmup, st.trial_index, i)) {
+            out.discarded_iterations = 0;
+            return interrupted_error(where + ", warm-up iteration " + std::to_string(i + 1));
+        }
         const Clock::time_point t0 = Clock::now();
         if (Result<void> r = run("warm-up", i); !r)
             return r.error();
@@ -103,9 +132,13 @@ Result<TrialResult> run_trial(Provider& provider, const RunConfig& config, const
             trial.first_inference_ms = ms_between(t0, Clock::now());
     }
 
-    failed_stage = "measurement";
+    out.failed_stage = "measurement";
     trial.latencies_ms.reserve(static_cast<std::size_t>(config.iterations));
     for (int i = 0; i < config.iterations; ++i) {
+        if (should_stop(hook, StopPoint::measured, st.trial_index, i)) {
+            out.discarded_iterations = i;
+            return interrupted_error(where + ", measured iteration " + std::to_string(i + 1));
+        }
         const Clock::time_point t0 = Clock::now();
         const Result<void> r = session->run_once();
         const Clock::time_point t1 = Clock::now();
@@ -123,7 +156,7 @@ Result<TrialResult> run_trial(Provider& provider, const RunConfig& config, const
                              std::to_string(*bad)};
         }
     }
-    final_outputs = copy_outputs(*session);
+    out.final_outputs = copy_outputs(*session);
     trial.stats = compute_stats(trial.latencies_ms, session->batch_size());
     return trial;  // the session is released here
 }
@@ -249,22 +282,27 @@ BenchmarkResult failed_load_result(const RunConfig& config, const OrtLoadResult&
 }
 
 BenchmarkResult run_benchmark(Runtime& runtime, const RunConfig& config,
-                              const ProgressFn& progress) {
+                              const ProgressFn& progress, const StopHook& hook) {
     Result<std::unique_ptr<Provider>> provider = make_provider(runtime, config);
     if (!provider) {
         BenchmarkResult r = begin_result(config);
         r.runtime.onnxruntime = runtime.load_result();
         r.known.runtime = true;
+        try {
+            r.runtime.ep_devices = runtime.ep_devices();
+        } catch (const Ort::Exception&) {
+            // stays null: the devices could not be enumerated
+        }
         if (!r.failure)
             set_failure(r, provider.error(), "ep_registration");
         finish_result(r);
         return r;
     }
-    return run_benchmark(runtime, *provider.value(), config, progress);
+    return run_benchmark(runtime, *provider.value(), config, progress, hook);
 }
 
 BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunConfig& config,
-                              const ProgressFn& progress) {
+                              const ProgressFn& progress, const StopHook& hook) {
     auto report = [&progress](const std::string& message) {
         if (progress)
             progress(message);
@@ -275,6 +313,15 @@ BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunCon
     r.known.runtime = true;
     r.runtime.provider = provider.describe();
     r.known.provider = true;
+    if (const std::optional<int> logical = r.system.cpu.logical_processors;
+        logical && config.threads > *logical) {
+        r.warnings.push_back({"threads_exceed_logical_processors",
+                              std::to_string(config.threads) +
+                                  " intra-op threads requested on a CPU with " +
+                                  std::to_string(*logical) +
+                                  " logical processors; threads will compete for cores",
+                              std::string("/config/intra_op_threads")});
+    }
     if (r.failure) {
         finish_result(r);
         return r;
@@ -295,24 +342,44 @@ BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunCon
         // Every trial, the first included, starts after the same idle period, so
         // session creation always meets the CPU in the same power state.
         std::optional<LoadSample> idle;
+        const std::string label = trial_label(st.trial_index, config.trials);
         if (const std::chrono::milliseconds wait = idle_before_trial(config, st.sequence);
             wait.count() > 0) {
-            report("idle " + std::to_string(wait.count()) + " ms before " +
-                   trial_label(st.trial_index, config.trials) + " (sampling background CPU load)");
-            idle = sample_cpu_load(wait);
-            if (st.sequence == 0)
+            report("idle " + std::to_string(wait.count()) + " ms before " + label +
+                   " (sampling background CPU load)");
+            // Waits on the stop event, so an interrupt ends the idle period at once.
+            const CpuTimes start = query_cpu_times();
+            const auto t0 = Clock::now();
+            const bool hook_stop = should_stop(hook, StopPoint::idle, st.trial_index, 0);
+            const bool cut = hook_stop || wait_or_stop(wait);
+            idle = LoadSample{cpu_utilization(start, query_cpu_times()).value_or(0.0),
+                              std::chrono::duration<double>(Clock::now() - t0).count()};
+            if (st.sequence == 0 && !cut)
                 r.system.load = idle;
+            if (cut) {
+                set_failure(r, interrupted_error("idle period before " + label), "measurement");
+                break;
+            }
         }
         report(trial_label(st.trial_index, config.trials) + ": creating session, " +
                std::to_string(config.warmup) + " warm-up + " + std::to_string(config.iterations) +
                " measured iterations");
-        std::vector<std::vector<std::byte>> outputs;
-        std::string failed_stage;
-        Result<TrialResult> trial = run_trial(provider, config, st, r, outputs, failed_stage);
+        TrialOutcome outcome;
+        Result<TrialResult> trial = run_trial(provider, config, st, r, hook, outcome);
         if (!trial) {
-            set_failure(r, trial.error(), failed_stage);
+            set_failure(r, trial.error(), outcome.failed_stage);
+            if (outcome.discarded_iterations >= 0) {
+                r.warnings.push_back(
+                    {"interrupted_trial_discarded",
+                     label + " was interrupted after " +
+                         std::to_string(outcome.discarded_iterations) + " of " +
+                         std::to_string(config.iterations) +
+                         " measured iterations; the trial is not part of the result",
+                     std::nullopt});
+            }
             break;
         }
+        std::vector<std::vector<std::byte>>& outputs = outcome.final_outputs;
         if (st.sequence == 0) {
             // ONNX Runtime accepted the model; the file decoder must have too.
             if (!r.graph) {
@@ -338,6 +405,10 @@ BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunCon
     if (!r.failure) {
         // Placement last, in its own verbose session, so it cannot warm a timed session.
         r.memory_before_placement = query_process_memory();
+        if (should_stop(hook, StopPoint::before_placement, 0, 0))
+            set_failure(r, interrupted_error("before node placement"), "session_creation");
+    }
+    if (!r.failure) {
         report("recording node placement");
         Result<NodeAssignment> placement = provider.record_placement(r.model.file.path, config);
         if (!placement) {
@@ -359,6 +430,9 @@ BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunCon
                                           requested_ep,
                                       std::string("/execution/node_assignment")});
             }
+            // The placement session itself is not interruptible; stop right after it.
+            if (should_stop(hook, StopPoint::after_placement, 0, 0))
+                set_failure(r, interrupted_error("after node placement"), "session_creation");
         }
     }
     finish_result(r);
@@ -476,11 +550,13 @@ void finish_result(BenchmarkResult& r) {
                         "There were no warm-up iterations to time separately.");
     }
     if (r.batch_size <= 0) {
-        r.warnings.push_back({"value_unavailable",
-                              "The batch size could not be determined from the model; 1 is "
-                              "recorded because the schema requires a value.",
-                              std::string("/config/batch_size")});
+        add_unavailable(r, "/config/batch_size",
+                        "The batch size could not be determined: the run failed before the "
+                        "model's input shape was known.");
     }
+    // The ONNX Runtime and QNN modules, if no session snapshot was taken.
+    if (r.known.runtime && r.runtime.loaded_modules.empty())
+        r.runtime.loaded_modules = list_ort_modules();
 }
 
 std::string format_summary(const BenchmarkResult& r) {

@@ -61,7 +61,7 @@
       "compute_precision": null
     },
     "strict_mode": true,
-    "batch_size": 1,
+    "batch_size": null,
     "input": {
       "kind": "dataset",
       "constant_value": null,

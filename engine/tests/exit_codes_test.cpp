@@ -15,11 +15,13 @@ TEST(ExitCodes, DocumentedValues) {
     EXPECT_EQ(eb::to_int(eb::ExitCode::ort_load_failure), 4);
     EXPECT_EQ(eb::to_int(eb::ExitCode::strict_mode_refusal), 5);
     EXPECT_EQ(eb::to_int(eb::ExitCode::output_error), 6);
+    EXPECT_EQ(eb::to_int(eb::ExitCode::interrupted), 130);
 }
 
 TEST(ExitCodes, AllCodesInOrder) {
-    for (size_t i = 0; i < eb::kAllExitCodes.size(); ++i)
+    for (size_t i = 0; i + 1 < eb::kAllExitCodes.size(); ++i)
         EXPECT_EQ(eb::to_int(eb::kAllExitCodes[i]), static_cast<int>(i));
+    EXPECT_EQ(eb::to_int(eb::kAllExitCodes.back()), 130);
 }
 
 TEST(ExitCodes, NamesAndDescriptionsAreUniqueAndSet) {

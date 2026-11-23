@@ -20,12 +20,14 @@ enum class ExitCode : int {
     strict_mode_refusal = 5,
     /// Results could not be written.
     output_error = 6,
+    /// Stopped by Ctrl+C, Ctrl+Break or closing the console (128 + SIGINT, as in shells).
+    interrupted = 130,
 };
 
-inline constexpr std::array<ExitCode, 7> kAllExitCodes = {
+inline constexpr std::array<ExitCode, 8> kAllExitCodes = {
     ExitCode::success,           ExitCode::internal_error,   ExitCode::usage_error,
     ExitCode::ort_runtime_error, ExitCode::ort_load_failure, ExitCode::strict_mode_refusal,
-    ExitCode::output_error,
+    ExitCode::output_error,      ExitCode::interrupted,
 };
 
 constexpr int to_int(ExitCode code) noexcept {

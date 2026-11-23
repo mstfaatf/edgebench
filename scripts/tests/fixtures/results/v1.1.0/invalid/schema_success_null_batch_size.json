@@ -1,0 +1,6 @@
+{
+  "description": "A successful result must record its batch size; null is allowed only in failed results.",
+  "base": "docs/examples/v1.1.0/example-cpu-fp32.json",
+  "set": {"/config/batch_size": null},
+  "expect": {"severity": "error", "code": "", "path": "/config/batch_size"}
+}

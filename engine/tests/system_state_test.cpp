@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include "edgebench/benchmark.hpp"
+#include "edgebench/doctor.hpp"
 #include "edgebench/system_info.hpp"
 
 namespace eb = edgebench;
@@ -132,4 +133,78 @@ TEST(SystemJson, PowerAndLoad) {
                                                      {"battery_saver", false}}));
     EXPECT_EQ(j.at("load"),
               (nlohmann::ordered_json{{"cpu_utilization_ratio", 0.025}, {"sample_window_s", 2.0}}));
+}
+
+// ---------------------------------------------------------------- doctor warnings
+
+namespace {
+
+std::vector<std::string> warning_codes(const eb::SystemInfo& s) {
+    std::vector<std::string> codes;
+    for (const eb::DoctorWarning& w : eb::system_state_warnings(s))
+        codes.push_back(w.code);
+    return codes;
+}
+
+eb::SystemInfo quiet_system() {
+    eb::SystemInfo s;
+    s.os.architecture = eb::Architecture::arm64;
+    s.process_architecture = eb::Architecture::arm64;
+    eb::PowerState p;
+    p.source = "ac";
+    p.battery_saver = false;
+    p.power_mode = "Balanced";
+    p.power_mode_known = true;
+    s.power = p;
+    s.load = eb::LoadSample{0.05, 1.0};
+    return s;
+}
+
+}  // namespace
+
+TEST(DoctorWarnings, QuietSystemHasNone) {
+    EXPECT_TRUE(warning_codes(quiet_system()).empty());
+    eb::SystemInfo unknown;  // nothing known: nothing to warn about
+    EXPECT_TRUE(warning_codes(unknown).empty());
+}
+
+TEST(DoctorWarnings, EachConditionHasItsCode) {
+    eb::SystemInfo s = quiet_system();
+    s.power->source = "battery";
+    EXPECT_EQ(warning_codes(s), std::vector<std::string>{"battery_power"});
+
+    s = quiet_system();
+    s.power->battery_saver = true;
+    EXPECT_EQ(warning_codes(s), std::vector<std::string>{"battery_saver_on"});
+
+    s = quiet_system();
+    s.load->cpu_utilization_ratio = 0.10;  // the limit itself is fine
+    EXPECT_TRUE(warning_codes(s).empty());
+    s.load->cpu_utilization_ratio = 0.125;
+    const std::vector<eb::DoctorWarning> load = eb::system_state_warnings(s);
+    ASSERT_EQ(load.size(), 1u);
+    EXPECT_EQ(load[0].code, "background_cpu_load_high");
+    EXPECT_NE(load[0].message.find("12.5%"), std::string::npos) << load[0].message;
+    EXPECT_FALSE(load[0].hint.empty());
+
+    s = quiet_system();
+    s.power->power_mode = "01234567-89ab-cdef-0123-456789abcdef";
+    s.power->power_mode_known = false;
+    EXPECT_EQ(warning_codes(s), std::vector<std::string>{"unknown_power_mode"});
+
+    s = quiet_system();
+    s.process_architecture = eb::Architecture::x64;
+    const std::vector<eb::DoctorWarning> emu = eb::system_state_warnings(s);
+    ASSERT_EQ(emu.size(), 1u);
+    EXPECT_EQ(emu[0].code, "process_emulated");
+    EXPECT_NE(emu[0].hint.find("arm64"), std::string::npos) << emu[0].hint;
+}
+
+TEST(DoctorWarnings, SeveralAtOnceKeepTheirOrder) {
+    eb::SystemInfo s = quiet_system();
+    s.power->source = "battery";
+    s.power->battery_saver = true;
+    s.load->cpu_utilization_ratio = 0.5;
+    EXPECT_EQ(warning_codes(s), (std::vector<std::string>{"battery_power", "battery_saver_on",
+                                                          "background_cpu_load_high"}));
 }
