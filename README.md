@@ -2,87 +2,138 @@
 
 [![CI](https://github.com/mstfaatf/edgebench/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mstfaatf/edgebench/actions/workflows/ci.yml)
 
-CPU vs NPU inference benchmarking for Windows on Snapdragon, built on
+CPU vs NPU ML inference benchmarking for Windows on Snapdragon, built on
 [ONNX Runtime](https://onnxruntime.ai/).
+
+EdgeBench measures how fast real models (MobileNetV2 to start with) run on the
+CPU and on the Qualcomm Hexagon NPU of a Snapdragon laptop. It records the
+configuration, the software versions, the loaded libraries and the state of the
+machine with every result, verifies where each node of the model actually ran,
+and writes results as schema-validated JSON plus CSV.
 
 ## Status
 
-**Early development.** The toolchain, model pipeline and verified CPU and NPU
-execution paths (Python and C++) are in place; the benchmark engine is not
-built yet. [docs/feasibility.md](docs/feasibility.md) is the technical note on
-what works, how NPU execution is verified, and what the engine must do. Its
-latency figures are methodology sanity checks: EdgeBench publishes no
-benchmark results at this stage.
+- **CPU benchmarking works**: `edgebench run` benchmarks a model on the ONNX
+  Runtime CPU execution provider with repeated trials, statistics, system-state
+  recording and result files.
+- **NPU support is in progress.** NPU execution through the Qualcomm QNN
+  execution provider has been verified in a separate diagnostic tool and in the
+  Python scripts ([feasibility note](docs/feasibility.md)); the engine's NPU
+  provider is not built yet.
+- **No published results yet.** Numbers in the docs are methodology checks from
+  one machine, not benchmark results.
 
-## Goals
+## Requirements
 
-- **Real inference**: benchmark real models (e.g. MobileNetV2, EfficientNet-Lite)
-  end to end, not synthetic kernels.
-- **Reproducible methodology**: pinned dependencies, fixed inputs, explicit
-  warm-up and iteration counts, and recorded device and software versions.
-- **CPU and Qualcomm NPU**: the ONNX Runtime CPU execution provider vs the
-  Qualcomm QNN execution provider on the Hexagon NPU.
-- **Verified NPU execution**: confirm that a model actually runs on the NPU
-  (no silent CPU fallback) and that its outputs are correct.
-- **Structured output**: results as JSON/CSV for analysis and for a static
-  dashboard.
+- Windows 11 on Snapdragon (ARM64). Tested on a Snapdragon X Plus (Surface
+  Laptop 7).
+- Visual Studio 2022 or newer with the C++ workload and the ARM64 build tools;
+  the CMake and Ninja bundled with Visual Studio are enough.
+- PowerShell, for `scripts/fetch_deps.ps1` (downloads ONNX Runtime and the QNN
+  execution provider).
+- Native ARM64 Python 3.12, only for preparing models and running the Python
+  scripts and tests.
 
-## Supported platforms
+A CPU-only x64 build also exists, mainly for continuous integration; it is not
+used for measurements.
 
-- Windows 11 on Snapdragon (ARM64), native ARM64 builds for measurements.
-- A CPU-only x64 build exists for continuous integration; it is not used for
-  measurements.
-- Designed to work on other Snapdragon devices by detecting the available
-  execution providers and devices at run time.
-- So far only tested on a Snapdragon X Plus (Surface Laptop 7).
+## Quick start
+
+From the repository root, in a *Developer PowerShell for VS 2022* (which puts
+`cmake` on `PATH`; see [docs/setup.md](docs/setup.md) for other shells):
+
+```powershell
+# Native dependencies (ONNX Runtime 1.32.0, QNN EP 2.8.0), pinned by SHA-256
+powershell -ExecutionPolicy Bypass -File scripts\fetch_deps.ps1
+
+# Configure, build and test
+cmake --preset arm64-release
+cmake --build --preset arm64-release
+ctest --preset arm64-release -L "unit|ort"
+
+# Check the machine and the runtime
+.\build\arm64-release\bin\Release\edgebench.exe doctor
+```
+
+To benchmark a model you need an ONNX file with fixed input shapes. The
+[setup guide](docs/setup.md#preparing-data-and-models) creates MobileNetV2 FP32
+and INT8 models with a Python environment (`scripts\export_mobilenetv2.py`,
+`scripts\quantize_qnn.py`). Then:
+
+```powershell
+.\build\arm64-release\bin\Release\edgebench.exe run --model models\mobilenetv2\mobilenetv2_fp32_b1.onnx
+```
+
+Defaults: CPU, 4 intra-op threads, IoBinding, 3 trials of 200 measured
+iterations after 20 warm-up iterations, 2 s idle before every trial. An excerpt
+of the summary (FP32 MobileNetV2, Surface Laptop 7, plugged in, *Balanced*
+power mode):
+
+```text
+Provider    CPUExecutionProvider, 4 intra-op threads, binding iobinding_preallocated, graph optimization enable_all
+Trials      3 x 200 measured iterations (20 warm-up, 2000 ms cooldown), batch size 1
+Power       ac, mode Balanced, plan Balanced, battery saver off, battery 80%
+CPU load    pre-run 5.1% over 2.0 s, highest cooldown 7.4% (before trial 2)
+
+ms               mean        p50        p95        p99        min        max inferences/s
+trial 1        3.9743     3.9131     4.4830     4.8493     3.5862     5.0992        251.6
+trial 2        4.1811     3.9320     4.5574     6.1728     3.5681    37.6502        239.2
+trial 3        4.0761     3.9642     4.6493     4.9814     3.6605     6.9566        245.3
+aggregate      4.0772     3.9428     4.5840     5.0992     3.5681    37.6502        245.3
+
+Trial means 3.9743 .. 4.1811 ms, CV 2.54%
+Placement   55 nodes: CPUExecutionProvider 55 (all on the requested EP)
+```
+
+Results land in `benchmarks\results\local\` (not committed):
+`<name>_<UTC stamp>.json` (results schema 1.1.0), a directory with
+`latencies.csv` and `summary.csv`, and `<name>_latest.json`. Existing files
+are never overwritten. Check a result with:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\validate_results.py --strict benchmarks\results\local\mobilenetv2_fp32_b1_cpu_iobinding_t4_latest.json
+```
+
+## Testing
+
+Tests carry CTest labels by what they need: `unit` (nothing), `ort` (the ONNX
+Runtime DLLs), `models` (locally prepared models), `npu` (the NPU) and
+`schema` (the Python environment). Continuous integration builds with
+`/W4 /WX` and runs `unit` and `ort` on Windows x64 and ARM64 runners, line
+coverage on x64, and the result validator tests and a repository hygiene check
+on Linux. See [Test labels](docs/setup.md#test-labels) and
+[Continuous integration](docs/setup.md#continuous-integration).
+
+## Documentation
+
+- [docs/methodology.md](docs/methodology.md): what is timed, trial structure,
+  statistics, recorded system state, and what EdgeBench does not claim
+- [docs/cli.md](docs/cli.md): `edgebench` commands, options, output and exit
+  codes
+- [docs/results-schema.md](docs/results-schema.md): result file format (JSON
+  Schema in [schemas/](schemas/))
+- [docs/architecture.md](docs/architecture.md): engine structure
+- [docs/setup.md](docs/setup.md): environment, data and model preparation,
+  building, tests and continuous integration
+- [docs/feasibility.md](docs/feasibility.md): technical note on CPU and NPU
+  execution, NPU verification, accuracy and the evidence behind the methodology
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
-| `engine/` | C++ benchmarking engine (`edgebench_core` library, `edgebench` CLI, tests) |
-| `ml/` | Python model preparation: PyTorch, TensorFlow/Keras (trained off-device), export, quantization, validation |
-| `models/` | Locally produced model files (not committed) |
-| `data/` | Downloaded datasets and split lists (not committed) |
-| `benchmarks/` | Benchmark configurations and results (`results/published/` is committed, `results/local/` is not) |
-| `schemas/` | JSON Schema for benchmark result files ([format spec](docs/results-schema.md)) |
-| `dashboard/` | Static results dashboard |
-| `scripts/` | Environment check, dependency fetch, dataset download, MobileNetV2 export/quantization/evaluation, NPU checks, Qualcomm AI Hub baseline comparison, result validation |
-| `tools/` | Diagnostics: `ort_probe` (C++ ONNX Runtime + QNN EP runner: strict NPU, EP context, C++ vs Python comparison, latency), `qnn_rejection_check.py` (QNN EP rejection detection) |
-| `cmake/` | Shared CMake modules |
-| `docs/` | Setup guide (incl. data and model preparation), results format, feasibility note |
-
-## Getting started
-
-See [docs/setup.md](docs/setup.md) for the Python environment, native
-dependencies, and building the C++ code. In short, from the repository root in
-a *Developer PowerShell for VS 2022* (which puts `cmake` on `PATH`):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\fetch_deps.ps1
-cmake --preset arm64-release
-cmake --build --preset arm64-release
-ctest --preset arm64-release
-.\build\arm64-release\bin\Release\edgebench.exe doctor
-```
-
-Tests carry CTest labels by what they need (`unit`, `ort`, `models`, `npu`,
-`schema`); continuous integration runs `unit` and `ort` on Windows x64 and ARM64
-runners, plus the Python validator suite and a repository hygiene check on Linux.
-See [Test labels](docs/setup.md#test-labels) and
-[Continuous integration](docs/setup.md#continuous-integration).
-
-## Documentation
-
-- [docs/setup.md](docs/setup.md): environment, data and model preparation, C++ build,
-  tests and continuous integration
-- [docs/cli.md](docs/cli.md): `edgebench` commands, options and exit codes
-- [docs/architecture.md](docs/architecture.md): engine structure (Runtime, Provider, BenchSession)
-- [docs/feasibility.md](docs/feasibility.md): feasibility note (test environment,
-  NPU verification, accuracy, initialization, latency sanity checks, C++ path,
-  verdicts, engine requirements)
-- [docs/results-schema.md](docs/results-schema.md): benchmark result file format
+| `engine/` | C++ engine: `edgebench_core` library, `edgebench` CLI, tests |
+| `tools/` | Diagnostics: `ort_probe` (C++ CPU/NPU runner), QNN rejection check |
+| `scripts/` | Dependency fetch, data and model preparation, NPU checks, result validation |
+| `schemas/` | JSON Schema for result files, one file per version |
+| `benchmarks/` | Configurations and results (`results/published/` is committed, `results/local/` is not) |
+| `ml/`, `dashboard/` | Model training/export pipelines and the static dashboard (planned) |
+| `docs/` | Documentation |
 
 ## License
 
-[MIT](LICENSE)
+EdgeBench is released under the [MIT License](LICENSE). Third-party components
+(ONNX Runtime, the QNN execution provider and Qualcomm's QNN libraries, C++
+libraries, models and datasets) are downloaded at build or run time, not stored
+in the repository; their licenses are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
