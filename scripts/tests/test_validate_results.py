@@ -257,7 +257,44 @@ def build_fixture(path: Path) -> tuple[dict[str, Any], Path, dict[str, str]]:
     doc = load(base)
     for pointer, value in spec["set"].items():
         set_pointer(doc, pointer, copy.deepcopy(value))
+    for pointer in spec.get("remove", []):
+        remove_pointer(doc, pointer)
     return doc, base, spec["expect"]
+
+
+def remove_pointer(doc: Any, pointer: str) -> None:
+    *parents, last = pointer.lstrip("/").split("/")
+    node = doc
+    for key in parents:
+        node = node[int(key)] if isinstance(node, list) else node[key]
+    del node[last]
+
+
+def test_missing_keys_only_reported_for_cpp_results(validators):
+    doc = load(CPU_110)
+    del doc["config"]["run_binding"]
+    del doc["timing"]["scope"]
+    paths = {i.path for i in vr.validate_document(doc, validators, CPU_110) if i.code}
+    assert paths == {"/config/run_binding", "/timing/scope"}
+    doc["tool"]["implementation"] = "python"  # other writers may omit 1.1.0 keys
+    assert vr.validate_document(doc, validators, CPU_110) == []
+
+
+def test_missing_keys_descend_into_nullable_blocks(validators):
+    # Keys 1.1.0 added to blocks that are oneOf [null, object] in the schema.
+    doc = load(NPU_110)
+    del doc["runtime"]["ep_device"]["selection"]
+    del doc["timing"]["session_init"]["cached_ms"]
+    del doc["config"]["ep_context_cache"]["files"]
+    paths = {i.path for i in vr.validate_document(doc, validators, NPU_110) if i.code}
+    assert {"/runtime/ep_device/selection", "/timing/session_init/cached_ms",
+            "/config/ep_context_cache/files"} <= paths
+
+
+def test_missing_keys_skip_null_blocks(validators):
+    doc = load(CPU_110)
+    assert doc["runtime"]["ep_device"] is None and doc["memory"] is None
+    assert vr.validate_document(doc, validators, CPU_110) == []  # nothing below null is required
 
 
 @pytest.mark.parametrize("path", FIXTURES, ids=lambda p: p.stem)
@@ -278,10 +315,11 @@ def test_every_v1_1_rule_has_a_fixture():
 def test_rule_does_not_apply_to_v100(validators, path):
     """Rules for 1.1.0 fields are not applied to documents declaring 1.0.0."""
     doc, base, _ = build_fixture(path)
-    issues = vr.v1_1_issues(doc)
+    schema = validators.for_version("1.1.0").schema
+    issues = [i for i in vr.consistency_issues(doc, base, schema) if i.code]
     assert issues  # the rule fires on the 1.1.0 document ...
     doc["schema_version"] = "1.0.0"
-    assert not any(i.code for i in vr.consistency_issues(doc, base))  # ... but is not run for 1.0.0
+    assert not any(i.code for i in vr.consistency_issues(doc, base, schema))  # ... not for 1.0.0
 
 
 @pytest.mark.parametrize("severity", [vr.ERROR, vr.WARNING])

@@ -90,7 +90,8 @@ void expect_doctor_load_failure(const ProcessResult& r, std::string_view kind) {
 // --------------------------------------------------------------------------- doctor
 
 TEST(Doctor, HappyPathReportsBundledOnnxRuntime) {
-    const ProcessResult r = run_process(kEdgebenchExe, {L"doctor"}, kEdgebenchExe.parent_path());
+    const ProcessResult r = run_process(kEdgebenchExe, {L"doctor", L"--load-sample-ms", L"0"},
+                                        kEdgebenchExe.parent_path());
     expect_no_crash(r);
     ASSERT_EQ(r.exit_code, 0u) << describe(r);
     EXPECT_TRUE(r.err.empty()) << describe(r);
@@ -107,7 +108,8 @@ TEST(Doctor, HappyPathReportsBundledOnnxRuntime) {
 
 TEST(Doctor, JsonOutputParses) {
     const ProcessResult r =
-        run_process(kEdgebenchExe, {L"doctor", L"--json"}, kEdgebenchExe.parent_path());
+        run_process(kEdgebenchExe, {L"doctor", L"--json", L"--load-sample-ms", L"100"},
+                    kEdgebenchExe.parent_path());
     expect_no_crash(r);
     ASSERT_EQ(r.exit_code, 0u) << describe(r);
     const json j = json::parse(r.out);
@@ -136,21 +138,23 @@ TEST(Doctor, JsonOutputParses) {
     EXPECT_FALSE(power.at("power_mode").is_null());
     EXPECT_FALSE(power.at("power_plan").is_null());
     const json& load = j.at("system").at("load");
-    EXPECT_NEAR(load.at("sample_window_s").get<double>(), 1.0, 0.25);
+    EXPECT_NEAR(load.at("sample_window_s").get<double>(), 0.1, 0.05);
     EXPECT_GE(load.at("cpu_utilization_ratio").get<double>(), 0.0);
     EXPECT_FALSE(j.at("system").at("os").at("name").get<std::string>().empty());
 }
 
 TEST(Doctor, FromAnotherWorkingDirectory) {
     TempDir cwd;
-    const ProcessResult r = run_process(kEdgebenchExe, {L"doctor"}, cwd.path());
+    const ProcessResult r =
+        run_process(kEdgebenchExe, {L"doctor", L"--load-sample-ms", L"0"}, cwd.path());
     expect_no_crash(r);
     EXPECT_EQ(r.exit_code, 0u) << describe(r);
 }
 
 TEST(Doctor, MissingDllIsReported) {
     IsolatedExe iso;
-    const ProcessResult r = run_process(iso.exe, {L"doctor"}, iso.dir.path());
+    const ProcessResult r =
+        run_process(iso.exe, {L"doctor", L"--load-sample-ms", L"0"}, iso.dir.path());
     expect_doctor_load_failure(r, "dll_not_found");
     const std::string dll = eb::path_to_utf8(iso.dir.path() / "onnxruntime.dll");
     EXPECT_TRUE(contains(r.err, dll + " not found")) << describe(r);
@@ -158,7 +162,8 @@ TEST(Doctor, MissingDllIsReported) {
 
 TEST(Doctor, MissingDllJson) {
     IsolatedExe iso;
-    const ProcessResult r = run_process(iso.exe, {L"doctor", L"--json"}, iso.dir.path());
+    const ProcessResult r =
+        run_process(iso.exe, {L"doctor", L"--json", L"--load-sample-ms", L"0"}, iso.dir.path());
     expect_no_crash(r);
     EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
     const json j = json::parse(r.out);
@@ -174,7 +179,8 @@ TEST(Doctor, MissingDllIgnoresWorkingDirectoryAndPath) {
     // through the current directory or PATH.
     IsolatedExe iso;
     const fs::path bundle = kEdgebenchExe.parent_path();
-    const ProcessResult r = run_process(iso.exe, {L"doctor"}, bundle, bundle);
+    const ProcessResult r =
+        run_process(iso.exe, {L"doctor", L"--load-sample-ms", L"0"}, bundle, bundle);
     expect_doctor_load_failure(r, "dll_not_found");
 }
 
@@ -183,7 +189,8 @@ TEST(Doctor, WrongDllVersionIsReported) {
         GTEST_SKIP() << kSystemOrtDll << " is not present";
     IsolatedExe iso;
     fs::copy_file(kSystemOrtDll, iso.dir.path() / "onnxruntime.dll");
-    const ProcessResult r = run_process(iso.exe, {L"doctor"}, iso.dir.path());
+    const ProcessResult r =
+        run_process(iso.exe, {L"doctor", L"--load-sample-ms", L"0"}, iso.dir.path());
     expect_doctor_load_failure(r, "version_mismatch");
 
     // The message names the version that was found and the one required.
@@ -203,7 +210,8 @@ TEST(Doctor, DllWithoutOrtEntryPointIsReported) {
         GTEST_SKIP() << kSystemNonOrtDll << " is not present";
     IsolatedExe iso;
     fs::copy_file(kSystemNonOrtDll, iso.dir.path() / "onnxruntime.dll");
-    const ProcessResult r = run_process(iso.exe, {L"doctor"}, iso.dir.path());
+    const ProcessResult r =
+        run_process(iso.exe, {L"doctor", L"--load-sample-ms", L"0"}, iso.dir.path());
     expect_doctor_load_failure(r, "entry_point_missing");
     EXPECT_TRUE(contains(r.err, "does not export OrtGetApiBase")) << describe(r);
 }
@@ -211,7 +219,8 @@ TEST(Doctor, DllWithoutOrtEntryPointIsReported) {
 TEST(Doctor, CorruptDllIsReported) {
     IsolatedExe iso;
     std::ofstream(iso.dir.path() / "onnxruntime.dll") << "this is not a DLL";
-    const ProcessResult r = run_process(iso.exe, {L"doctor"}, iso.dir.path());
+    const ProcessResult r =
+        run_process(iso.exe, {L"doctor", L"--load-sample-ms", L"0"}, iso.dir.path());
     expect_doctor_load_failure(r, "load_failed");
     EXPECT_TRUE(contains(r.err, "LoadLibraryExW(")) << describe(r);
 }
@@ -350,14 +359,19 @@ TEST(Cli, RunDryRunNeedsOnnxRuntime) {
     EXPECT_TRUE(contains(r.err, "cannot load ONNX Runtime (dll_not_found)")) << describe(r);
 }
 
+// A short run of the fixture model into `out` (no cooldown, no load sample).
+std::vector<std::wstring> short_run_args(const fs::path& model, const fs::path& out) {
+    return {L"run", L"--model",      model.native(), L"--trials",      L"2", L"--warmup",
+            L"3",   L"--iterations", L"10",          L"--cooldown-ms", L"0", L"--load-sample-ms",
+            L"0",   L"--output-dir", out.native()};
+}
+
+const fs::path kFixtureDir = kSourceDir / "engine" / "tests" / "fixtures" / "models";
+
 TEST(Cli, RunBenchmarksTheFixture) {
-    const fs::path model =
-        kSourceDir / "engine" / "tests" / "fixtures" / "models" / "fixed_float32.onnx";
-    const ProcessResult r =
-        run_process(kEdgebenchExe,
-                    {L"run", L"--model", model.native(), L"--trials", L"2", L"--warmup", L"3",
-                     L"--iterations", L"10", L"--cooldown-ms", L"0"},
-                    kSourceDir);
+    TempDir out;
+    std::vector<std::wstring> args = short_run_args(kFixtureDir / "fixed_float32.onnx", out.path());
+    const ProcessResult r = run_process(kEdgebenchExe, args, kSourceDir);
     expect_no_crash(r);
     ASSERT_EQ(r.exit_code, 0u) << describe(r);
     // Summary on stdout, progress on stderr.
@@ -370,24 +384,99 @@ TEST(Cli, RunBenchmarksTheFixture) {
     EXPECT_TRUE(contains(r.err, "trial 1 of 2")) << describe(r);
     EXPECT_TRUE(contains(r.err, "trial 2 of 2")) << describe(r);
     EXPECT_TRUE(contains(r.err, "recording node placement")) << describe(r);
-    // --cooldown-ms 0: a 1 s idle sample before trial 1 only.
-    EXPECT_TRUE(contains(r.err, "idle 1000 ms before trial 1 of 2")) << describe(r);
-    EXPECT_FALSE(contains(r.err, "before trial 2 of 2")) << describe(r);
+    EXPECT_FALSE(contains(r.err, "idle ")) << describe(r);  // --load-sample-ms 0, cooldown 0
     EXPECT_TRUE(contains(r.out, "\nPower       ")) << describe(r);
-    EXPECT_TRUE(contains(r.out, "\nCPU load    pre-run ")) << describe(r);
     EXPECT_TRUE(contains(r.out, "\nMemory      working set ")) << describe(r);
+
+    // The last summary line names the result file, which exists with its companions.
+    const std::string last = r.out.substr(r.out.rfind("\nResults     ") + 13);
+    const fs::path result = fs::path(std::u8string(last.begin(), last.end() - 1));
+    EXPECT_TRUE(fs::is_regular_file(result)) << last;
+    EXPECT_EQ(result.parent_path(), out.path());
+    const std::string stem = result.stem().string();
+    EXPECT_EQ(stem.rfind("fixed_float32_cpu_iobinding_t4_", 0), 0u) << stem;
+    EXPECT_TRUE(fs::is_regular_file(out.path() / stem / "latencies.csv"));
+    EXPECT_TRUE(fs::is_regular_file(out.path() / stem / "summary.csv"));
+    EXPECT_TRUE(fs::is_regular_file(out.path() / "fixed_float32_cpu_iobinding_t4_latest.json"));
 }
 
-TEST(Cli, RunStopsOnNonFiniteOutput) {
-    const fs::path model =
-        kSourceDir / "engine" / "tests" / "fixtures" / "models" / "nan_output.onnx";
-    const ProcessResult r = run_process(
-        kEdgebenchExe,
-        {L"run", L"--model", model.native(), L"--trials", L"2", L"--iterations", L"5"}, kSourceDir);
+TEST(Cli, RunFormatJsonPrintsTheDocument) {
+    TempDir out;
+    std::vector<std::wstring> args = short_run_args(kFixtureDir / "fixed_float32.onnx", out.path());
+    args.insert(args.end(), {L"--format", L"json", L"--name", L"as-json"});
+    const ProcessResult r = run_process(kEdgebenchExe, args, kSourceDir);
+    expect_no_crash(r);
+    ASSERT_EQ(r.exit_code, 0u) << describe(r);
+    const json doc = json::parse(r.out);  // stdout is exactly the document
+    EXPECT_EQ(doc.at("status"), "success");
+    EXPECT_EQ(doc.at("schema_version"), "1.1.0");
+    EXPECT_TRUE(contains(r.err, "result written to ")) << describe(r);
+    EXPECT_TRUE(fs::is_regular_file(out.path() / "as-json_latest.json"));
+    EXPECT_EQ(json::parse(std::ifstream(out.path() / "as-json_latest.json")), doc);
+}
+
+TEST(Cli, RunStopsOnNonFiniteOutputAndWritesAFailedResult) {
+    TempDir out;
+    std::vector<std::wstring> args = short_run_args(kFixtureDir / "nan_output.onnx", out.path());
+    const ProcessResult r = run_process(kEdgebenchExe, args, kSourceDir);
     expect_no_crash(r);
     EXPECT_EQ(r.exit_code, code(ExitCode::internal_error)) << describe(r);
     EXPECT_TRUE(contains(r.err, "trial 1 of 2: output 'y' has a non-finite value")) << describe(r);
+    EXPECT_TRUE(contains(r.err, "failed result written to ")) << describe(r);
     EXPECT_TRUE(r.out.empty()) << describe(r);
+    const fs::path latest = out.path() / "nan_output_cpu_iobinding_t4_latest.json";
+    ASSERT_TRUE(fs::is_regular_file(latest)) << describe(r);
+    const json doc = json::parse(std::ifstream(latest));
+    EXPECT_EQ(doc.at("status"), "failed");
+    EXPECT_EQ(doc.at("error").at("stage"), "measurement");
+    const fs::path python = fs::path(EDGEBENCH_PYTHON).make_preferred();
+    if (fs::is_regular_file(python)) {
+        const ProcessResult v =
+            run_process(python,
+                        {(kSourceDir / "scripts" / "validate_results.py").native(), L"--strict",
+                         latest.native()},
+                        kSourceDir);
+        EXPECT_EQ(v.exit_code, 0u) << v.output;
+    }
+}
+
+TEST(Cli, RunUsageErrorFromTheModelWritesNothing) {
+    TempDir out;
+    std::vector<std::wstring> args = short_run_args(kFixtureDir / "dynamic_batch.onnx", out.path());
+    const ProcessResult r = run_process(kEdgebenchExe, args, kSourceDir);
+    EXPECT_EQ(r.exit_code, code(ExitCode::usage_error)) << describe(r);
+    EXPECT_TRUE(fs::is_empty(out.path())) << describe(r);
+}
+
+TEST(Cli, RunWithAnUnwritableOutputDirectoryExits6AfterTheSummary) {
+    TempDir dir;
+    std::ofstream(dir.path() / "a_file") << "x";  // a file where a directory is needed
+    std::vector<std::wstring> args =
+        short_run_args(kFixtureDir / "fixed_float32.onnx", dir.path() / "a_file" / "results");
+    const ProcessResult r = run_process(kEdgebenchExe, args, kSourceDir);
+    expect_no_crash(r);
+    EXPECT_EQ(r.exit_code, code(ExitCode::output_error)) << describe(r);
+    EXPECT_TRUE(contains(r.out, "\naggregate ")) << describe(r);  // measurements not lost
+    EXPECT_FALSE(contains(r.out, "Results     ")) << describe(r);
+    EXPECT_TRUE(contains(r.err, "error: cannot write the result: ")) << describe(r);
+    EXPECT_TRUE(contains(r.err, "a_file")) << describe(r);
+}
+
+TEST(Cli, RunLoadFailureWritesAFailedResult) {
+    IsolatedExe iso;  // no ONNX Runtime next to the copy
+    const fs::path out = iso.dir.path() / "results";
+    const fs::path model = iso.dir.path() / "fixture.onnx";
+    fs::copy_file(kFixtureDir / "fixed_float32.onnx", model);
+    std::vector<std::wstring> args = short_run_args(model, out);
+    const ProcessResult r = run_process(iso.exe, args, iso.dir.path());
+    expect_no_crash(r);
+    EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
+    EXPECT_TRUE(contains(r.err, "cannot load ONNX Runtime (dll_not_found)")) << describe(r);
+    const json doc = json::parse(std::ifstream(out / "fixture_cpu_iobinding_t4_latest.json"));
+    EXPECT_EQ(doc.at("status"), "failed");
+    EXPECT_EQ(doc.at("error").at("stage"), "environment");
+    EXPECT_EQ(doc.at("error").at("code"), "dll_not_found");
+    EXPECT_TRUE(doc.at("runtime").is_null());
 }
 
 #ifdef EDGEBENCH_ORT_PROBE_PATH
@@ -399,6 +488,34 @@ TEST(OrtProbe, LoadFailureExits4) {
     expect_no_crash(r);
     EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
     EXPECT_TRUE(contains(r.err, "(dll_not_found)")) << describe(r);
+}
+
+TEST(OrtProbe, JsonRefusesToOverwrite) {
+    TempDir dir;
+    const fs::path existing = dir.path() / "summary.json";
+    std::ofstream(existing) << "earlier";
+    const ProcessResult r = run_process(fs::path(EDGEBENCH_ORT_PROBE_PATH).make_preferred(),
+                                        {L"--model", (kFixtureDir / "fixed_float32.onnx").native(),
+                                         L"--target", L"cpu", L"--json", existing.native()},
+                                        dir.path());
+    expect_no_crash(r);
+    EXPECT_EQ(r.exit_code, code(ExitCode::output_error)) << describe(r);
+    EXPECT_TRUE(contains(r.err, "already exists; refusing to overwrite")) << describe(r);
+    std::ifstream in(existing);
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(content, "earlier");
+}
+
+TEST(OrtProbe, JsonWritesANewFile) {
+    TempDir dir;
+    const fs::path target = dir.path() / "new.json";
+    const ProcessResult r = run_process(fs::path(EDGEBENCH_ORT_PROBE_PATH).make_preferred(),
+                                        {L"--model", (kFixtureDir / "fixed_float32.onnx").native(),
+                                         L"--target", L"cpu", L"--json", target.native()},
+                                        dir.path());
+    EXPECT_EQ(r.exit_code, 0u) << describe(r);
+    const json doc = json::parse(std::ifstream(target));
+    EXPECT_EQ(doc.at("result"), "ok");
 }
 #endif
 

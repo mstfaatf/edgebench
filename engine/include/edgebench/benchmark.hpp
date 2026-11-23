@@ -105,20 +105,42 @@ struct TimingResult {
     // timing.accelerator: always null here (no profiled accelerator pass).
 };
 
+/// Why a run failed (results schema: error).
+struct RunFailure {
+    Error error;        // exit code, kind, message, ORT error code
+    std::string stage;  // error.stage: environment, model_load, session_creation, warmup, ...
+};
+
+/// Which parts of a result were established before the run ended. A failed run
+/// keeps what it collected; the exporter writes null for the rest.
+struct KnownParts {
+    bool runtime = false;    // ONNX Runtime was loaded
+    bool provider = false;   // the provider was created (describe() is valid)
+    bool model = false;      // the model file was read and decoded
+    bool session = false;    // at least one session was created
+    bool placement = false;  // node placement was recorded
+};
+
 struct BenchmarkResult {
     std::string schema_version;
     std::string run_id;
-    std::string timestamp_utc;  // start of the run
+    std::chrono::system_clock::time_point started_at;
+    std::string timestamp_utc;  // started_at, RFC 3339
     std::optional<std::string> label;
-    std::string status = "success";
+    std::optional<RunFailure> failure;  // set: status "failed"
+    KnownParts known;
     std::vector<ResultWarning> warnings;
+
+    std::string status() const { return failure ? "failed" : "success"; }
 
     std::string tool_version;
     BuildInfo tool;
     SystemInfo system;        // power: at the start of the run; load: the pre-run idle sample
     PowerState power_at_end;  // compared with system.power for the power_state_changed warning
+    std::optional<ProcessMemory> memory_before_placement;  // after the last trial's session
     RuntimeResult runtime;
     ModelResult model;
+    std::optional<OnnxGraphSummary> graph;  // decoded model file
 
     RunConfig config;  // as requested; the schema's config block derives from it
     std::int64_t batch_size = 0;
@@ -132,6 +154,27 @@ struct BenchmarkResult {
 /// Receives progress messages ("idle 2000 ms before trial 1 of 3", "trial 1 of 3: ...").
 using ProgressFn = std::function<void(std::string_view)>;
 
+/// A result for `config` before anything runs: identity, tool, system, the
+/// power state, and the model file's facts (its hash and decoded metadata). A
+/// model file that cannot be read sets `failure` (stage model_load).
+BenchmarkResult begin_result(const RunConfig& config);
+
+/// Marks `result` failed.
+void set_failure(BenchmarkResult& result, Error error, std::string stage);
+
+/// Fills in what is derived at the end of a run, successful or not: statistics
+/// of the completed trials, process memory, the power state at the end, and the
+/// warnings for changed power state, high background load and unknown values.
+void finish_result(BenchmarkResult& result);
+
+/// The failed result of a run whose ONNX Runtime could not be loaded (stage
+/// environment, code = the loader's error kind).
+BenchmarkResult failed_load_result(const RunConfig& config, const OrtLoadResult& load);
+
+/// Creates the provider for `config` and runs the benchmark with it.
+BenchmarkResult run_benchmark(Runtime& runtime, const RunConfig& config,
+                              const ProgressFn& progress = {});
+
 /// Runs the benchmark described by `config` with `provider`:
 ///
 /// record the power state; for every trial (scheduler order): idle for
@@ -144,11 +187,14 @@ using ProgressFn = std::function<void(std::string_view)>;
 /// memory, record node placement in a separate session, and compare the power
 /// state with the one at the start.
 ///
-/// Errors: run_once() failures are ort_runtime_error naming trial and iteration;
-/// non-finite outputs, and outputs whose top-1 differs from trial 0, are
-/// internal_error naming output and trial.
-Result<BenchmarkResult> run_benchmark(Runtime& runtime, Provider& provider, const RunConfig& config,
-                                      const ProgressFn& progress = {});
+/// Never throws for run failures: the result's `failure` is set and everything
+/// collected so far is kept. run_once() failures are ort_runtime_error naming
+/// trial and iteration (stage warmup or measurement); non-finite outputs, and
+/// outputs whose top-1 differs from trial 0, are internal_error naming output
+/// and trial (stage measurement); session creation failures keep their exit code
+/// (usage_error for unsupported models, ort_runtime_error otherwise).
+BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunConfig& config,
+                              const ProgressFn& progress = {});
 
 /// Human-readable summary of a result (what `edgebench run` prints).
 std::string format_summary(const BenchmarkResult& result);
@@ -156,8 +202,8 @@ std::string format_summary(const BenchmarkResult& result);
 /// config.input.preprocessing for generated inputs.
 std::string generated_input_description(const RunConfig& config);
 
-/// Idle period before each trial: --cooldown-ms, or 1 s if the cooldown is 0
-/// (then only before the first trial).
+/// Idle period before each trial: --cooldown-ms, or --load-sample-ms before the
+/// first trial if the cooldown is 0 (then none between trials).
 std::chrono::milliseconds idle_before_trial(const RunConfig& config, int sequence);
 
 /// Background CPU load above which a run gets a background_cpu_load_high warning.

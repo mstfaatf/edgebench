@@ -138,6 +138,63 @@ std::pair<std::string, int> read_initializer(std::span<const std::byte> data) {
     return {name, dtype};
 }
 
+// ValueInfoProto: name (1), type (2) -> TypeProto.tensor_type (1) -> elem_type (1),
+// shape (2) -> TensorShapeProto.dim (1) -> dim_value (1) | dim_param (2).
+TensorInfo read_value_info(std::span<const std::byte> data) {
+    TensorInfo t;
+    Reader r(data);
+    std::uint32_t field = 0, wire = 0;
+    while (r.next(field, wire)) {
+        if (field == 1 && wire == 2) {
+            t.name = r.string();
+        } else if (field == 2 && wire == 2) {
+            Reader type(r.bytes());
+            std::uint32_t f = 0, w = 0;
+            while (type.next(f, w)) {
+                if (f != 1 || w != 2) {  // only tensor types
+                    type.skip(w);
+                    continue;
+                }
+                Reader tensor(type.bytes());
+                std::uint32_t tf = 0, tw = 0;
+                while (tensor.next(tf, tw)) {
+                    if (tf == 1 && tw == 0) {
+                        t.dtype = static_cast<ONNXTensorElementDataType>(tensor.varint());
+                    } else if (tf == 2 && tw == 2) {
+                        Reader shape(tensor.bytes());
+                        std::uint32_t sf = 0, sw = 0;
+                        while (shape.next(sf, sw)) {
+                            if (sf != 1 || sw != 2) {
+                                shape.skip(sw);
+                                continue;
+                            }
+                            std::int64_t value = -1;
+                            std::string param;
+                            Reader dim(shape.bytes());
+                            std::uint32_t df = 0, dw = 0;
+                            while (dim.next(df, dw)) {
+                                if (df == 1 && dw == 0)
+                                    value = static_cast<std::int64_t>(dim.varint());
+                                else if (df == 2 && dw == 2)
+                                    param = dim.string();
+                                else
+                                    dim.skip(dw);
+                            }
+                            t.shape.push_back(param.empty() ? value : -1);
+                            t.dim_params.push_back(param);
+                        }
+                    } else {
+                        tensor.skip(tw);
+                    }
+                }
+            }
+        } else {
+            r.skip(wire);
+        }
+    }
+    return t;
+}
+
 int most_common(const std::map<int, int>& counts) {
     return std::max_element(counts.begin(), counts.end(),
                             [](const auto& a, const auto& b) { return a.second < b.second; })
@@ -188,6 +245,7 @@ Result<OnnxGraphSummary> inspect_onnx(std::span<const std::byte> model_bytes) {
 
     std::vector<Node> nodes;
     std::map<std::string, int> initializer_dtype;
+    std::vector<TensorInfo> graph_inputs;
     Reader g(graph);
     while (g.next(field, wire)) {
         if (field == 1 && wire == 2) {
@@ -196,12 +254,21 @@ Result<OnnxGraphSummary> inspect_onnx(std::span<const std::byte> model_bytes) {
             auto [name, dtype] = read_initializer(g.bytes());
             ++s.initializer_dtypes[dtype];
             initializer_dtype[name] = dtype;
+        } else if (field == 11 && wire == 2) {
+            graph_inputs.push_back(read_value_info(g.bytes()));
+        } else if (field == 12 && wire == 2) {
+            s.outputs.push_back(read_value_info(g.bytes()));
         } else {
             g.skip(wire);
         }
     }
     if (!g.ok())
         return Error{ExitCode::usage_error, "invalid_onnx", "the model's graph cannot be decoded"};
+    // Older models also list initializers as graph inputs; those are not model inputs.
+    for (TensorInfo& t : graph_inputs) {
+        if (!initializer_dtype.contains(t.name))
+            s.inputs.push_back(std::move(t));
+    }
 
     std::map<int, int> weight_dtypes, activation_dtypes;
     for (const Node& n : nodes) {

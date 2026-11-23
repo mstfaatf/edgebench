@@ -50,12 +50,13 @@ void row(std::ostringstream& out, const char* label, const std::string& value) {
 
 }  // namespace
 
-DoctorReport run_doctor() {
+DoctorReport run_doctor(std::chrono::milliseconds load_sample) {
     DoctorReport r;
     r.build = build_info();
     r.system = query_system_info();
     r.system.power = query_power_state();
-    r.system.load = sample_cpu_load(std::chrono::seconds(1));
+    if (load_sample.count() > 0)
+        r.system.load = sample_cpu_load(load_sample);
     const PowerState& power = *r.system.power;
     if (power.source == "battery") {
         r.warnings.push_back(
@@ -67,7 +68,7 @@ DoctorReport run_doctor() {
             "battery saver is on, which limits performance. Turn it off "
             "before benchmarking.");
     }
-    if (r.system.load->cpu_utilization_ratio > 0.10) {
+    if (r.system.load && r.system.load->cpu_utilization_ratio > 0.10) {
         char pct[16];
         std::snprintf(pct, sizeof(pct), "%.1f%%", r.system.load->cpu_utilization_ratio * 100.0);
         r.warnings.push_back(std::string("background CPU load is ") + pct +

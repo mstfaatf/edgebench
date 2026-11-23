@@ -15,6 +15,7 @@
 #include "edgebench/provider.hpp"
 #include "edgebench/runtime.hpp"
 #include "process_util.hpp"
+#include "test_runtime.hpp"
 
 namespace fs = std::filesystem;
 namespace eb = edgebench;
@@ -30,13 +31,7 @@ const fs::path kReference = kSourceDir / "data" / "ort_probe_reference" / "lates
 
 // One Runtime (and so one Ort::Env) for the whole test program.
 eb::Runtime& runtime() {
-    static std::unique_ptr<eb::Runtime> rt = [] {
-        const eb::OrtLoadResult load = eb::load_onnxruntime();
-        if (!load.ok())
-            throw std::runtime_error(load.message);
-        return std::move(eb::Runtime::create(load)).value();
-    }();
-    return *rt;
+    return eb::test::shared_runtime();
 }
 
 eb::RunConfig config_for(const fs::path& model, eb::RunBinding binding) {

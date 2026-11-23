@@ -52,7 +52,7 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
         "print the resolved configuration as JSON.");
     RunConfig defaults;
     std::string model, provider = "cpu", binding = "iobinding", input = "random", graph = "all";
-    std::string label, output_dir = defaults.output_dir.string();
+    std::string label, name, format = "summary", output_dir = defaults.output_dir.string();
     std::uint64_t seed = 0;
     double constant_value = 0.0;
     RunConfig& cfg = result.run;
@@ -79,7 +79,8 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
     run->add_option("--trials", cfg.trials, "Number of trials (>= 1)")
         ->type_name("N")
         ->capture_default_str();
-    run->add_option("--cooldown-ms", cfg.cooldown_ms, "Pause between trials in ms (>= 0)")
+    run->add_option("--cooldown-ms", cfg.cooldown_ms,
+                    "Idle period before every trial in ms, sampling background CPU load (>= 0)")
         ->type_name("N")
         ->capture_default_str();
     run->add_option("--input", input, "Input data: random or constant")
@@ -98,8 +99,20 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
         ->capture_default_str();
     CLI::Option* label_opt =
         run->add_option("--label", label, "Name for the run")->type_name("TEXT");
+    run->add_option("--load-sample-ms", cfg.load_sample_ms,
+                    "Background-load sample before trial 1 when --cooldown-ms is 0 (0: none)")
+        ->type_name("N")
+        ->capture_default_str();
     run->add_option("--output-dir", output_dir, "Directory for result files")
         ->type_name("PATH")
+        ->capture_default_str();
+    CLI::Option* name_opt = run->add_option("--name", name,
+                                            "Result file name (letters, digits, '-', '_', '.') "
+                                            "[default: <model>_<provider>_<binding>_t<threads>]")
+                                ->type_name("TEXT");
+    run->add_option("--format", format, "What to print to stdout: summary or json")
+        ->type_name("FORMAT")
+        ->check(choice(parse_output_format, "summary, json", "format"))
         ->capture_default_str();
     run->add_flag("--dry-run", cfg.dry_run,
                   "Validate, load ONNX Runtime, print the resolved configuration as JSON");
@@ -108,6 +121,12 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
     CLI::App* doctor = app.add_subcommand(
         "doctor", "Check the build, the system and the ONNX Runtime installation.");
     doctor->add_flag("--json", result.doctor.json, "Print the report as JSON");
+    doctor
+        ->add_option("--load-sample-ms", result.doctor.load_sample_ms,
+                     "Background CPU load sample length in ms (0: no sample)")
+        ->type_name("N")
+        ->check(CLI::NonNegativeNumber)
+        ->capture_default_str();
 
     std::vector<std::string> reversed(args.rbegin(), args.rend());  // CLI11 consumes from the back
     try {
@@ -150,6 +169,9 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
             cfg.constant_value = constant_value;
         if (label_opt->count() > 0)
             cfg.label = label;
+        if (name_opt->count() > 0)
+            cfg.name = name;
+        cfg.format = *parse_output_format(format);
         cfg.output_dir = std::filesystem::path(std::u8string(output_dir.begin(), output_dir.end()));
 
         const std::vector<ConfigError> errors = validate(cfg);

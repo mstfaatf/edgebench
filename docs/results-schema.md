@@ -333,7 +333,13 @@ Optional. `null` unless an accuracy evaluation was run.
 
 ## `raw`
 
-`null` if per-iteration latencies were not saved.
+`null` if per-iteration latencies were not saved. `edgebench run` writes them to
+`<name>_<stamp>/latencies.csv` next to the result file and records
+`raw.latencies_file` as that relative path with `/` separators (e.g.
+`mobilenetv2_fp32_b1_cpu_iobinding_t4_20261121T235210.123Z/latencies.csv`) and
+`raw.sha256` as the digest of the file's bytes. `<name>_latest.json` lives in
+the same directory, so the same relative path works from it. A failed run
+without a completed trial has `raw: null`.
 
 | Field | Type | Nullable | Meaning |
 |---|---|---|---|
@@ -507,6 +513,7 @@ The code is printed with each problem:
 | `session_init_not_applicable` | error | `session_init.context_build_ms` or `cached_ms` is set without an enabled cache, or `context_build_ms` is set although the cache was `loaded` |
 | `qnn_validation_missing` | error | `verification_method` is `qnn_validation_log` but `execution.qnn_validation` is `null` |
 | `rejected_nodes_but_verified` | error | `full_device_execution_verified` is `true` although `qnn_validation` lists rejected or failed nodes |
+| `missing_1_1_0_key` | warning | `tool.implementation` is `cpp` and a key defined by the 1.1.0 schema is absent (reported once per key, with its path). Other writers may omit keys added in 1.1.0 (absent means null), but the C++ engine writes every key; the check descends into nested objects and arrays but not into blocks that are `null` |
 
 Statistics are not recomputed from the latency file; the engine is responsible
 for computing them from the same data.

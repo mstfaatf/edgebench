@@ -125,6 +125,25 @@ functions (nearest-rank percentiles, sample standard deviation, trial variation)
 `onnx_inspect.hpp` reads the model file's opset, IR version, producer and
 quantization nodes, which ONNX Runtime does not expose.
 
+## Results and failed runs
+
+`run_benchmark()` always returns a `BenchmarkResult`. If the run fails, its
+`failure` holds the error and the schema's `error.stage`, and `known` records
+which parts were established (runtime, provider, model, a session, placement),
+so a failed result keeps everything collected so far. `begin_result()` fills the
+parts that need no ONNX Runtime (identity, tool, system, power, the model file's
+hash and decoded metadata, including its tensors), and `finish_result()` the
+parts derived at the end (statistics of the completed trials, memory, power
+changes, warnings). A run whose ONNX Runtime cannot be loaded gets its result
+from `failed_load_result()`.
+
+`result_json.hpp` turns a result into the schema 1.1.0 document (every key, in
+schema order) and the two CSV files; `result_files.hpp` writes them without
+overwriting anything (exclusive creation through a temporary file and a
+no-replace rename, collision suffixes, atomic replacement of `<name>_latest.json`).
+`main` prints the summary first, then writes, so a write error (exit code 6)
+never loses the measurements. See [cli.md](cli.md#result-files).
+
 ## Errors
 
 Fallible operations return `Result<T>` (`result.hpp`): a value or an `Error`
@@ -159,3 +178,5 @@ The timing, statistics and export code only use `Provider::describe()` and the
   (GetProcessMemoryInfo). The decoding and arithmetic are pure functions.
 - `run_config.hpp`, `cli.hpp`: the run configuration and command-line parsing.
 - `dry_run.hpp`: `run --dry-run`.
+- `run_identity.hpp`: run IDs, RFC 3339 timestamps and the file stamp
+  (`YYYYmmddTHHMMSS.mmmZ`).

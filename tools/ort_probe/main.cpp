@@ -21,7 +21,8 @@
 // Run with --help for the options. Exit codes are edgebench's (edgebench/exit_codes.hpp,
 // docs/cli.md): 0 ok, 1 a check failed (output comparison, device selection) or an
 // unexpected error, 2 usage error, 3 ONNX Runtime error, 4 ONNX Runtime could not be
-// loaded or a loaded ORT/QNN DLL is not the bundled one.
+// loaded or a loaded ORT/QNN DLL is not the bundled one, 6 the --json file already
+// exists or could not be written (it is never overwritten).
 
 #include <onnxruntime_cxx_api.h>
 
@@ -38,6 +39,7 @@
 
 #include "edgebench/exit_codes.hpp"
 #include "edgebench/ort_loader.hpp"
+#include "edgebench/result_files.hpp"
 #include "ort_support.hpp"
 #include "probe_util.hpp"
 
@@ -52,6 +54,21 @@ constexpr int kExitCheckFailed = edgebench::to_int(ExitCode::internal_error);
 constexpr int kExitUsage = edgebench::to_int(ExitCode::usage_error);
 constexpr int kExitOrtError = edgebench::to_int(ExitCode::ort_runtime_error);
 constexpr int kExitOrtLoadFailure = edgebench::to_int(ExitCode::ort_load_failure);
+constexpr int kExitOutputError = edgebench::to_int(ExitCode::output_error);
+
+// Writes the --json summary without ever replacing an existing file (temporary
+// file, then rename). Returns false, after printing why, if it could not.
+bool WriteJsonFile(const fs::path& path, const std::string& text) {
+    std::error_code ec;
+    if (path.has_parent_path())
+        fs::create_directories(path.parent_path(), ec);
+    const edgebench::Result<void> r = edgebench::create_file_atomically(path, text + "\n");
+    if (!r) {
+        std::fprintf(stderr, "error: cannot write --json: %s\n", r.error().message.c_str());
+        return false;
+    }
+    return true;
+}
 
 // AllClose bounds for NPU-vs-CPU checks: the HTP backend computes float
 // graphs at reduced precision, so exact agreement with the CPU EP is not expected.
@@ -510,15 +527,13 @@ int RunProbe(const Options& o) {
     env.UnregisterExecutionProviderLibrary(kQnnEpName);
 
     j.Key("result").String(report.failed ? "failed" : "ok").EndObject();
-    if (!o.json.empty()) {
-        if (o.json.has_parent_path())
-            fs::create_directories(o.json.parent_path());
-        std::ofstream(o.json) << j.str() << "\n";
-    }
+    const bool json_written = o.json.empty() || WriteJsonFile(o.json, j.str());
     std::printf("\n%s\n", report.failed ? "FAILED" : "OK");
     if (report.foreign_module)
         return kExitOrtLoadFailure;
-    return report.failed ? kExitCheckFailed : kExitOk;
+    if (report.failed)
+        return kExitCheckFailed;
+    return json_written ? kExitOk : kExitOutputError;
 }
 
 void WriteErrorJson(const Options& o, const std::string& code_name, int code,
@@ -539,9 +554,7 @@ void WriteErrorJson(const Options& o, const std::string& code_name, int code,
         .String(message)
         .EndObject()
         .EndObject();
-    if (o.json.has_parent_path())
-        fs::create_directories(o.json.parent_path());
-    std::ofstream(o.json) << j.str() << "\n";
+    WriteJsonFile(o.json, j.str());
 }
 
 }  // namespace
@@ -558,6 +571,11 @@ int main(int argc, char** argv) {
         return kExitUsage;
     }
     const Options& o = parsed.options;
+    if (!o.json.empty() && fs::exists(o.json)) {
+        std::fprintf(stderr, "error: --json %s already exists; refusing to overwrite it\n",
+                     edgebench::path_to_utf8(fs::absolute(o.json)).c_str());
+        return kExitOutputError;
+    }
     // Load onnxruntime.dll from next to the executable before any ONNX Runtime call.
     const edgebench::OrtLoadResult load = edgebench::load_onnxruntime();
     if (!load.ok()) {

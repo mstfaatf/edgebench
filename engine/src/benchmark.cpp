@@ -60,13 +60,16 @@ std::optional<std::size_t> argmax_float(const std::vector<std::byte>& bytes) {
 // final outputs through `final_outputs`.
 Result<TrialResult> run_trial(Provider& provider, const RunConfig& config, const ScheduledTrial& st,
                               BenchmarkResult& result,
-                              std::vector<std::vector<std::byte>>& final_outputs) {
+                              std::vector<std::vector<std::byte>>& final_outputs,
+                              std::string& failed_stage) {
     const std::string where = trial_label(st.trial_index, config.trials);
+    failed_stage = "session_creation";
     Result<std::unique_ptr<BenchSession>> created =
         provider.create_session(result.model.file.path, config);
     if (!created)
         return with_context(created.error(), where);
     std::unique_ptr<BenchSession> session = std::move(created).value();
+    result.known.session = true;
 
     TrialResult trial;
     trial.trial_index = st.trial_index;
@@ -91,6 +94,7 @@ Result<TrialResult> run_trial(Provider& provider, const RunConfig& config, const
         return {};
     };
 
+    failed_stage = "warmup";
     for (int i = 0; i < config.warmup; ++i) {
         const Clock::time_point t0 = Clock::now();
         if (Result<void> r = run("warm-up", i); !r)
@@ -99,6 +103,7 @@ Result<TrialResult> run_trial(Provider& provider, const RunConfig& config, const
             trial.first_inference_ms = ms_between(t0, Clock::now());
     }
 
+    failed_stage = "measurement";
     trial.latencies_ms.reserve(static_cast<std::size_t>(config.iterations));
     for (int i = 0; i < config.iterations; ++i) {
         const Clock::time_point t0 = Clock::now();
@@ -168,7 +173,8 @@ std::string fmt_opt(const std::optional<double>& v) {
 std::chrono::milliseconds idle_before_trial(const RunConfig& config, int sequence) {
     if (config.cooldown_ms > 0)
         return std::chrono::milliseconds(config.cooldown_ms);
-    return sequence == 0 ? std::chrono::milliseconds(1000) : std::chrono::milliseconds(0);
+    return sequence == 0 ? std::chrono::milliseconds(config.load_sample_ms)
+                         : std::chrono::milliseconds(0);
 }
 
 std::string generated_input_description(const RunConfig& config) {
@@ -180,43 +186,108 @@ std::string generated_input_description(const RunConfig& config) {
            ") once per session, before timing, and reused for every iteration.";
 }
 
-Result<BenchmarkResult> run_benchmark(Runtime& runtime, Provider& provider, const RunConfig& config,
-                                      const ProgressFn& progress) {
-    auto report = [&progress](const std::string& message) {
-        if (progress)
-            progress(message);
-    };
+void set_failure(BenchmarkResult& result, Error error, std::string stage) {
+    result.failure = RunFailure{std::move(error), std::move(stage)};
+}
 
+BenchmarkResult begin_result(const RunConfig& config) {
     BenchmarkResult r;
     r.schema_version = std::string(results_schema_version());
     r.run_id = new_run_id();
-    r.timestamp_utc = utc_timestamp(std::chrono::system_clock::now());
+    r.started_at = std::chrono::system_clock::now();
+    r.timestamp_utc = utc_timestamp(r.started_at);
     r.label = config.label;
     r.tool_version = std::string(version());
     r.tool = build_info();
     r.config = config;
     r.input_preprocessing = generated_input_description(config);
     r.timing.timer = steady_clock_info();
+    r.system = query_system_info();
+    r.system.power = query_power_state();
 
     // Model file facts first: reading the file also warms the file cache equally
     // for every trial.
     Result<ModelFileInfo> file = read_model_file_info(config.model);
-    if (!file)
-        return file.error();
+    if (!file) {
+        set_failure(r, file.error(), "model_load");
+        return r;
+    }
     r.model.file = std::move(file).value();
     r.model.name = path_to_utf8(r.model.file.path.stem());
-    const Result<OnnxGraphSummary> graph = inspect_onnx_file(r.model.file.path);
+    Result<OnnxGraphSummary> graph = inspect_onnx_file(r.model.file.path);
+    if (graph) {
+        const OnnxGraphSummary& g = graph.value();
+        r.model.opset = g.opset;
+        r.model.ir_version = g.ir_version;
+        r.model.precision = infer_precision(g);
+        if (!g.producer_name.empty())
+            r.model.export_tool =
+                g.producer_name + (g.producer_version.empty() ? "" : " " + g.producer_version);
+        // Tensors as declared in the file; replaced by the session's once one exists.
+        r.model.inputs = g.inputs;
+        r.model.outputs = g.outputs;
+        if (!g.inputs.empty() && !g.inputs.front().shape.empty() &&
+            g.inputs.front().shape.front() > 0) {
+            r.batch_size = g.inputs.front().shape.front();
+        }
+        r.known.model = !g.inputs.empty() && !g.outputs.empty();
+        r.graph = std::move(graph).value();
+    }
+    return r;
+}
 
-    r.system = query_system_info();
-    const PowerState power_at_start = query_power_state();
-    r.system.power = power_at_start;
+BenchmarkResult failed_load_result(const RunConfig& config, const OrtLoadResult& load) {
+    BenchmarkResult r = begin_result(config);
+    if (!r.failure) {
+        set_failure(r,
+                    Error{ExitCode::ort_load_failure, std::string(to_string(load.error_kind)),
+                          load.message},
+                    "environment");
+    }
+    finish_result(r);
+    return r;
+}
+
+BenchmarkResult run_benchmark(Runtime& runtime, const RunConfig& config,
+                              const ProgressFn& progress) {
+    Result<std::unique_ptr<Provider>> provider = make_provider(runtime, config);
+    if (!provider) {
+        BenchmarkResult r = begin_result(config);
+        r.runtime.onnxruntime = runtime.load_result();
+        r.known.runtime = true;
+        if (!r.failure)
+            set_failure(r, provider.error(), "ep_registration");
+        finish_result(r);
+        return r;
+    }
+    return run_benchmark(runtime, *provider.value(), config, progress);
+}
+
+BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunConfig& config,
+                              const ProgressFn& progress) {
+    auto report = [&progress](const std::string& message) {
+        if (progress)
+            progress(message);
+    };
+
+    BenchmarkResult r = begin_result(config);
     r.runtime.onnxruntime = runtime.load_result();
+    r.known.runtime = true;
     r.runtime.provider = provider.describe();
+    r.known.provider = true;
+    if (r.failure) {
+        finish_result(r);
+        return r;
+    }
     try {
         r.runtime.ep_devices = runtime.ep_devices();
     } catch (const Ort::Exception& e) {
-        return ort_error("ep_enumeration_failed", "enumerating EP devices", e.GetOrtErrorCode(),
-                         e.what());
+        set_failure(r,
+                    ort_error("ep_enumeration_failed", "enumerating EP devices",
+                              e.GetOrtErrorCode(), e.what()),
+                    "environment");
+        finish_result(r);
+        return r;
     }
 
     std::vector<std::vector<std::byte>> reference_outputs;
@@ -236,28 +307,71 @@ Result<BenchmarkResult> run_benchmark(Runtime& runtime, Provider& provider, cons
                std::to_string(config.warmup) + " warm-up + " + std::to_string(config.iterations) +
                " measured iterations");
         std::vector<std::vector<std::byte>> outputs;
-        Result<TrialResult> trial = run_trial(provider, config, st, r, outputs);
-        if (!trial)
-            return trial.error();
+        std::string failed_stage;
+        Result<TrialResult> trial = run_trial(provider, config, st, r, outputs, failed_stage);
+        if (!trial) {
+            set_failure(r, trial.error(), failed_stage);
+            break;
+        }
         if (st.sequence == 0) {
             // ONNX Runtime accepted the model; the file decoder must have too.
-            if (!graph) {
-                return Error{ExitCode::internal_error, graph.error().kind,
-                             "cannot read the model's metadata: " + graph.error().message};
+            if (!r.graph) {
+                set_failure(r,
+                            Error{ExitCode::internal_error, "invalid_onnx",
+                                  "cannot decode the model file's metadata although ONNX "
+                                  "Runtime loaded it"},
+                            "model_load");
+                break;
             }
             reference_outputs = std::move(outputs);
         } else if (Result<void> d =
                        check_determinism(r, st.trial_index, reference_outputs, outputs, r.warnings);
                    !d) {
-            return d.error();
+            set_failure(r, d.error(), "measurement");
+            break;
         }
         trial.value().idle_before = idle;
         r.timing.session_init.cold_ms.push_back(trial.value().session_create_ms);
         r.timing.trials.push_back(std::move(trial).value());
     }
 
-    // Process memory after the last trial's session was released.
-    const ProcessMemory memory = query_process_memory();
+    if (!r.failure) {
+        // Placement last, in its own verbose session, so it cannot warm a timed session.
+        r.memory_before_placement = query_process_memory();
+        report("recording node placement");
+        Result<NodeAssignment> placement = provider.record_placement(r.model.file.path, config);
+        if (!placement) {
+            set_failure(r, placement.error(), "session_creation");
+        } else {
+            const std::string requested_ep(execution_provider_name(config.provider));
+            r.execution.node_assignment = std::move(placement).value();
+            r.known.placement = true;
+            r.execution.full_device_execution_verified =
+                r.execution.node_assignment.all_on(requested_ep);
+            r.execution.verification_details =
+                "Node placement from ONNX Runtime's verbose session log, recorded in a separate "
+                "session with the same options after the timed trials.";
+            if (!r.execution.full_device_execution_verified) {
+                const NodeAssignment& p = r.execution.node_assignment;
+                r.warnings.push_back({"nodes_not_on_requested_ep",
+                                      std::to_string(p.nodes_not_on(requested_ep)) + " of " +
+                                          std::to_string(p.total_nodes) + " nodes are not on " +
+                                          requested_ep,
+                                      std::string("/execution/node_assignment")});
+            }
+        }
+    }
+    finish_result(r);
+    return r;
+}
+
+void finish_result(BenchmarkResult& r) {
+    const RunConfig& config = r.config;
+
+    // Process memory: after the last trial's session was released (before the
+    // placement session), or now if the run ended early.
+    const ProcessMemory memory =
+        r.memory_before_placement ? *r.memory_before_placement : query_process_memory();
     r.memory.peak_working_set_bytes = memory.peak_working_set_bytes;
     r.memory.peak_private_bytes = memory.peak_private_bytes;
     r.memory.working_set_after_last_trial_bytes = memory.working_set_bytes;
@@ -275,27 +389,8 @@ Result<BenchmarkResult> run_benchmark(Runtime& runtime, Provider& provider, cons
         }
     }
 
-    // Placement last, in its own verbose session, so it cannot warm a timed session.
-    report("recording node placement");
-    Result<NodeAssignment> placement = provider.record_placement(r.model.file.path, config);
-    if (!placement)
-        return placement.error();
-    const std::string requested_ep(execution_provider_name(config.provider));
-    r.execution.node_assignment = std::move(placement).value();
-    r.execution.full_device_execution_verified = r.execution.node_assignment.all_on(requested_ep);
-    r.execution.verification_details =
-        "Node placement from ONNX Runtime's verbose session log, recorded in a separate session "
-        "with the same options after the timed trials.";
-    if (!r.execution.full_device_execution_verified) {
-        const NodeAssignment& p = r.execution.node_assignment;
-        r.warnings.push_back({"nodes_not_on_requested_ep",
-                              std::to_string(p.nodes_not_on(requested_ep)) + " of " +
-                                  std::to_string(p.total_nodes) + " nodes are not on " +
-                                  requested_ep,
-                              std::string("/execution/node_assignment")});
-    }
-
     // Power state at the end: anything that changed makes the run suspect.
+    const PowerState power_at_start = r.system.power.value_or(PowerState{});
     r.power_at_end = query_power_state();
     if (const std::vector<std::string> changed = power_changes(power_at_start, r.power_at_end);
         !changed.empty()) {
@@ -322,36 +417,26 @@ Result<BenchmarkResult> run_benchmark(Runtime& runtime, Provider& provider, cons
             r.warnings.push_back({"background_cpu_load_high",
                                   "Background CPU load reached " + fmt(highest * 100.0, 1) + "% (" +
                                       when +
-                                      "); other processes may have distorted the "
-                                      "measurement.",
+                                      "); other processes may have distorted the measurement.",
                                   std::string("/system/load")});
         }
     }
 
-    // Model metadata from the file.
-    const OnnxGraphSummary& g = graph.value();
-    r.model.opset = g.opset;
-    r.model.ir_version = g.ir_version;
-    r.model.precision = infer_precision(g);
-    if (!g.producer_name.empty())
-        r.model.export_tool =
-            g.producer_name + (g.producer_version.empty() ? "" : " " + g.producer_version);
-
-    // Statistics.
+    // Statistics of the completed trials.
     TimingResult& t = r.timing;
-    t.first_inference_ms = t.trials.front().first_inference_ms;
-    t.session_init.session_create_ms = [&] {
+    if (!t.trials.empty()) {
+        t.first_inference_ms = t.trials.front().first_inference_ms;
         std::vector<double> sorted = t.session_init.cold_ms;
         std::sort(sorted.begin(), sorted.end());
-        return nearest_rank(sorted, 50);
-    }();
-    std::vector<double> pooled, means;
-    for (const TrialResult& trial : t.trials) {
-        pooled.insert(pooled.end(), trial.latencies_ms.begin(), trial.latencies_ms.end());
-        means.push_back(trial.stats.mean_ms);
+        t.session_init.session_create_ms = nearest_rank(sorted, 50);
+        std::vector<double> pooled, means;
+        for (const TrialResult& trial : t.trials) {
+            pooled.insert(pooled.end(), trial.latencies_ms.begin(), trial.latencies_ms.end());
+            means.push_back(trial.stats.mean_ms);
+        }
+        t.aggregate =
+            AggregateResult{compute_stats(pooled, r.batch_size), compute_trial_variation(means)};
     }
-    t.aggregate =
-        AggregateResult{compute_stats(pooled, r.batch_size), compute_trial_variation(means)};
 
     // Values that could not be determined.
     if (!power_at_start.source)
@@ -369,19 +454,33 @@ Result<BenchmarkResult> run_benchmark(Runtime& runtime, Provider& provider, cons
     if (!power_at_start.battery_saver)
         add_unavailable(r, "/system/power/battery_saver",
                         "The battery saver state could not be read.");
+    if (!r.system.load) {
+        add_unavailable(r, "/system/load",
+                        idle_before_trial(config, 0).count() == 0
+                            ? "Background CPU load was not sampled (--load-sample-ms 0)."
+                            : "Background CPU load was not sampled: the run ended before the "
+                              "first trial.");
+    }
     if (!r.memory.session_create_working_set_delta_bytes) {
         add_unavailable(r, "/memory/session_create_working_set_delta_bytes",
-                        "The process working set could not be read.");
+                        t.trials.empty() ? "No trial completed."
+                                         : "The process working set could not be read.");
     }
-    if (r.runtime.provider.ep_device && !r.runtime.provider.ep_device->driver_version) {
+    if (r.known.provider && r.runtime.provider.ep_device &&
+        !r.runtime.provider.ep_device->driver_version) {
         add_unavailable(r, "/runtime/ep_device/driver_version",
                         "The device driver version could not be determined.");
     }
-    if (!t.first_inference_ms) {
+    if (!t.trials.empty() && !t.first_inference_ms) {
         add_unavailable(r, "/timing/first_inference_ms",
                         "There were no warm-up iterations to time separately.");
     }
-    return r;
+    if (r.batch_size <= 0) {
+        r.warnings.push_back({"value_unavailable",
+                              "The batch size could not be determined from the model; 1 is "
+                              "recorded because the schema requires a value.",
+                              std::string("/config/batch_size")});
+    }
 }
 
 std::string format_summary(const BenchmarkResult& r) {

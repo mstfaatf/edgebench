@@ -34,7 +34,7 @@ std::string new_run_id() {
 
 std::string utc_timestamp(std::chrono::system_clock::time_point t) {
     using namespace std::chrono;
-    const auto ms = duration_cast<milliseconds>(t.time_since_epoch());
+    const auto ms = floor<milliseconds>(t.time_since_epoch());
     const sys_days day = floor<days>(sys_time<milliseconds>(ms));
     const year_month_day ymd(day);
     const hh_mm_ss<milliseconds> tod(ms - day.time_since_epoch());
@@ -43,6 +43,22 @@ std::string utc_timestamp(std::chrono::system_clock::time_point t) {
                   static_cast<int>(ymd.year()), static_cast<unsigned>(ymd.month()),
                   static_cast<unsigned>(ymd.day()), static_cast<int>(tod.hours().count()),
                   static_cast<int>(tod.minutes().count()), static_cast<int>(tod.seconds().count()),
+                  static_cast<int>(tod.subseconds().count()));
+    return out;
+}
+
+std::string file_stamp(std::chrono::system_clock::time_point t) {
+    using namespace std::chrono;
+    // floor, not duration_cast: correct for times before the epoch too.
+    const auto ms = floor<milliseconds>(t.time_since_epoch());
+    const sys_days day = floor<days>(sys_time<milliseconds>(ms));
+    const year_month_day ymd(day);
+    const hh_mm_ss<milliseconds> tod(ms - day.time_since_epoch());
+    char out[32];
+    std::snprintf(out, sizeof(out), "%04d%02u%02uT%02d%02d%02d.%03dZ", static_cast<int>(ymd.year()),
+                  static_cast<unsigned>(ymd.month()), static_cast<unsigned>(ymd.day()),
+                  static_cast<int>(tod.hours().count()), static_cast<int>(tod.minutes().count()),
+                  static_cast<int>(tod.seconds().count()),
                   static_cast<int>(tod.subseconds().count()));
     return out;
 }

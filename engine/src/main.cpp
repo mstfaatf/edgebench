@@ -21,6 +21,8 @@
 #include "edgebench/dry_run.hpp"
 #include "edgebench/exit_codes.hpp"
 #include "edgebench/ort_loader.hpp"
+#include "edgebench/result_files.hpp"
+#include "edgebench/result_json.hpp"
 #include "edgebench/run_config.hpp"
 #include "edgebench/runtime.hpp"
 #include "edgebench/version.hpp"
@@ -53,33 +55,79 @@ int load_failure(const eb::OrtLoadResult& r) {
                                                     ")\n  " + r.message);
 }
 
-int benchmark_command(eb::Runtime& runtime, const eb::RunConfig& config) {
-    eb::Result<std::unique_ptr<eb::Provider>> provider = eb::make_provider(runtime, config);
-    if (!provider)
-        return fail(provider.error().exit_code, provider.error().message);
-    const eb::Result<eb::BenchmarkResult> result =
-        eb::run_benchmark(runtime, *provider.value(), config, [](std::string_view message) {
-            std::fprintf(stderr, "%.*s\n", static_cast<int>(message.size()), message.data());
-            std::fflush(stderr);
-        });
-    if (!result)
-        return fail(result.error().exit_code, result.error().message);
-    for (const eb::ResultWarning& w : result.value().warnings) {
+// Prints a finished run (summary or JSON), writes its result files, and returns
+// the exit code: the run's own failure code if it failed, otherwise 0, or 6 if
+// the results could not be written. Usage errors write nothing.
+int report_result(const eb::BenchmarkResult& r) {
+    const eb::RunConfig& config = r.config;
+    const int run_code = r.failure ? eb::to_int(r.failure->error.exit_code) : 0;
+    if (r.failure && r.failure->error.exit_code == eb::ExitCode::usage_error)
+        return fail(eb::ExitCode::usage_error, r.failure->error.message);
+
+    for (const eb::ResultWarning& w : r.warnings) {
         if (w.code != "value_unavailable")
             std::fprintf(stderr, "warning: [%s] %s\n", w.code.c_str(), w.message.c_str());
     }
-    std::fputs(eb::format_summary(result.value()).c_str(), stdout);
-    return eb::to_int(eb::ExitCode::success);
+    if (r.failure) {
+        const eb::Error& e = r.failure->error;
+        if (e.exit_code == eb::ExitCode::ort_load_failure && r.failure->stage == "environment")
+            std::fprintf(stderr, "error: cannot load ONNX Runtime (%s)\n  %s\n", e.kind.c_str(),
+                         e.message.c_str());
+        else
+            std::fprintf(stderr, "error: %s\n", e.message.c_str());
+    } else if (config.format == eb::OutputFormat::summary) {
+        // Printed before writing, so the measurements are never lost to a write error.
+        std::fputs(eb::format_summary(r).c_str(), stdout);
+    }
+    std::fflush(stdout);
+
+    const eb::Result<eb::WrittenResult> written =
+        eb::write_result_files(r, config.output_dir, eb::result_name(config));
+    if (config.format == eb::OutputFormat::json) {
+        const nlohmann::ordered_json doc =
+            written ? written.value().document : eb::to_result_json(r, std::nullopt);
+        std::printf("%s\n", doc.dump(2).c_str());
+        std::fflush(stdout);
+    }
+    if (!written) {
+        std::fprintf(stderr, "error: cannot write the result: %s\n",
+                     written.error().message.c_str());
+        return r.failure ? run_code : eb::to_int(eb::ExitCode::output_error);
+    }
+    const std::string path = eb::path_to_utf8(written.value().result_file);
+    if (!r.failure && config.format == eb::OutputFormat::summary)
+        std::printf("Results     %s\n", path.c_str());
+    else
+        std::fprintf(stderr, "%s result written to %s\n", r.failure ? "failed" : "the",
+                     path.c_str());
+    return run_code;
+}
+
+int benchmark_command(eb::Runtime& runtime, const eb::RunConfig& config) {
+    return report_result(eb::run_benchmark(runtime, config, [](std::string_view message) {
+        std::fprintf(stderr, "%.*s\n", static_cast<int>(message.size()), message.data());
+        std::fflush(stderr);
+    }));
 }
 
 int run_command(const eb::RunConfig& config) {
     const eb::OrtLoadResult ort = eb::load_onnxruntime();
-    if (!ort.ok())
-        return load_failure(ort);
+    if (!ort.ok()) {
+        if (config.dry_run)
+            return load_failure(ort);
+        return report_result(eb::failed_load_result(config, ort));
+    }
     // Declared first, destroyed last: every session is released before the Runtime.
     eb::Result<std::unique_ptr<eb::Runtime>> runtime = eb::Runtime::create(ort);
-    if (!runtime)
-        return fail(runtime.error().exit_code, runtime.error().message);
+    if (!runtime) {
+        if (config.dry_run)
+            return fail(runtime.error().exit_code, runtime.error().message);
+        eb::BenchmarkResult r = eb::begin_result(config);
+        if (!r.failure)
+            eb::set_failure(r, runtime.error(), "environment");
+        eb::finish_result(r);
+        return report_result(r);
+    }
     if (!config.dry_run)
         return benchmark_command(*runtime.value(), config);
     const eb::Result<nlohmann::ordered_json> resolved = eb::dry_run(*runtime.value(), config);
@@ -92,7 +140,8 @@ int run_command(const eb::RunConfig& config) {
 }
 
 int doctor_command(const eb::DoctorOptions& options) {
-    const eb::DoctorReport report = eb::run_doctor();
+    const eb::DoctorReport report =
+        eb::run_doctor(std::chrono::milliseconds(options.load_sample_ms));
     if (options.json)
         std::printf("%s\n", eb::to_json(report).dump(2).c_str());
     else

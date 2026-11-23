@@ -212,7 +212,7 @@ execution provider and prints top-1 accuracy (over all 1000 classes, and
 restricted to the 10 Imagenette classes) and each INT8 model's top-1 agreement
 with FP32. Each run saves a new summary,
 `benchmarks/results/local/feasibility/cpu_accuracy_mobilenetv2_<timestamp>.json`
-(UTC, `YYYYmmdd-HHMMSS`), and copies it to `cpu_accuracy_mobilenetv2_latest.json`.
+(UTC with milliseconds, `YYYYmmddTHHMMSS.mmmZ`), and copies it to `cpu_accuracy_mobilenetv2_latest.json`.
 Earlier summaries are never overwritten; the measurement scripts below follow the
 same scheme.
 
@@ -427,7 +427,9 @@ The probe uses edgebench's [exit codes](cli.md#exit-codes): 0 if everything
 passed, 1 if a check failed (output comparison, device selection), 2 on a usage
 error, 3 on an ONNX Runtime error (the error code and message are printed), and
 4 if ONNX Runtime could not be loaded or a loaded ONNX Runtime/QNN DLL is not the
-bundled one. It loads ONNX Runtime the same way as
+bundled one, and 6 if the `--json` file could not be written. `--json` never
+overwrites: if the path already exists, the probe exits with 6 before doing
+anything. It loads ONNX Runtime the same way as
 `edgebench.exe` (see [How the executables find ONNX Runtime](#how-the-executables-find-onnx-runtime))
 and refuses to run with any other copy.
 

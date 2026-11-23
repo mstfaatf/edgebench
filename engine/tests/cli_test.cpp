@@ -218,3 +218,33 @@ TEST(CliRun, AllValidationErrorsAreReported) {
     EXPECT_TRUE(contains(r.err, "--trials")) << r.err;
     EXPECT_TRUE(contains(r.err, "edgebench run --help")) << r.err;
 }
+
+TEST(CliRun, NameFormatAndLoadSample) {
+    TempModel model;
+    eb::ParseResult r = parse(run_args(model));
+    ASSERT_FALSE(r.exit.has_value()) << r.err;
+    EXPECT_FALSE(r.run.name.has_value());
+    EXPECT_EQ(r.run.format, eb::OutputFormat::summary);
+    EXPECT_EQ(r.run.load_sample_ms, 1000);
+
+    r = parse(
+        run_args(model, {"--name", "fp32-cpu_t4.v2", "--format", "json", "--load-sample-ms", "0"}));
+    ASSERT_FALSE(r.exit.has_value()) << r.err;
+    EXPECT_EQ(r.run.name, "fp32-cpu_t4.v2");
+    EXPECT_EQ(r.run.format, eb::OutputFormat::json);
+    EXPECT_EQ(r.run.load_sample_ms, 0);
+
+    expect_usage_error(parse(run_args(model, {"--name", "has space"})), "--name: may only contain");
+    expect_usage_error(parse(run_args(model, {"--name", "a/b"})), "--name");
+    expect_usage_error(parse(run_args(model, {"--name", ".hidden"})), "--name");
+    expect_usage_error(parse(run_args(model, {"--format", "xml"})), "--format");
+    expect_usage_error(parse(run_args(model, {"--load-sample-ms", "-1"})), "--load-sample-ms");
+}
+
+TEST(Cli, DoctorLoadSample) {
+    eb::ParseResult r = parse({"doctor", "--load-sample-ms", "0"});
+    ASSERT_FALSE(r.exit.has_value()) << r.err;
+    EXPECT_EQ(r.doctor.load_sample_ms, 0);
+    EXPECT_EQ(parse({"doctor"}).doctor.load_sample_ms, 1000);
+    expect_usage_error(parse({"doctor", "--load-sample-ms", "-5"}), "--load-sample-ms");
+}

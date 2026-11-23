@@ -16,6 +16,7 @@ enum class ProviderKind { cpu };
 enum class RunBinding { run, iobinding_preallocated };
 enum class InputKind { random, constant };
 enum class GraphOptLevel { disable_all, enable_basic, enable_extended, enable_all };
+enum class OutputFormat { summary, json };
 
 /// Every value `edgebench run` uses. Defaults match the documented CLI defaults
 /// (docs/cli.md). `seed` and `constant_value` are only set when given explicitly;
@@ -29,12 +30,15 @@ struct RunConfig {
     int iterations = 200;
     int trials = 3;
     int cooldown_ms = 2000;
+    int load_sample_ms = 1000;  // background-load sample before trial 1 when cooldown_ms is 0
     InputKind input = InputKind::random;
     std::optional<std::uint64_t> seed;
     std::optional<double> constant_value;
     GraphOptLevel graph_opt = GraphOptLevel::enable_all;
     std::optional<std::string> label;
     std::filesystem::path output_dir = "benchmarks/results/local";
+    std::optional<std::string> name;  // result file name; default: default_result_name()
+    OutputFormat format = OutputFormat::summary;
     bool dry_run = false;
 
     std::uint64_t effective_seed() const { return seed.value_or(0); }
@@ -51,11 +55,24 @@ struct ConfigError {
 /// All problems with `config`; empty if it is valid. Checks the model file on disk.
 std::vector<ConfigError> validate(const RunConfig& config);
 
+/// Characters allowed in --name: letters, digits, '-', '_' and '.'.
+bool is_valid_result_name(std::string_view name);
+
+/// <model stem>_<provider>_<binding>_t<threads>, e.g. "mobilenetv2_fp32_b1_cpu_iobinding_t4".
+/// Characters of the model stem outside the --name set become '_'.
+std::string default_result_name(const RunConfig& config);
+
+/// config.name if set, otherwise default_result_name().
+std::string result_name(const RunConfig& config);
+
 // CLI spellings (`--provider cpu`, `--binding iobinding`, ...) <-> values.
 std::optional<ProviderKind> parse_provider(std::string_view text);
 std::optional<RunBinding> parse_binding(std::string_view text);
 std::optional<InputKind> parse_input_kind(std::string_view text);
 std::optional<GraphOptLevel> parse_graph_opt(std::string_view text);
+std::optional<OutputFormat> parse_output_format(std::string_view text);
+std::string_view cli_name(RunBinding binding);     // "run" or "iobinding"
+std::string_view cli_name(ProviderKind provider);  // "cpu"
 
 /// Comma-separated list of the accepted `--provider` values, e.g. "cpu".
 std::string_view supported_providers();

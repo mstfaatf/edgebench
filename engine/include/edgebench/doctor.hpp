@@ -1,6 +1,7 @@
 // `edgebench doctor`: checks the build, the system and the ONNX Runtime installation.
 #pragma once
 
+#include <chrono>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -41,7 +42,7 @@ struct DoctorReport {
 
 /// Runs every check. Sections that do not need ONNX Runtime are filled in even
 /// when it cannot be loaded.
-DoctorReport run_doctor();
+DoctorReport run_doctor(std::chrono::milliseconds load_sample = std::chrono::seconds(1));
 
 /// Human-readable report (no color codes).
 std::string format_text(const DoctorReport& report);

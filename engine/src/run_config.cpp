@@ -48,6 +48,14 @@ std::vector<ConfigError> validate(const RunConfig& c) {
         add("trials", "must be at least 1 (got " + std::to_string(c.trials) + ")");
     if (c.cooldown_ms < 0)
         add("cooldown-ms", "must be 0 or more (got " + std::to_string(c.cooldown_ms) + ")");
+    if (c.load_sample_ms < 0)
+        add("load-sample-ms", "must be 0 or more (got " + std::to_string(c.load_sample_ms) + ")");
+    if (c.name && !is_valid_result_name(*c.name)) {
+        add("name",
+            "may only contain letters, digits, '-', '_' and '.', and must not start "
+            "with '.' (got '" +
+                *c.name + "')");
+    }
 
     if (c.seed && c.input != InputKind::random)
         add("seed", "is only allowed with --input random");
@@ -61,6 +69,51 @@ std::vector<ConfigError> validate(const RunConfig& c) {
     if (c.output_dir.empty())
         add("output-dir", "must not be empty");
     return errors;
+}
+
+bool is_valid_result_name(std::string_view name) {
+    if (name.empty() || name.size() > 128 || name.front() == '.')
+        return false;
+    return std::all_of(name.begin(), name.end(), [](char ch) {
+        const auto c = static_cast<unsigned char>(ch);
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+               c == '-' || c == '_' || c == '.';
+    });
+}
+
+std::string default_result_name(const RunConfig& c) {
+    std::string stem = path_to_utf8(c.model.stem());
+    for (char& ch : stem) {
+        const auto u = static_cast<unsigned char>(ch);
+        const bool ok = (u >= 'a' && u <= 'z') || (u >= 'A' && u <= 'Z') ||
+                        (u >= '0' && u <= '9') || u == '-' || u == '_' || u == '.';
+        if (!ok)
+            ch = '_';
+    }
+    if (stem.empty() || stem.front() == '.')
+        stem = "model" + stem;
+    return stem + "_" + std::string(cli_name(c.provider)) + "_" + std::string(cli_name(c.binding)) +
+           "_t" + std::to_string(c.threads);
+}
+
+std::string result_name(const RunConfig& c) {
+    return c.name ? *c.name : default_result_name(c);
+}
+
+std::optional<OutputFormat> parse_output_format(std::string_view text) {
+    if (text == "summary")
+        return OutputFormat::summary;
+    if (text == "json")
+        return OutputFormat::json;
+    return std::nullopt;
+}
+
+std::string_view cli_name(RunBinding binding) {
+    return binding == RunBinding::run ? "run" : "iobinding";
+}
+
+std::string_view cli_name(ProviderKind) {
+    return "cpu";
 }
 
 std::optional<ProviderKind> parse_provider(std::string_view text) {
@@ -175,6 +228,8 @@ nlohmann::ordered_json resolved_config_json(const RunConfig& c) {
         {"label", c.label ? json(*c.label) : json(nullptr)},
         {"output_dir", path_to_utf8(output_dir)},
         {"cooldown_ms", c.cooldown_ms},
+        {"load_sample_ms", c.load_sample_ms},
+        {"name", result_name(c)},
         {"config", config},
     };
 }

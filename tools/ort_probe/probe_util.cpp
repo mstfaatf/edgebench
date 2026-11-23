@@ -216,12 +216,13 @@ outputs from tools/ort_probe/make_reference.py, and measures latency.
   --runs N                 timed runs on the first input (default 0: no timing)
   --qnn-profiling off|basic|detailed   QNN EP profiling (default off)
   --qnn-profile-file PATH  QNN profiling CSV output
-  --json PATH              write a JSON summary
+  --json PATH              write a JSON summary (a new file: never overwritten)
   --verbose-log            ONNX Runtime verbose logging to stderr
 
 Exit codes: 0 ok, 1 check failed (output comparison, device selection) or
 unexpected error, 2 usage error, 3 ONNX Runtime error, 4 ONNX Runtime could not
-be loaded or a loaded ONNX Runtime/QNN DLL is not the bundled one.
+be loaded or a loaded ONNX Runtime/QNN DLL is not the bundled one, 6 the --json
+file already exists or could not be written (it is never overwritten).
 )";
     return s.str();
 }

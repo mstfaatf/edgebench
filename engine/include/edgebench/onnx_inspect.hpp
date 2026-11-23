@@ -13,8 +13,10 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 #include "edgebench/result.hpp"
+#include "edgebench/tensor_info.hpp"
 
 namespace edgebench {
 
@@ -26,6 +28,9 @@ struct OnnxGraphSummary {
     std::map<int, int> initializer_dtypes;  // ONNX element type -> initializers
     std::optional<int> weight_dtype;        // dtype of initializers fed to DequantizeLinear
     std::optional<int> activation_dtype;    // zero-point dtype of QuantizeLinear
+    /// Graph inputs (initializers excluded) and outputs as declared in the file,
+    /// so the model's tensors are known even when no session can be created.
+    std::vector<TensorInfo> inputs, outputs;
 };
 
 /// What the file says about precision and quantization, in results-schema terms.

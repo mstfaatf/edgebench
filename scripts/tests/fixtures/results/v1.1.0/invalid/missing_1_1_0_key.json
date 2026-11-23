@@ -1,0 +1,11 @@
+{
+  "description": "C++ engine result without a key the 1.1.0 schema defines.",
+  "base": "docs/examples/v1.1.0/example-cpu-fp32.json",
+  "set": {},
+  "remove": ["/config/run_binding"],
+  "expect": {
+    "severity": "warning",
+    "code": "missing_1_1_0_key",
+    "path": "/config/run_binding"
+  }
+}

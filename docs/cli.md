@@ -18,10 +18,11 @@ edgebench <command> --help
 
 ## `edgebench run`
 
-Benchmarks one model with one configuration and prints a summary. Only the CPU
-provider is available in this version. Results are kept in memory and printed;
-`--output-dir` is validated but no result file is written yet. `--dry-run`
-creates the real session and checks one inference without measuring.
+Benchmarks one model with one configuration, prints a summary, and writes the
+result as a results-schema 1.1.0 JSON document plus CSV files (see
+[Result files](#result-files)). Only the CPU provider is available in this
+version. `--dry-run` creates the real session and checks one inference without
+measuring or writing anything.
 
 | Option | Default | Constraints / meaning |
 |---|---|---|
@@ -32,13 +33,16 @@ creates the real session and checks one inference without measuring.
 | `--warmup N` | `20` | Unmeasured iterations before each trial, ≥ 0 |
 | `--iterations N` | `200` | Measured iterations per trial, ≥ 1 |
 | `--trials N` | `3` | Number of trials, ≥ 1 |
-| `--cooldown-ms N` | `2000` | Pause between trials, ≥ 0 |
+| `--cooldown-ms N` | `2000` | Idle period before every trial (the first included), ≥ 0; background CPU load is sampled during it |
+| `--load-sample-ms N` | `1000` | With `--cooldown-ms 0`: length of the background-load sample (and idle) before the first trial, ≥ 0. `0` takes no sample: `system.load` is null with a `value_unavailable` warning |
 | `--input KIND` | `random` | `random` or `constant`; see [Input data](#input-data) |
 | `--seed N` | `0` | RNG seed (unsigned integer). Only allowed with `--input random` |
 | `--constant-value FLOAT` | `0.0` | Fill value, finite. Only allowed with `--input constant` |
 | `--graph-opt LEVEL` | `all` | ONNX Runtime graph optimization: `disable`, `basic`, `extended`, `all` (recorded as `disable_all` … `enable_all`) |
 | `--label TEXT` | none | Name for the run; must not be empty if given |
-| `--output-dir PATH` | `benchmarks/results/local` | Directory for result files, relative to the current directory |
+| `--output-dir PATH` | `benchmarks/results/local` | Directory for result files (created if missing), relative to the current directory |
+| `--name TEXT` | `<model stem>_<provider>_<binding>_t<threads>` | Base name of the result files. Letters, digits, `-`, `_` and `.` only, not starting with `.`, at most 128 characters. In the default, other characters of the model file name become `_`, e.g. `mobilenetv2_fp32_b1_cpu_iobinding_t4` |
+| `--format FORMAT` | `summary` | What goes to stdout: `summary` (human-readable) or `json` (the full result document). Progress and errors stay on stderr; the files are written either way |
 | `--dry-run` | off | Validate the options, create the session, run one inference, print the resolved configuration as JSON, exit 0 |
 
 All validation problems are reported together, one per line, as
@@ -49,8 +53,8 @@ All validation problems are reported together, one per line, as
 A run consists of `--trials` trials. Each trial:
 
 1. idles for `--cooldown-ms` while sampling system-wide CPU load (before
-   **every** trial, including the first; with `--cooldown-ms 0`, a fixed 1 s
-   idle before the first trial only);
+   **every** trial, including the first; with `--cooldown-ms 0`, for
+   `--load-sample-ms` before the first trial only);
 2. creates a **new session** (the creation time of the `Ort::Session` alone,
    without input generation, binding setup or model hashing, goes into
    `timing.session_init.cold_ms`, one value per trial);
@@ -160,6 +164,61 @@ Placement   55 nodes: CPUExecutionProvider 55 (all on the requested EP)
 - One row per trial, then `aggregate` over all measured iterations pooled.
 - `Trial means`: range of the trial means and their coefficient of variation.
 - `Placement`: node count per execution provider after graph optimization.
+- `Results`: the last line, the path of the result file that was written. With
+  `--format json`, stdout is only the document and the path goes to stderr.
+
+### Result files
+
+Every run that gets past argument validation writes, in `--output-dir`:
+
+```text
+<name>_<stamp>.json            the result document (results schema 1.1.0)
+<name>_<stamp>/latencies.csv   one row per measured iteration
+<name>_<stamp>/summary.csv     one row per trial, plus the aggregate row
+<name>_latest.json             a copy of the newest result for <name>
+```
+
+- `<stamp>` is the UTC start of the run with milliseconds,
+  `YYYYmmddTHHMMSS.mmmZ` (e.g. `20261121T235210.123Z`); milliseconds are
+  truncated, never rounded. The Python measurement scripts use the same format
+  (`scripts/common/results_io.py`).
+- **Nothing is overwritten.** Every timestamped file and folder is created
+  exclusively. If one with the same stamp exists (two runs in the same
+  millisecond), `-2`, `-3`, ... is appended to the stamp. Each file is written to
+  a temporary name in its directory and then renamed into place, so an
+  interrupted run never leaves a half-written file under a final name.
+- `<name>_latest.json` is the only file that is ever replaced, atomically
+  (temporary file, then `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING |
+  MOVEFILE_WRITE_THROUGH`). It sits in the same directory as the stamped file,
+  so its `raw.latencies_file` reference is valid too.
+- The document's `raw` section links `latencies.csv` by a path relative to the
+  result file, with the file's SHA-256 (see
+  [results-schema.md](results-schema.md#raw)).
+- CSV files follow RFC 4180: UTF-8 without BOM, CRLF line endings, a header row,
+  `.` as decimal separator, fields quoted when needed, and numbers written in
+  the same shortest round-trip form as the JSON. Empty fields are nulls (p95
+  with fewer than 20 samples, p99 with fewer than 100).
+- `latencies.csv` columns: `trial_index,iteration_index,latency_ms`.
+  `summary.csv` columns: `row` (`trial` or `aggregate`), `trial_index`, then the
+  latency statistics of the schema (`count`, `mean_ms`, `p50_ms`, `p95_ms`,
+  `p99_ms`, `stddev_ms`, `min_ms`, `max_ms`, `inferences_per_sec`,
+  `items_per_sec`) and `session_create_ms` (the trial's session creation time;
+  the median for the aggregate row).
+
+**Failed runs** also write a result, with `status: "failed"` and the `error`
+object (`stage`, `message`, `code`), keeping whatever was established before
+the failure (system, runtime, model, completed trials): ONNX Runtime could not
+be loaded (stage `environment`, exit 4), session creation or an inference failed
+(`session_creation`, `warmup` or `measurement`, exit 3), non-finite outputs or a
+changed top-1 between trials (`measurement`, exit 1). Usage errors (exit 2),
+including models with dynamic shapes or unsupported input types, write
+nothing. Completed trials keep their latency files; without one, `raw` is null
+and there is no run folder.
+
+If the results cannot be written, the summary has already been printed, the
+error names the path and the operating system's message, and the exit code is
+6. If writing a failed run's result also fails, that is reported on stderr and
+the run's own exit code is kept.
 
 ### `--dry-run`
 
@@ -186,7 +245,7 @@ It prints the result as JSON with the field names of the
 `outputs`), `config` (with `batch_size` and `session_config`),
 `runtime.execution_provider`, `runtime.ep_device` and `execution`
 (`verification_method` is `node_assignment`, with the node counts per EP).
-`label`, `output_dir` and `cooldown_ms` are run settings the schema's `config`
+`label`, `output_dir`, `cooldown_ms`, `load_sample_ms` and `name` (the result file name) are run settings the schema's `config`
 block has no field for; `dry_run_check` reports the session creation time of
 this one session and the inference check.
 
@@ -238,6 +297,8 @@ Output for the FP32 MobileNetV2 model (`run --model models\mobilenetv2\mobilenet
   "label": null,
   "output_dir": "c:\\dev\\edgebench\\benchmarks\\results\\local",
   "cooldown_ms": 2000,
+  "load_sample_ms": 1000,
+  "name": "mobilenetv2_fp32_b1_cpu_iobinding_t4",
   "config": {
     "requested": {
       "execution_provider": "CPUExecutionProvider",
@@ -392,6 +453,7 @@ Checks everything a benchmark depends on and reports it:
 
 | Option | Meaning |
 |---|---|
+| `--load-sample-ms N` | Length of the background CPU load sample, default `1000`; `0` skips it (`system.load` is null) |
 | `--json` | Print the report as JSON instead of text. `tool`, `system` and `runtime` use the [results schema](results-schema.md)'s field names where they overlap; `onnxruntime_load`, `problems`, `warnings`, `result` and `exit_code` summarize the checks |
 
 Exit code 0 when every check passes. Exit code 4 when ONNX Runtime cannot be
@@ -464,4 +526,4 @@ Shared by `edgebench` and `tools/ort_probe` (defined in
 | 3 | `ort_runtime_error` | ONNX Runtime error: session creation or inference failed |
 | 4 | `ort_load_failure` | ONNX Runtime could not be loaded (any loader error kind), or a loaded ONNX Runtime/QNN DLL is not the bundled one |
 | 5 | `strict_mode_refusal` | Strict mode refused the session: not every node can run on the requested device. Reserved for the NPU provider |
-| 6 | `output_error` | Results could not be written |
+| 6 | `output_error` | Results could not be written (`edgebench run`: after the summary was printed; `ort_probe`: the `--json` file exists or could not be written) |

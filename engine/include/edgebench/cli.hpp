@@ -14,6 +14,7 @@ enum class Command { none, run, doctor };
 
 struct DoctorOptions {
     bool json = false;
+    int load_sample_ms = 1000;  // background-load sample length; 0: no sample
 };
 
 /// Outcome of parsing. If `exit` is set, the program prints `out` to stdout and

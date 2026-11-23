@@ -3,9 +3,15 @@
 Every run writes a new, timestamped summary and never overwrites an earlier
 one:
 
-    <dir>/<name>_<YYYYmmdd-HHMMSS>.json     summary of this run (UTC timestamp)
-    <dir>/<name>_<YYYYmmdd-HHMMSS>/         this run's logs, profiles, probe output
-    <dir>/<name>_latest.json                copy of the most recent summary
+    <dir>/<name>_<stamp>.json     summary of this run
+    <dir>/<name>_<stamp>/         this run's logs, profiles, probe output
+    <dir>/<name>_latest.json      copy of the most recent summary
+
+``<stamp>`` is the UTC time with milliseconds, ``YYYYmmddTHHMMSS.mmmZ`` (e.g.
+``20261121T235210.123Z``), the same string the C++ engine uses in its result
+file names (``file_stamp()`` in ``engine/include/edgebench/run_identity.hpp``).
+Files written by older versions used ``YYYYmmdd-HHMMSS``; nothing parses the
+stamp, so both forms can sit side by side.
 
 ``<name>_latest.json`` is the only file that is replaced; it exists so that
 docs and other scripts can refer to "the most recent run" by a fixed name.
@@ -24,8 +30,15 @@ FEASIBILITY_DIR = REPO_ROOT / "benchmarks" / "results" / "local" / "feasibility"
 
 
 def run_stamp(now: datetime | None = None) -> str:
-    """UTC timestamp used in file names, e.g. ``20261121-013000``."""
-    return (now or datetime.now(timezone.utc)).strftime("%Y%m%d-%H%M%S")
+    """UTC timestamp used in file names, e.g. ``20261121T013000.123Z``.
+
+    Milliseconds are truncated, never rounded, so ``.9999`` stays in its second.
+    A naive ``now`` is taken as UTC.
+    """
+    t = now or datetime.now(timezone.utc)
+    if t.tzinfo is not None:
+        t = t.astimezone(timezone.utc)
+    return f"{t:%Y%m%dT%H%M%S}.{t.microsecond // 1000:03d}Z"
 
 
 @dataclass(frozen=True)

@@ -35,6 +35,8 @@ add_library(edgebench_core STATIC
   src/ort_loader.cpp
   src/placement.cpp
   src/result.cpp
+  src/result_files.cpp
+  src/result_json.cpp
   src/run_config.cpp
   src/run_identity.cpp
   src/runtime.cpp
@@ -78,6 +80,7 @@ if(EDGEBENCH_BUILD_TESTS)
     tests/core_types_test.cpp
     tests/exit_codes_test.cpp
     tests/module_paths_test.cpp
+    tests/result_files_test.cpp
     tests/run_config_test.cpp
     tests/system_state_test.cpp
     tests/timing_test.cpp
@@ -103,6 +106,7 @@ if(EDGEBENCH_BUILD_TESTS)
     tests/ort_loader_test.cpp
     tests/edgebench_exe_test.cpp
     tests/provider_test.cpp
+    tests/test_runtime.cpp
     tests/process_util.cpp)
   target_link_libraries(edgebench_bundle_tests PRIVATE edgebench_core GTest::gtest_main)
   target_compile_definitions(edgebench_bundle_tests PRIVATE

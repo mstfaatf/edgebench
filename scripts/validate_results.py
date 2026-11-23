@@ -334,7 +334,69 @@ V1_1_RULES = {
     "session_init_not_applicable": ERROR,
     "qnn_validation_missing": ERROR,
     "rejected_nodes_but_verified": ERROR,
+    "missing_1_1_0_key": WARNING,
 }
+
+
+def _resolve(node: dict[str, Any], root: dict[str, Any]) -> dict[str, Any]:
+    while isinstance(node, dict) and "$ref" in node:
+        node = root["$defs"][node["$ref"].rsplit("/", 1)[-1]]
+    return node
+
+
+def _object_schema(node: dict[str, Any], root: dict[str, Any]) -> dict[str, Any] | None:
+    """The object branch of a schema node (directly, or inside oneOf/anyOf)."""
+    node = _resolve(node, root)
+    if "properties" in node:
+        return node
+    for branch in node.get("oneOf", []) + node.get("anyOf", []):
+        found = _object_schema(branch, root)
+        if found is not None:
+            return found
+    return None
+
+
+def _items_schema(node: dict[str, Any], root: dict[str, Any]) -> dict[str, Any] | None:
+    node = _resolve(node, root)
+    if "items" in node:
+        return node["items"]
+    for branch in node.get("oneOf", []) + node.get("anyOf", []):
+        found = _items_schema(branch, root)
+        if found is not None:
+            return found
+    return None
+
+
+def missing_keys(doc: Any, schema: dict[str, Any], root: dict[str, Any],
+                 path: tuple = ()) -> list[str]:
+    """JSON Pointers of every key the schema defines that `doc` omits (null values count
+    as present; the contents of null and free-form maps are not inspected)."""
+    found: list[str] = []
+    if isinstance(doc, dict):
+        obj = _object_schema(schema, root)
+        if obj is None:
+            return found
+        for key, sub in obj["properties"].items():
+            if key not in doc:
+                found.append(pointer(path + (key,)))
+            else:
+                found += missing_keys(doc[key], sub, root, path + (key,))
+    elif isinstance(doc, list):
+        items = _items_schema(schema, root)
+        if items is not None:
+            for i, value in enumerate(doc):
+                found += missing_keys(value, items, root, path + (i,))
+    return found
+
+
+def missing_key_issues(doc: dict[str, Any], schema: dict[str, Any]) -> list[Issue]:
+    """The C++ engine writes every key of the version it declares; other writers may
+    omit keys added in a minor version (they mean null)."""
+    if doc["tool"].get("implementation") != "cpp":
+        return []
+    return [Issue(p, "key defined by the 1.1.0 schema is missing; the C++ engine writes every key",
+                  V1_1_RULES["missing_1_1_0_key"], "missing_1_1_0_key")
+            for p in missing_keys(doc, schema, schema)]
 
 
 def v1_1_issues(doc: dict[str, Any]) -> list[Issue]:
@@ -447,7 +509,8 @@ def v1_1_issues(doc: dict[str, Any]) -> list[Issue]:
     return issues
 
 
-def consistency_issues(doc: dict[str, Any], result_path: Path | None = None) -> list[Issue]:
+def consistency_issues(doc: dict[str, Any], result_path: Path | None = None,
+                       schema: dict[str, Any] | None = None) -> list[Issue]:
     issues = []
     if doc["run_id"] == NIL_UUID and not any(w["code"] == EXAMPLE_WARNING_CODE for w in doc["warnings"]):
         issues.append(Issue("/run_id", f"the nil UUID is reserved for examples with a '{EXAMPLE_WARNING_CODE}' warning"))
@@ -455,6 +518,8 @@ def consistency_issues(doc: dict[str, Any], result_path: Path | None = None) -> 
     issues += raw_issues(doc, result_path)
     if version_key(doc["schema_version"]) >= (1, 1, 0):
         issues += v1_1_issues(doc)
+        if schema is not None:
+            issues += missing_key_issues(doc, schema)
     return issues
 
 
@@ -469,7 +534,8 @@ def validate_document(doc: Any, validators: Validators | None = None,
     issues = schema_issues(doc, validators)
     if issues:
         return issues  # consistency rules assume a schema-valid document
-    return consistency_issues(doc, result_path)
+    schema = validators.for_version(doc["schema_version"]).schema
+    return consistency_issues(doc, result_path, schema)
 
 
 def validate_file(path: Path, validators: Validators | None = None) -> list[Issue]:
