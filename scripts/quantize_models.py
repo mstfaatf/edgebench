@@ -8,7 +8,10 @@ and writes, next to it:
 - ``<model>_int8_b<batch>.onnx``: the INT8 QDQ model with dead Q/DQ chains
   pruned, and a JSON sidecar;
 - ``<model>_int8_unpruned_b<batch>.onnx``: the quantizer's output before
-  pruning, kept as a reference.
+  pruning, kept as a reference;
+- the same from the normalization-folded FP32 files (``scripts/fold_models.py``):
+  ``<model>_int8_folded_b<batch>.onnx`` and ``<model>_int8_folded_unpruned_b<batch>.onnx``,
+  calibrated with [0, 1] images (no mean/std), since those models take raw input.
 
 Both are added to ``models/manifest.json``. The recipe (per-channel symmetric
 int8 weights, uint8 activations, MinMax calibration on the 200 Imagenette
@@ -27,7 +30,8 @@ Checks, each of which fails the run:
 files on disk, without writing anything.
 
 Usage:
-    python scripts/quantize_models.py [--model NAME ...] [--batch N ...] [--verify]
+    python scripts/quantize_models.py [--model NAME ...] [--batch N ...]
+                                      [--normalization external|folded|all] [--verify]
 """
 
 from __future__ import annotations
@@ -73,16 +77,21 @@ def check_batches_share_params(name: str, produced: dict, variant: str) -> list[
     return oq.quant_param_differences(protos)
 
 
-def verify(names: list[str], batches: list[int]) -> int:
+SOURCES = {"external": ["fp32"], "folded": ["fp32_folded"], "all": ["fp32", "fp32_folded"]}
+
+
+def verify(names: list[str], batches: list[int], sources: list[str]) -> int:
     from common import onnx_export as ox
     from common import onnx_quantize as oq
 
     by_file = {f.file: f for f in read_manifest()[0]}
     failures = 0
-    for name in names:
-        results = oq.quantize(MODELS[name], batches)
+    for name, source in ((n, s) for n in names for s in sources):
+        pruned_variant, unpruned_variant = oq.INT8_VARIANTS[source]
+        results = oq.quantize(MODELS[name], batches, source_variant=source)
         for batch, r in results.items():
-            for variant, data in ((oq.INT8, r["pruned"]), (oq.INT8_UNPRUNED, r["unpruned"])):
+            for variant, data in ((pruned_variant, r["pruned"]),
+                                  (unpruned_variant, r["unpruned"])):
                 rel = relative_path(name, variant, batch)
                 digest = ox.sha256_bytes(data)
                 entry = by_file.get(rel)
@@ -97,7 +106,7 @@ def verify(names: list[str], batches: list[int]) -> int:
     return 1 if failures else 0
 
 
-def quantize(names: list[str], batches: list[int]) -> int:
+def quantize(names: list[str], batches: list[int], sources: list[str]) -> int:
     import numpy as np
     import onnx
 
@@ -114,11 +123,12 @@ def quantize(names: list[str], batches: list[int]) -> int:
     if images is None:
         print("output checks skipped: run scripts/get_data.py --dataset imagenetv2 first")
     failures = 0
-    for name in names:
+    for name, source in ((n, s) for n in names for s in sources):
         spec = MODELS[name]
-        print(f"quantizing {name} (calibrating on batch 1)")
-        results = oq.quantize(spec, batches)
-        for variant, key in ((oq.INT8, "pruned"), (oq.INT8_UNPRUNED, "unpruned")):
+        pruned_variant, unpruned_variant = oq.INT8_VARIANTS[source]
+        print(f"quantizing {name} from {source} (calibrating on batch 1)")
+        results = oq.quantize(spec, batches, source_variant=source)
+        for variant, key in ((pruned_variant, "pruned"), (unpruned_variant, "unpruned")):
             problems = check_batches_share_params(
                 name, {b: r[key] for b, r in results.items()}, variant)
             if problems:
@@ -128,12 +138,14 @@ def quantize(names: list[str], batches: list[int]) -> int:
         if not failures:
             print("  scales and zero points identical across batch sizes")
 
-        x = ox.normalize_for(spec, images[1]) if images else None
+        # Folded models take the [0, 1] images as they are.
+        x = None if images is None else (
+            ox.normalize_for(spec, images[1]) if source == "fp32" else images[1])
         b1_logits = None
         for batch in sorted(results):
             r = results[batch]
-            rel = relative_path(name, oq.INT8, batch)
-            rel_unpruned = relative_path(name, oq.INT8_UNPRUNED, batch)
+            rel = relative_path(name, pruned_variant, batch)
+            rel_unpruned = relative_path(name, unpruned_variant, batch)
             write_atomically(MODELS_DIR / rel, r["pruned"])
             write_atomically(MODELS_DIR / rel_unpruned, r["unpruned"])
             by_file[rel] = ManifestFile(rel, ox.sha256_bytes(r["pruned"]), len(r["pruned"]))
@@ -150,9 +162,10 @@ def quantize(names: list[str], batches: list[int]) -> int:
                 checks["vs_fp32"] = ox.compare_logits(logits, fp32)
                 if batch == 1:
                     b1_logits = logits
-                elif b1_logits is None and (MODELS_DIR / relative_path(name, oq.INT8, 1)).is_file():
+                elif b1_logits is None and \
+                        (MODELS_DIR / relative_path(name, pruned_variant, 1)).is_file():
                     b1_logits = ox.run_ort(
-                        ox.ort_session(MODELS_DIR / relative_path(name, oq.INT8, 1)), x)
+                        ox.ort_session(MODELS_DIR / relative_path(name, pruned_variant, 1)), x)
                 if batch != 1 and b1_logits is not None:
                     checks["vs_b1"] = ox.compare_logits(logits, b1_logits)
                     failures += not ox.within_tolerance(checks["vs_b1"])
@@ -162,7 +175,7 @@ def quantize(names: list[str], batches: list[int]) -> int:
             sidecar = {
                 "model": Path(rel).name,
                 "model_name": name,
-                "variant": oq.INT8,
+                "variant": pruned_variant,
                 "batch_size": batch,
                 "source_model": {"file": r["source"], "sha256": r["source_sha256"]},
                 "unpruned_model": {"file": rel_unpruned,
@@ -203,6 +216,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="models to quantize (default: all)")
     parser.add_argument("--batch", nargs="+", type=int, choices=BATCH_SIZES,
                         default=list(BATCH_SIZES), help="batch sizes (default: 1 4 8)")
+    parser.add_argument("--normalization", choices=sorted(SOURCES), default="all",
+                        help="quantize the external-normalization FP32 files, the "
+                             "normalization-folded ones (scripts/fold_models.py), or both "
+                             "(default: all)")
     parser.add_argument("--verify", action="store_true",
                         help="quantize again in memory and compare with models/manifest.json")
     args = parser.parse_args(argv)
@@ -215,7 +232,9 @@ def main(argv: list[str] | None = None) -> int:
 
     names = list(dict.fromkeys(args.model))
     batches = sorted(set(args.batch))
-    return verify(names, batches) if args.verify else quantize(names, batches)
+    sources = SOURCES[args.normalization]
+    return (verify(names, batches, sources) if args.verify
+            else quantize(names, batches, sources))
 
 
 if __name__ == "__main__":

@@ -156,7 +156,8 @@ models/
 ```
 
 Files are named `<model>_<variant>_b<batch>.onnx`, with variant `fp32`, `int8`
-or `int8_unpruned`. The `.onnx` files and
+or `int8_unpruned`, and the normalization-folded `fp32_folded`, `int8_folded`
+and `int8_folded_unpruned` ([below](#normalization-folded-models)). The `.onnx` files and
 sidecars are not committed (`models/` is gitignored except its README and
 `manifest.json`). Each sidecar records the weights, exporter, versions, shapes,
 ONNX metadata and the results of the checks below. The INT8 models of the
@@ -352,3 +353,113 @@ Top-1 agreement with the same INT8 model on the CPU EP, on 64 ImageNetV2
 images: MobileNetV2 92.2%, ResNet-18 90.6%, EfficientNet-Lite0 98.4%. The HTP's
 integer kernels round differently from ONNX Runtime's CPU kernels, so the two
 are not bit-identical.
+
+## Normalization-folded models
+
+The default files take normalized input (`edgebench.normalization = external`).
+The folded variants have the mean/std normalization folded into the first
+convolution: they take the [0, 1] image tensor straight from resize, crop and
+scale, with no normalization step. They show whether moving normalization
+into the model's weights is free, compared with doing it outside the model
+(not timed) or as separate Sub/Div nodes in the graph (which the feasibility
+study found costs about half the NPU cycles of Qualcomm AI Hub's MobileNetV2).
+
+| File | Made by | Input |
+|---|---|---|
+| `<model>_fp32_folded_b<batch>.onnx` | `scripts/fold_models.py`, from `<model>_fp32_b<batch>.onnx` | [0, 1], no mean/std |
+| `<model>_int8_folded_b<batch>.onnx` | `scripts/quantize_models.py --normalization folded`, from the folded FP32 file | [0, 1], no mean/std |
+| `<model>_int8_folded_unpruned_b<batch>.onnx` | the same, before pruning (reference) | [0, 1], no mean/std |
+
+**Input contract.** Feed `load_image(path, normalized=False)`: values in
+[0, 1], RGB, NCHW. Applying mean/std to the input of a folded model normalizes
+twice and gives wrong predictions without any error. The file says so in its
+metadata (`edgebench.normalization = folded`, `edgebench.input_range = [0, 1]`),
+and `edgebench run` reports `model.normalization: folded`.
+
+### How the fold works, and why it needs a border correction
+
+With raw input `x`, mean `m` and std `s` (per channel), the external model
+computes `y = conv(pad0((x - m) / s), W) + b`. Folding gives the usual
+`W' = W / s` (per input channel) and `b' = b - sum(W * m / s)`. That alone is
+exact only for an unpadded convolution: the original model pads with zeros in
+**normalized** space (a raw value of `m`), the folded one with zeros in **raw**
+space, so outputs whose kernel touches the padding differ. Because convolution
+is linear, the difference does not depend on the input:
+
+```
+y = conv(pad0(x), W') + b' + E
+E = sum(W * m / s) - conv(pad0(m / s), W)
+  = the convolution of an image holding m / s in the padding and 0 inside
+```
+
+`E` is computed once (in float64) and stored as a constant
+`[1, C_out, H_out, W_out]` tensor added right after the folded convolution
+(`<conv>_border_correction/Add`). It is exactly zero away from the border. A
+first convolution without padding needs no correction and gets none.
+
+All three models' first convolutions are padded (MobileNetV2 and
+EfficientNet-Lite0: 3x3, stride 2, pad 1; ResNet-18: 7x7, stride 2, pad 3), so
+all carry the map: 32x112x112 floats (1.6 MB) for MobileNetV2 and
+EfficientNet-Lite0, 64x112x112 (3.2 MB) for ResNet-18. Folding is refused,
+with an error, unless the graph input has exactly one consumer: a `Conv` with
+constant weights, `group` 1 and explicit padding.
+
+Measured on 64 ImageNetV2 images (FP32, ONNX Runtime CPU EP), folded file on
+[0, 1] input vs external file on normalized input:
+
+| Model | Exact fold: max abs diff, top-1 agreement | Without the border correction (not shipped) |
+|---|---|---|
+| MobileNetV2 | 7.2e-6 to 8.6e-6, 100% | 0.60, 96.9% |
+| ResNet-18 | 1.7e-5, 100% | 2.31, 93.8% |
+| EfficientNet-Lite0 | 8.6e-6 to 9.1e-6, 100% | 1.04, 95.3% |
+
+The exact fold is at float rounding level (within the 1e-4 tolerance used for
+all FP32 checks); the naive fold changes the top-1 class on 3-6% of images.
+
+### INT8 folded models
+
+The folded FP32 files are quantized with the same recipe as the others
+([INT8 QDQ models](#int8-qdq-models)), except that the calibration images are
+not normalized. Batch sizes share scales and zero points, pruning removes the
+same dead chains, and the unpruned copies are kept. Metadata keeps the folded
+input contract (`edgebench.folded_mean`, `edgebench.folded_std`,
+`edgebench.input_range`, `edgebench.fold_border_correction`) and points
+`edgebench.source_model` at the folded FP32 file.
+
+Sanity numbers on ImageNetV2 eval-quick (1,000 images; **not the published
+evaluation**), ONNX Runtime CPU EP:
+
+| Model | INT8 external top-1 | INT8 folded top-1 | INT8 folded vs INT8 external | INT8 folded vs FP32 folded |
+|---|---|---|---|---|
+| MobileNetV2 | 58.9% | 56.8% | 83.6% | 82.5% |
+| ResNet-18 | 57.3% | 57.5% | 94.6% | 93.8% |
+| EfficientNet-Lite0 | 61.6% | 60.1% | 88.0% | 86.6% |
+
+The folded INT8 models are less faithful to FP32 than the external ones for
+MobileNetV2 and EfficientNet-Lite0 (INT8 vs FP32 agreement 92.6% and 95.2%
+for the external files). The reason is the border-correction `Add` between the
+first convolution and its activation: the quantizer can no longer merge the
+ReLU6 into the convolution's output range, so that tensor is quantized over its
+full pre-activation range (about [-43, 60] instead of [0, 6], a 17x coarser
+step). ResNet-18's pre-activation range is small, so it is barely affected.
+
+On the NPU (QNN HTP, strict mode), every folded INT8 batch-1 model creates a
+session and runs. Node counts are the external INT8 model's plus four (the
+`Add` and its QuantizeLinear/DequantizeLinear pairs): MobileNetV2 307 (303),
+ResNet-18 144 (140), EfficientNet-Lite0 289 (285).
+
+### Making and verifying them
+
+```powershell
+.\.venv\Scripts\python.exe scripts\fold_models.py
+.\.venv\Scripts\python.exe scripts\quantize_models.py --normalization folded
+
+.\.venv\Scripts\python.exe scripts\fold_models.py --verify
+.\.venv\Scripts\python.exe scripts\quantize_models.py --verify   # external and folded
+```
+
+`fold_models.py` refuses an FP32 file that does not match `models/manifest.json`,
+checks every folded file against the external one on 64 images (1e-4, top-1
+identical) and batch 4 and 8 against batch 1, and is deterministic: folding
+again gives byte-identical files.
+

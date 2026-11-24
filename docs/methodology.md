@@ -18,6 +18,13 @@ Preprocessing cost is deliberately excluded because it depends on the
 application, not on the execution provider; for MobileNetV2, normalizing one
 image in NumPy took 0.027 ms ([feasibility, section 7.2](feasibility.md#72-ai-hub-comparison)).
 
+Where normalization happens is part of the model, so every result records it
+as `model.normalization`: `external` (done before the model, not timed),
+`in_graph` (Sub/Div nodes inside the model, timed) or `folded` (merged into the
+first convolution, so the model takes [0, 1] input and the timed run includes
+whatever the fold adds). Only results with the same normalization placement
+measure the same work ([models.md](models.md#normalization-folded-models)).
+
 Session creation is measured separately (`timing.session_init.cold_ms`, one
 value per trial) and is never mixed into the iteration latencies.
 

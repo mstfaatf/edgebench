@@ -10,7 +10,9 @@ FP32 models are produced by `scripts/export_models.py`: one directory per
 model (`mobilenetv2/`, `resnet18/`, `efficientnet_lite0/`), one file per batch size
 (`<model>_fp32_b<batch>.onnx`). `manifest.json` (committed) lists the SHA256
 and size of every exported file; `export_models.py --verify` checks a fresh
-export against it. `scripts/quantize_models.py` writes the INT8 QDQ versions next to them
+export against it. `scripts/fold_models.py` writes normalization-folded FP32 variants
+(`<model>_fp32_folded_b<batch>.onnx`, input in [0, 1]), and
+`scripts/quantize_models.py` writes the INT8 QDQ versions of both next to them
 (`<model>_int8_b<batch>.onnx`, plus unpruned references
 `<model>_int8_unpruned_b<batch>.onnx`). The feasibility study's MobileNetV2
 INT8 variants (`mobilenetv2_int8qdq_*`, `unpruned/`) come from

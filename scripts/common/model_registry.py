@@ -157,8 +157,10 @@ def expected_files(models: list[str] | None = None, variant: str = "fp32",
 
 
 # Variants listed in the manifest: FP32 exports, pruned INT8 QDQ models, and the
-# unpruned quantizer output kept as a reference.
-VARIANTS = ("fp32", "int8", "int8_unpruned")
+# unpruned quantizer output kept as a reference; each also with the input
+# normalization folded into the first convolution (input in [0, 1]).
+VARIANTS = ("fp32", "int8", "int8_unpruned",
+            "fp32_folded", "int8_folded", "int8_folded_unpruned")
 
 
 def all_expected_files() -> list[str]:

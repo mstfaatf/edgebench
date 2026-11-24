@@ -510,6 +510,30 @@ TEST(OnnxInspectModels, Int8ModelsAreStaticQdq) {
         GTEST_SKIP() << "no INT8 models (run scripts/quantize_models.py, see docs/models.md)";
 }
 
+// Normalization-folded files (scripts/fold_models.py, quantize_models.py
+// --normalization folded): model.normalization comes out as "folded".
+TEST(OnnxInspectModels, FoldedModelsReportFoldedNormalization) {
+    int found = 0;
+    for (const std::string model : {"mobilenetv2", "resnet18", "efficientnet_lite0"}) {
+        for (const std::string variant : {"fp32_folded", "int8_folded"}) {
+            const fs::path path =
+                kSourceDir / "models" / model / (model + "_" + variant + "_b1.onnx");
+            if (!fs::is_regular_file(path))
+                continue;
+            ++found;
+            SCOPED_TRACE(path.filename().string());
+            const auto g = eb::inspect_onnx_file(path);
+            ASSERT_TRUE(g.ok());
+            EXPECT_EQ(eb::normalization_from_metadata(g.value()), "folded");
+            EXPECT_EQ(g.value().metadata.at("edgebench.input_range"), "[0, 1]");
+            EXPECT_EQ(eb::infer_precision(g.value()).stored_precision,
+                      variant == "fp32_folded" ? "fp32" : "int8");
+        }
+    }
+    if (found == 0)
+        GTEST_SKIP() << "no folded models (run scripts/fold_models.py, see docs/models.md)";
+}
+
 TEST(OnnxInspectModels, MobileNetV2) {
     const fs::path models = kSourceDir / "models" / "mobilenetv2";
     const fs::path fp32 = models / "mobilenetv2_fp32_b1.onnx";

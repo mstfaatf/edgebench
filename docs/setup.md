@@ -45,10 +45,10 @@ The ARM64 build is the one tagged `-arm64`. Confirm it with `sysconfig`:
 >
 > | Kind of script | Behaviour on a non-native interpreter | Examples |
 > |---|---|---|
-> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `scripts/export_models.py`, `scripts/export_mobilenetv2.py`, `scripts/quantize_models.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `scripts/npu_overhead.py`, `tools/qnn_rejection_check.py`, `tools/ort_probe/reference.py`, `tools/ort_probe/make_reference.py` |
+> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `scripts/export_models.py`, `scripts/export_mobilenetv2.py`, `scripts/fold_models.py`, `scripts/quantize_models.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `scripts/npu_overhead.py`, `tools/qnn_rejection_check.py`, `tools/ort_probe/reference.py`, `tools/ort_probe/make_reference.py` |
 > | Environment diagnostic | Runs and reports the problem prominently | `scripts/check_env.py` |
 > | Downloads and platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/get_data.py`, `scripts/get_aihub_baseline.py`, `scripts/validate_results.py`, `scripts/make_test_models.py`, `scripts/check_hygiene.py`, `scripts/coverage_summary.py`, and the tests in `scripts/tests/` |
-> | Shared modules in `scripts/common/` | Not checked themselves. `npu_harness.py` and `ort_qnn.py` load ONNX Runtime and are imported only by guarded scripts, after the check; `onnx_export.py` and `onnx_quantize.py` import torch, onnx and ONNX Runtime inside their functions and are used by `export_models.py`, `quantize_models.py` and their tests; the others (`preprocess.py`, `manifests.py`, `model_registry.py`, `accuracy.py`, `qnn_log.py`, `onnx_prune.py`, `qdq_inspect.py`, `results_io.py`, `cli.py`) do not | – |
+> | Shared modules in `scripts/common/` | Not checked themselves. `npu_harness.py` and `ort_qnn.py` load ONNX Runtime and are imported only by guarded scripts, after the check; `onnx_export.py` and `onnx_quantize.py` import torch, onnx and ONNX Runtime inside their functions and are used by `export_models.py`, `fold_models.py`, `quantize_models.py` and their tests; `onnx_fold.py` needs onnx and NumPy only; the others (`preprocess.py`, `manifests.py`, `model_registry.py`, `accuracy.py`, `qnn_log.py`, `onnx_prune.py`, `qdq_inspect.py`, `results_io.py`, `cli.py`) do not | – |
 >
 > The C++ build accepts ARM64 (the measurement build) and x64 (CPU only, for
 > continuous integration; it reports emulation at run time), and rejects
@@ -242,6 +242,16 @@ calibration on the 200 calibration images): `models/<model>/<model>_int8_b<batch
 pruned, plus the unpruned reference `<model>_int8_unpruned_b<batch>.onnx`, all
 listed in `models/manifest.json`. `--verify` re-quantizes and compares. Recipe,
 metadata and checks are in [models.md](models.md#int8-qdq-models).
+
+Optional normalization-folded variants (mean/std folded into the first
+convolution; the models take [0, 1] input):
+
+```powershell
+.\.venv\Scripts\python.exe scripts\fold_models.py
+.\.venv\Scripts\python.exe scripts\quantize_models.py --normalization folded
+```
+
+See [models.md](models.md#normalization-folded-models).
 
 The feasibility study's MobileNetV2 variants (used by `eval_cpu.py`,
 `npu_check.py`, `compare_aihub.py` and `tools/ort_probe/make_reference.py`) come

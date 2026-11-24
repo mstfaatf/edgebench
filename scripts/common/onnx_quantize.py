@@ -45,6 +45,11 @@ from common.model_registry import (
 
 INT8 = "int8"
 INT8_UNPRUNED = "int8_unpruned"
+INT8_FOLDED = "int8_folded"
+INT8_FOLDED_UNPRUNED = "int8_folded_unpruned"
+# FP32 source variant -> (pruned, unpruned) INT8 variants.
+INT8_VARIANTS = {"fp32": (INT8, INT8_UNPRUNED),
+                 "fp32_folded": (INT8_FOLDED, INT8_FOLDED_UNPRUNED)}
 IMAGENETTE_ROOT = DATA_DIR / "imagenette" / "imagenette2-320"
 QUANT_PREFIX = META_PREFIX + "quant."
 
@@ -52,7 +57,10 @@ QUANT_PREFIX = META_PREFIX + "quant."
 # and so stay valid for the quantized file.
 CARRIED_KEYS = ("model", "batch_size", "weights", "weights_sha256", "normalization",
                 "input_preprocessing", "exporter", "torch_version", "torchvision_version",
-                "onnx_version", "timm_version")
+                "onnx_version", "timm_version",
+                # normalization-folded sources only (see common/onnx_fold.py)
+                "input_range", "folded_mean", "folded_std", "fold_border_correction",
+                "fold_first_conv")
 
 
 def calibration_entries() -> list:
@@ -63,7 +71,7 @@ def calibration_images_present() -> bool:
     return (IMAGENETTE_ROOT / ".extracted").is_file()
 
 
-def _reader(spec: ModelSpec, entries: list) -> Any:
+def _reader(spec: ModelSpec, entries: list, normalized: bool) -> Any:
     from onnxruntime.quantization import CalibrationDataReader
 
     from common.preprocess import load_image
@@ -78,7 +86,8 @@ def _reader(spec: ModelSpec, entries: list) -> Any:
             e = next(self._it, None)
             if e is None:
                 return None
-            return {INPUT_NAME: load_image(IMAGENETTE_ROOT / e.path, mean=spec.mean, std=spec.std)}
+            return {INPUT_NAME: load_image(IMAGENETTE_ROOT / e.path, normalized=normalized,
+                                           mean=spec.mean, std=spec.std)}
 
     return ManifestReader()
 
@@ -116,7 +125,7 @@ def quant_metadata(spec: ModelSpec, source_meta: dict[str, str], variant: str, p
         QUANT_PREFIX + "tool": f"onnxruntime.quantization {ort.__version__} "
                                "(qnn_preprocess_model, get_qnn_qdq_config, quantize_static)",
         QUANT_PREFIX + "qnn_preprocess": "applied" if preprocess_changed else "no changes",
-        QUANT_PREFIX + "pruned": "true" if variant == INT8 else "false",
+        QUANT_PREFIX + "pruned": "true" if variant in (INT8, INT8_FOLDED) else "false",
     })
     return dict(sorted(meta.items()))
 
@@ -128,13 +137,18 @@ def _set_metadata(proto: Any, metadata: dict[str, str]) -> None:
     onnx.helper.set_model_props(proto, metadata)
 
 
-def quantize(spec: ModelSpec, batches: list[int],
-             calibration_count: int | None = None) -> dict[int, dict[str, Any]]:
+def quantize(spec: ModelSpec, batches: list[int], calibration_count: int | None = None,
+             source_variant: str = "fp32") -> dict[int, dict[str, Any]]:
     """Quantize the model's FP32 files; returns per batch the unpruned and pruned bytes.
 
-    The batch-1 FP32 file is always calibrated (it provides the ranges for every
-    batch size), even when batch 1 is not requested.
+    ``source_variant`` is ``fp32`` (external normalization: calibration images are
+    normalized with the model's mean/std) or ``fp32_folded`` (normalization folded
+    into the model: calibration images stay in [0, 1]). The batch-1 FP32 file is
+    always calibrated (it provides the ranges for every batch size), even when
+    batch 1 is not requested.
     """
+    pruned_variant, unpruned_variant = INT8_VARIANTS[source_variant]
+    normalized_input = source_variant == "fp32"
     import onnx
     from onnxruntime.quantization import QuantType, quantize_static
     from onnxruntime.quantization.execution_providers.qnn import (
@@ -152,10 +166,11 @@ def quantize(spec: ModelSpec, batches: list[int],
         tmp = Path(tmp_dir)
         cache = tmp / "calibration_ranges.json"
         for batch in [1] + sorted(b for b in set(batches) if b != 1):
-            source_rel = relative_path(spec.name, "fp32", batch)
+            source_rel = relative_path(spec.name, source_variant, batch)
             fp32 = MODELS_DIR / source_rel
             if not fp32.is_file():
-                raise FileNotFoundError(f"{fp32} not found; run scripts/export_models.py first")
+                raise FileNotFoundError(f"{fp32} not found; run scripts/export_models.py "
+                                        "(and scripts/fold_models.py for folded models) first")
             # The quantizer gets the FP32 graph without metadata_props: the INT8
             # metadata is written from the source file afterwards, and
             # qnn_preprocess_model (ONNX Runtime 1.32) fails on a model that has
@@ -169,7 +184,7 @@ def quantize(spec: ModelSpec, batches: list[int],
             source = preprocessed if changed else stripped
             config = get_qnn_qdq_config(
                 str(source),
-                _reader(spec, entries) if batch == 1 else None,
+                _reader(spec, entries, normalized_input) if batch == 1 else None,
                 per_channel=True,
                 weight_type=QuantType.QInt8,
             )
@@ -201,7 +216,7 @@ def quantize(spec: ModelSpec, batches: list[int],
             unpruned = onnx.load(str(out))
             pruned = onnx.load(str(out))
             report = prune(pruned)
-            for proto, variant in ((unpruned, INT8_UNPRUNED), (pruned, INT8)):
+            for proto, variant in ((unpruned, unpruned_variant), (pruned, pruned_variant)):
                 _set_metadata(proto, quant_metadata(spec, source_meta, variant, proto, source_rel,
                                                     source_sha, changed, len(entries)))
                 onnx.checker.check_model(proto, full_check=True)
