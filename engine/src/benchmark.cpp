@@ -292,6 +292,7 @@ BenchmarkResult begin_result(const RunConfig& config) {
         r.model.opset = g.opset;
         r.model.ir_version = g.ir_version;
         r.model.precision = infer_precision(g);
+        r.model.normalization = normalization_from_metadata(g);
         if (!g.producer_name.empty())
             r.model.export_tool =
                 g.producer_name + (g.producer_version.empty() ? "" : " " + g.producer_version);

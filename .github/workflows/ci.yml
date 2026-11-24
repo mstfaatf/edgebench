@@ -44,6 +44,7 @@ jobs:
           scripts/tests/test_check_hygiene.py
           scripts/tests/test_coverage_summary.py
           scripts/tests/test_manifests.py
+          scripts/tests/test_export_models.py
 
       - name: Validate example and published results
         run: python scripts/validate_results.py --strict docs/examples benchmarks/results/published

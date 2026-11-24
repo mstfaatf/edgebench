@@ -45,10 +45,10 @@ The ARM64 build is the one tagged `-arm64`. Confirm it with `sysconfig`:
 >
 > | Kind of script | Behaviour on a non-native interpreter | Examples |
 > |---|---|---|
-> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `scripts/export_mobilenetv2.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `scripts/npu_overhead.py`, `tools/qnn_rejection_check.py`, `tools/ort_probe/reference.py`, `tools/ort_probe/make_reference.py` |
+> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `scripts/export_models.py`, `scripts/export_mobilenetv2.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `scripts/npu_overhead.py`, `tools/qnn_rejection_check.py`, `tools/ort_probe/reference.py`, `tools/ort_probe/make_reference.py` |
 > | Environment diagnostic | Runs and reports the problem prominently | `scripts/check_env.py` |
 > | Downloads and platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/get_data.py`, `scripts/get_aihub_baseline.py`, `scripts/validate_results.py`, `scripts/make_test_models.py`, `scripts/check_hygiene.py`, `scripts/coverage_summary.py`, and the tests in `scripts/tests/` |
-> | Shared modules in `scripts/common/` | Not checked themselves. `npu_harness.py` and `ort_qnn.py` load ONNX Runtime and are imported only by guarded scripts, after the check; the others (`preprocess.py`, `manifests.py`, `accuracy.py`, `qnn_log.py`, `onnx_prune.py`, `qdq_inspect.py`, `results_io.py`, `cli.py`) do not | – |
+> | Shared modules in `scripts/common/` | Not checked themselves. `npu_harness.py` and `ort_qnn.py` load ONNX Runtime and are imported only by guarded scripts, after the check; `onnx_export.py` imports torch, onnx and ONNX Runtime inside its functions and is used by `export_models.py` and its tests; the others (`preprocess.py`, `manifests.py`, `model_registry.py`, `accuracy.py`, `qnn_log.py`, `onnx_prune.py`, `qdq_inspect.py`, `results_io.py`, `cli.py`) do not | – |
 >
 > The C++ build accepts ARM64 (the measurement build) and x64 (CPU only, for
 > continuous integration; it reports emulation at run time), and rejects
@@ -210,20 +210,23 @@ normalization folded into their first convolution. The tests check the output
 against torchvision's transforms (synthetic images, and ImageNetV2 images when
 downloaded) and pin its SHA256 for a fixed input.
 
-### 2. Export the FP32 model
+### 2. Export the FP32 models
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\export_mobilenetv2.py
+.\.venv\Scripts\python.exe scripts\export_models.py
 ```
 
-Exports torchvision MobileNetV2 (`IMAGENET1K_V2` weights) to
-`models/mobilenetv2/mobilenetv2_fp32_b1.onnx`: opset 17, fixed input
-`input` [1, 3, 224, 224], output `logits` [1, 1000]. The script checks the
-model with `onnx.checker`, compares it with PyTorch on an eval image, and checks
-that an input filled with 0.5 (the input of `tools/ort_probe/reference.py` and
-`ort_probe --fill 0.5`) gives top-1 class
-677. It writes a JSON sidecar (`.json`, same name) with the export settings and
-the model's SHA256.
+Exports torchvision MobileNetV2 (`IMAGENET1K_V2`) and ResNet-18
+(`IMAGENET1K_V1`) to fixed-shape FP32 ONNX files, one per batch size (1, 4, 8):
+`models/<model>/<model>_fp32_b<batch>.onnx`, opset 17, input `input`
+[batch, 3, 224, 224] (already normalized), output `logits` [batch, 1000]. The
+weights are checked against pinned SHA256s; every file is checked with
+`onnx.checker` and shape inference, compared with PyTorch on ImageNetV2 images
+(from step 1), and listed with its SHA256 in the committed `models/manifest.json`.
+`--verify` re-exports and compares with the manifest. Details, tolerances and
+the ONNX metadata are in [models.md](models.md).
+`scripts\export_mobilenetv2.py` exports only `mobilenetv2_fp32_b1.onnx`, the
+input of the next step.
 
 ### 3. Quantize to INT8 QDQ
 
@@ -556,7 +559,7 @@ the `unit` and `ort` labels only, never `models` or `npu`.
 
 | Job | Runner | What it does |
 |---|---|---|
-| `python (validator, hygiene)` | `ubuntu-latest`, Python 3.12 | Installs `requirements-ci.txt` (jsonschema and pytest, pinned); runs the validator, hygiene-check, coverage-summary and dataset-manifest tests; validates `docs/examples/` and `benchmarks/results/published/` with `--strict`; runs the hygiene check |
+| `python (validator, hygiene)` | `ubuntu-latest`, Python 3.12 | Installs `requirements-ci.txt` (jsonschema and pytest, pinned); runs the validator, hygiene-check, coverage-summary, dataset-manifest and model-registry tests; validates `docs/examples/` and `benchmarks/results/published/` with `--strict`; runs the hygiene check |
 | `windows-x64` | `windows-latest` | MSVC x64 environment; fetches the x64 ONNX Runtime; `x64` preset, Release, `/W4 /WX`; `ctest -L "unit\|ort"`; uploads the CTest log on failure |
 | `windows-arm64` | `windows-11-arm` | The same for ARM64 (`arm64-ninja` preset); the QNN files are bundled, but there is no NPU, so no `npu` tests run |
 | `coverage (x64)` | `windows-latest` | x64 Debug build; the `unit` and `ort` tests under [OpenCppCoverage](https://github.com/OpenCppCoverage/OpenCppCoverage) 0.9.9.0 (installer pinned by SHA256), including child processes, filtered to `engine/src`; uploads the HTML and Cobertura report (`coverage-x64` artifact) and prints per-file line coverage in the job summary. Report only, no threshold |
@@ -571,7 +574,7 @@ To run the same checks locally:
 
 ```powershell
 # python job (any OS; with the full .venv or a venv with requirements-ci.txt)
-python -m pytest scripts/tests/test_validate_results.py scripts/tests/test_check_hygiene.py scripts/tests/test_coverage_summary.py scripts/tests/test_manifests.py
+python -m pytest scripts/tests/test_validate_results.py scripts/tests/test_check_hygiene.py scripts/tests/test_coverage_summary.py scripts/tests/test_manifests.py scripts/tests/test_export_models.py
 python scripts/validate_results.py --strict docs/examples benchmarks/results/published
 python scripts/check_hygiene.py
 

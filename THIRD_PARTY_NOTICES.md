@@ -57,7 +57,8 @@ dependencies, is in [requirements.txt](requirements.txt).
 
 | Model | Used by | License | Source |
 |---|---|---|---|
-| MobileNetV2, torchvision weights `MobileNet_V2_Weights.IMAGENET1K_V2` | `scripts/export_mobilenetv2.py` | torchvision code: BSD-3-Clause; weights trained on ImageNet: see upstream | <https://pytorch.org/vision/stable/models/generated/torchvision.models.mobilenet_v2.html> |
+| MobileNetV2, torchvision weights `MobileNet_V2_Weights.IMAGENET1K_V2` | `scripts/export_models.py` | torchvision code: BSD-3-Clause; weights trained on ImageNet: see upstream | <https://pytorch.org/vision/stable/models/generated/torchvision.models.mobilenet_v2.html> |
+| ResNet-18, torchvision weights `ResNet18_Weights.IMAGENET1K_V1` | `scripts/export_models.py` | torchvision code: BSD-3-Clause; weights trained on ImageNet: see upstream | <https://pytorch.org/vision/stable/models/generated/torchvision.models.resnet18.html> |
 | Qualcomm AI Hub MobileNet-v2 (float and w8a8 ONNX assets, AI Hub Models 0.67.0) | `scripts/get_aihub_baseline.py` | Model card: Apache-2.0; `qai_hub_models`: BSD-3-Clause | <https://huggingface.co/qualcomm/MobileNet-v2>, <https://github.com/qualcomm/ai-hub-models> |
 
 Exported and quantized models are written to `models/`, which is not committed.

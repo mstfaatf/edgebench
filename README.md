@@ -60,8 +60,9 @@ that check written result files with the Python validator skip that check, and
 the `schema` test is not added; configure again after creating it.
 
 To benchmark a model you need an ONNX file with fixed input shapes. The
-[setup guide](docs/setup.md#preparing-data-and-models) creates MobileNetV2 FP32
-and INT8 models with a Python environment (`scripts\export_mobilenetv2.py`,
+[setup guide](docs/setup.md#preparing-data-and-models) creates FP32 models
+(MobileNetV2 and ResNet-18, batch sizes 1, 4 and 8; see [docs/models.md](docs/models.md))
+and INT8 MobileNetV2 with a Python environment (`scripts\export_models.py`,
 `scripts\quantize_qnn.py`). Then:
 
 ```powershell
@@ -112,6 +113,8 @@ hygiene tests on Linux. See [Test labels](docs/setup.md#test-labels) and
 
 - [docs/methodology.md](docs/methodology.md): what is timed, trial structure,
   statistics, recorded system state, and what EdgeBench does not claim
+- [docs/models.md](docs/models.md): supported models, weights, export settings
+  and checks; the models expect normalized input
 - [docs/cli.md](docs/cli.md): `edgebench` commands, options, output and exit
   codes
 - [docs/results-schema.md](docs/results-schema.md): result file format (JSON

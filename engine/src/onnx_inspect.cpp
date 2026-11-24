@@ -221,6 +221,19 @@ Result<OnnxGraphSummary> inspect_onnx(std::span<const std::byte> model_bytes) {
             s.producer_version = model.string();
         } else if (field == 7 && wire == 2) {
             graph = model.bytes();
+        } else if (field == 14 && wire == 2) {  // StringStringEntryProto: key (1), value (2)
+            Reader entry(model.bytes());
+            std::string key, value;
+            std::uint32_t f = 0, w = 0;
+            while (entry.next(f, w)) {
+                if (f == 1 && w == 2)
+                    key = entry.string();
+                else if (f == 2 && w == 2)
+                    value = entry.string();
+                else
+                    entry.skip(w);
+            }
+            s.metadata[key] = value;
         } else if (field == 8 && wire == 2) {  // OperatorSetIdProto: domain (1), version (2)
             Reader opset(model.bytes());
             std::string domain;
@@ -310,6 +323,17 @@ Result<OnnxGraphSummary> inspect_onnx_file(const std::filesystem::path& path) {
                      "error while reading " + path_to_utf8(path)};
     }
     return inspect_onnx(data);
+}
+
+std::optional<std::string> normalization_from_metadata(const OnnxGraphSummary& graph) {
+    const auto it = graph.metadata.find(std::string(kNormalizationMetadataKey));
+    if (it == graph.metadata.end())
+        return std::nullopt;
+    for (std::string_view known : {"external", "in_graph", "folded"}) {
+        if (it->second == known)
+            return it->second;
+    }
+    return std::nullopt;
 }
 
 ModelPrecision infer_precision(const OnnxGraphSummary& g) {

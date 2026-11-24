@@ -138,7 +138,7 @@ json model_json(const BenchmarkResult& r) {
           {"calibration", nullptr},
           {"tool", nullptr}}},
         {"precision_notes", nullptr},
-        {"normalization", nullptr},
+        {"normalization", opt(m.normalization)},
     };
 }
 

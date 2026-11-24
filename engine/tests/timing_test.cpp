@@ -330,6 +330,57 @@ TEST(OnnxInspect, Fp16Weights) {
     EXPECT_EQ(eb::infer_precision(g).stored_precision, "mixed");
 }
 
+namespace {
+
+// Protobuf length-delimited field (lengths < 128 only).
+std::string pb_bytes(int field, const std::string& payload) {
+    return std::string(1, static_cast<char>((field << 3) | 2)) +
+           static_cast<char>(payload.size()) + payload;
+}
+
+// A minimal ModelProto: ir_version 8, a graph with only a name, and metadata_props.
+std::string model_with_metadata(const std::vector<std::pair<std::string, std::string>>& props) {
+    std::string m = std::string{'\x08', '\x08'} + pb_bytes(7, pb_bytes(2, "g"));
+    for (const auto& [key, value] : props)
+        m += pb_bytes(14, pb_bytes(1, key) + pb_bytes(2, value));
+    return m;
+}
+
+eb::OnnxGraphSummary inspect_string(const std::string& bytes) {
+    auto r = eb::inspect_onnx(std::as_bytes(std::span(bytes.data(), bytes.size())));
+    EXPECT_TRUE(r.ok());
+    return r.ok() ? r.value() : eb::OnnxGraphSummary{};
+}
+
+}  // namespace
+
+TEST(OnnxInspect, ReadsMetadataProps) {
+    const auto g = inspect_string(model_with_metadata(
+        {{"edgebench.normalization", "external"}, {"edgebench.model", "mobilenetv2"}}));
+    EXPECT_EQ(g.ir_version, 8);
+    EXPECT_EQ(g.metadata.size(), 2u);
+    EXPECT_EQ(g.metadata.at("edgebench.model"), "mobilenetv2");
+    EXPECT_EQ(eb::normalization_from_metadata(g), "external");
+}
+
+TEST(OnnxInspect, NormalizationOnlyFromKnownValues) {
+    for (const std::string v : {"external", "in_graph", "folded"}) {
+        EXPECT_EQ(eb::normalization_from_metadata(
+                      inspect_string(model_with_metadata({{"edgebench.normalization", v}}))),
+                  v);
+    }
+    EXPECT_FALSE(eb::normalization_from_metadata(
+                     inspect_string(model_with_metadata({{"edgebench.normalization", "yes"}})))
+                     .has_value());
+    EXPECT_FALSE(eb::normalization_from_metadata(inspect_string(model_with_metadata({})))
+                     .has_value());
+    // The fixture has no metadata at all.
+    const auto f = eb::inspect_onnx_file(kFixtures / "fixed_float32.onnx");
+    ASSERT_TRUE(f.ok());
+    EXPECT_TRUE(f.value().metadata.empty());
+    EXPECT_FALSE(eb::normalization_from_metadata(f.value()).has_value());
+}
+
 TEST(OnnxInspect, RejectsNonOnnxBytes) {
     const std::string junk = "this is not an ONNX model";
     const auto r = eb::inspect_onnx(std::as_bytes(std::span(junk.data(), junk.size())));

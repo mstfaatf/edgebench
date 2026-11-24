@@ -369,7 +369,10 @@ Within each new object every key is required.
   `model.normalization` says where normalization lives: `external` (before the
   model, not timed), `in_graph` (Sub/Div nodes in the model, timed) or `folded`
   (merged into the first layer's weights). Comparing an `external` model with an
-  `in_graph` one compares different amounts of work.
+  `in_graph` one compares different amounts of work. `edgebench run` takes it
+  from the model file's ONNX metadata key `edgebench.normalization`, which
+  `scripts/export_models.py` writes ([models.md](models.md)); for files without
+  it, the field is null.
 - **Profiling and timing are kept apart.** Profiling changes what it measures:
   QNN profiling adds milliseconds of host work per inference, so wall-clock
   times from a profiled session are not representative. `config.profiling`

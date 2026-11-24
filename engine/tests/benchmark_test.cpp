@@ -437,6 +437,43 @@ TEST(ResultFiles, FailedLoadResultHasNoRuntime) {
     EXPECT_EQ(validate(written.value().result_file).exit_code, 0u);
 }
 
+// Every file from scripts/export_models.py: concrete shapes, batch fixed per
+// file, FP32, opset 17, normalization recorded as external.
+TEST(OnnxInspectModels, ExportedFp32ModelsHaveFixedShapes) {
+    int found = 0;
+    for (const std::string model : {"mobilenetv2", "resnet18"}) {
+        for (const std::int64_t batch : {1, 4, 8}) {
+            const fs::path path = kSourceDir / "models" / model /
+                                  (model + "_fp32_b" + std::to_string(batch) + ".onnx");
+            if (!fs::is_regular_file(path))
+                continue;
+            ++found;
+            SCOPED_TRACE(path.filename().string());
+            const auto g = eb::inspect_onnx_file(path);
+            ASSERT_TRUE(g.ok());
+            const eb::OnnxGraphSummary& s = g.value();
+            EXPECT_EQ(s.opset, 17);
+            EXPECT_EQ(eb::infer_precision(s).stored_precision, "fp32");
+            ASSERT_EQ(s.inputs.size(), 1u);
+            ASSERT_EQ(s.outputs.size(), 1u);
+            EXPECT_EQ(s.inputs[0].shape, (std::vector<std::int64_t>{batch, 3, 224, 224}));
+            EXPECT_EQ(s.outputs[0].shape, (std::vector<std::int64_t>{batch, 1000}));
+            for (const auto* tensors : {&s.inputs, &s.outputs}) {
+                for (const eb::TensorInfo& t : *tensors) {
+                    for (std::size_t d = 0; d < t.shape.size(); ++d) {
+                        EXPECT_GT(t.shape[d], 0) << t.name << " dimension " << d;
+                        EXPECT_TRUE(t.dim_params[d].empty()) << t.name << " dimension " << d;
+                    }
+                }
+            }
+            EXPECT_EQ(eb::normalization_from_metadata(s), "external");
+            EXPECT_EQ(s.metadata.at("edgebench.batch_size"), std::to_string(batch));
+        }
+    }
+    if (found == 0)
+        GTEST_SKIP() << "no exported models (run scripts/export_models.py, see docs/models.md)";
+}
+
 TEST(OnnxInspectModels, MobileNetV2) {
     const fs::path models = kSourceDir / "models" / "mobilenetv2";
     const fs::path fp32 = models / "mobilenetv2_fp32_b1.onnx";

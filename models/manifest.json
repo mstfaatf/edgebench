@@ -1,0 +1,40 @@
+{
+  "description": "SHA256 and size of every model file produced by scripts/export_models.py with the tool versions below. Paths are relative to models/.",
+  "tools": {
+    "onnx": "1.23.2",
+    "torch": "2.13.0+cpu",
+    "torchvision": "0.28.0+8fb8771"
+  },
+  "files": [
+    {
+      "file": "mobilenetv2/mobilenetv2_fp32_b1.onnx",
+      "sha256": "3b80d618151c020c1bcce93085b7a1a2d6aabde15612b462db0d2b9f07867e95",
+      "size_bytes": 13993027
+    },
+    {
+      "file": "mobilenetv2/mobilenetv2_fp32_b4.onnx",
+      "sha256": "d4661e82b717734669a6fab11ba6f2aba8d10ee053078a6215ffc3c23804bda4",
+      "size_bytes": 13993027
+    },
+    {
+      "file": "mobilenetv2/mobilenetv2_fp32_b8.onnx",
+      "sha256": "2954b6c5cba4d7526d67396c6c4ddf26aa59163013a586723941adecab40195a",
+      "size_bytes": 13993027
+    },
+    {
+      "file": "resnet18/resnet18_fp32_b1.onnx",
+      "sha256": "2e0f2425e8293c5479a79703b502fd4ad400559c6c23acb904cd5367fb8051fe",
+      "size_bytes": 46749308
+    },
+    {
+      "file": "resnet18/resnet18_fp32_b4.onnx",
+      "sha256": "bfd1db53cd168bdac90acb2bae341b06be92b1a93cd4edc8680afb73da4f7245",
+      "size_bytes": 46749308
+    },
+    {
+      "file": "resnet18/resnet18_fp32_b8.onnx",
+      "sha256": "043aee989ef7a03db79cea5eeddea55d9bb6e7b0a643b55965024dbd54b0008e",
+      "size_bytes": 46749308
+    }
+  ]
+}

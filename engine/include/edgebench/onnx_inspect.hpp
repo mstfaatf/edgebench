@@ -13,6 +13,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "edgebench/result.hpp"
@@ -31,6 +32,8 @@ struct OnnxGraphSummary {
     /// Graph inputs (initializers excluded) and outputs as declared in the file,
     /// so the model's tensors are known even when no session can be created.
     std::vector<TensorInfo> inputs, outputs;
+    /// The model's metadata_props (key -> value; the last entry wins for a repeated key).
+    std::map<std::string, std::string> metadata;
 };
 
 /// What the file says about precision and quantization, in results-schema terms.
@@ -46,6 +49,14 @@ struct ModelPrecision {
 /// not one.
 Result<OnnxGraphSummary> inspect_onnx(std::span<const std::byte> model_bytes);
 Result<OnnxGraphSummary> inspect_onnx_file(const std::filesystem::path& path);
+
+/// Metadata key EdgeBench's export pipeline uses to say where input normalization
+/// happens (results schema model.normalization).
+inline constexpr std::string_view kNormalizationMetadataKey = "edgebench.normalization";
+
+/// model.normalization from the file's metadata: "external", "in_graph" or
+/// "folded"; nullopt if the key is absent or holds another value.
+std::optional<std::string> normalization_from_metadata(const OnnxGraphSummary& graph);
 
 /// Precision and quantization inferred from the graph: QuantizeLinear /
 /// DequantizeLinear nodes make a QDQ model (static, or dynamic with
