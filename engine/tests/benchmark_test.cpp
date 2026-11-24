@@ -441,7 +441,7 @@ TEST(ResultFiles, FailedLoadResultHasNoRuntime) {
 // file, FP32, opset 17, normalization recorded as external.
 TEST(OnnxInspectModels, ExportedFp32ModelsHaveFixedShapes) {
     int found = 0;
-    for (const std::string model : {"mobilenetv2", "resnet18"}) {
+    for (const std::string model : {"mobilenetv2", "resnet18", "efficientnet_lite0"}) {
         for (const std::int64_t batch : {1, 4, 8}) {
             const fs::path path = kSourceDir / "models" / model /
                                   (model + "_fp32_b" + std::to_string(batch) + ".onnx");

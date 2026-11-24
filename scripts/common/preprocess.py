@@ -10,7 +10,8 @@ The transform is the standard torchvision ImageNet evaluation pipeline:
 2. resize so the shorter side is 256 (bilinear, PIL),
 3. center crop 224x224,
 4. scale to [0, 1],
-5. normalize with the ImageNet mean/std,
+5. normalize with a per-channel mean/std (ImageNet by default; per model in
+   ``common.model_registry``),
 6. lay out as NCHW float32 with a leading batch dimension of 1.
 
 It is implemented with PIL and NumPy only (no torch import), and matches
@@ -39,16 +40,25 @@ IMAGENETTE_ROOT = DATA_DIR / "imagenette" / "imagenette2-320"
 SPLITS_DIR = DATA_DIR / "imagenette" / "splits"
 CLASSES_JSON = Path(__file__).resolve().parent / "imagenette_classes.json"
 
-PREPROCESS_DESCRIPTION = {
-    "resize_shorter_side": RESIZE_SIZE,
-    "interpolation": "bilinear (PIL)",
-    "center_crop": CROP_SIZE,
-    "scale": "1/255",
-    "mean": list(MEAN),
-    "std": list(STD),
-    "layout": "NCHW",
-    "dtype": "float32",
-}
+
+
+def preprocess_description(mean: tuple[float, ...] = MEAN,
+                           std: tuple[float, ...] = STD) -> dict:
+    """The transform as a JSON-ready dict, for sidecars and model metadata."""
+    return {
+        "resize_shorter_side": RESIZE_SIZE,
+        "interpolation": "bilinear (PIL)",
+        "center_crop": CROP_SIZE,
+        "scale": "1/255",
+        "mean": list(mean),
+        "std": list(std),
+        "layout": "NCHW",
+        "dtype": "float32",
+    }
+
+
+# With the ImageNet mean/std, used by most torchvision models.
+PREPROCESS_DESCRIPTION = preprocess_description()
 
 
 def _resize_shorter_side(img: Image.Image, size: int) -> Image.Image:
@@ -83,11 +93,16 @@ def preprocess_image_unit(img: Image.Image) -> np.ndarray:
     return np.ascontiguousarray(x.transpose(2, 0, 1)[np.newaxis], dtype=np.float32)
 
 
-def normalize(x_unit: np.ndarray) -> np.ndarray:
-    """Step 5: ImageNet mean/std normalization of a [1, 3, H, W] array in [0, 1]."""
-    mean = np.asarray(MEAN, dtype=np.float32).reshape(1, 3, 1, 1)
-    std = np.asarray(STD, dtype=np.float32).reshape(1, 3, 1, 1)
-    return np.ascontiguousarray((x_unit - mean) / std, dtype=np.float32)
+def normalize(x_unit: np.ndarray, mean: tuple[float, ...] = MEAN,
+              std: tuple[float, ...] = STD) -> np.ndarray:
+    """Step 5: per-channel mean/std normalization of an [N, 3, H, W] array in [0, 1].
+
+    The default is the ImageNet mean/std. Models trained with other constants
+    (e.g. 0.5/0.5) must pass their own: ``common.model_registry`` holds them per model.
+    """
+    mean_arr = np.asarray(mean, dtype=np.float32).reshape(1, 3, 1, 1)
+    std_arr = np.asarray(std, dtype=np.float32).reshape(1, 3, 1, 1)
+    return np.ascontiguousarray((x_unit - mean_arr) / std_arr, dtype=np.float32)
 
 
 def preprocess_image(img: Image.Image) -> np.ndarray:
@@ -95,13 +110,16 @@ def preprocess_image(img: Image.Image) -> np.ndarray:
     return normalize(preprocess_image_unit(img))
 
 
-def load_image(path: str | Path, *, normalized: bool = True) -> np.ndarray:
+def load_image(path: str | Path, *, normalized: bool = True, mean: tuple[float, ...] = MEAN,
+               std: tuple[float, ...] = STD) -> np.ndarray:
     """Load an image file and preprocess it to a [1, 3, 224, 224] float32 array.
 
-    With ``normalized=False`` the array is in [0, 1] (no mean/std normalization).
+    With ``normalized=False`` the array is in [0, 1] (no mean/std normalization);
+    otherwise ``mean``/``std`` (default ImageNet) are applied.
     """
     with Image.open(path) as img:
-        return preprocess_image(img) if normalized else preprocess_image_unit(img)
+        unit = preprocess_image_unit(img)
+    return normalize(unit, mean, std) if normalized else unit
 
 
 @dataclass(frozen=True)

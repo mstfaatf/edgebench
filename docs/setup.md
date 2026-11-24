@@ -216,10 +216,12 @@ downloaded) and pin its SHA256 for a fixed input.
 .\.venv\Scripts\python.exe scripts\export_models.py
 ```
 
-Exports torchvision MobileNetV2 (`IMAGENET1K_V2`) and ResNet-18
-(`IMAGENET1K_V1`) to fixed-shape FP32 ONNX files, one per batch size (1, 4, 8):
+Exports MobileNetV2 (torchvision `IMAGENET1K_V2`), ResNet-18 (torchvision
+`IMAGENET1K_V1`) and EfficientNet-Lite0 (timm `efficientnet_lite0.ra_in1k`) to
+fixed-shape FP32 ONNX files, one per batch size (1, 4, 8):
 `models/<model>/<model>_fp32_b<batch>.onnx`, opset 17, input `input`
-[batch, 3, 224, 224] (already normalized), output `logits` [batch, 1000]. The
+[batch, 3, 224, 224] (already normalized with the model's own mean/std),
+output `logits` [batch, 1000]. The
 weights are checked against pinned SHA256s; every file is checked with
 `onnx.checker` and shape inference, compared with PyTorch on ImageNetV2 images
 (from step 1), and listed with its SHA256 in the committed `models/manifest.json`.

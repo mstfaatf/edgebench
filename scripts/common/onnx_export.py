@@ -1,7 +1,7 @@
-"""Export torchvision classifiers to fixed-shape ONNX, and check the result.
+"""Export torchvision and timm classifiers to fixed-shape ONNX, and check the result.
 
 Used by ``scripts/export_models.py`` and by ``scripts/tests/test_export_models.py``.
-Imports torch, torchvision, onnx and onnxruntime lazily, inside the functions,
+Imports torch, torchvision, timm, onnx and onnxruntime lazily, inside the functions,
 so importing this module is cheap.
 
 What an exported file guarantees:
@@ -9,9 +9,10 @@ What an exported file guarantees:
 - every graph input and output has concrete dimensions; the batch dimension is
   fixed per file;
 - input ``input`` float32 [batch, 3, 224, 224] is the output of
-  ``common.preprocess.load_image`` (ImageNet mean/std already applied:
-  ``edgebench.normalization`` = ``external`` in the ONNX metadata);
-- output ``logits`` float32 [batch, 1000], raw logits in torchvision class order;
+  ``common.preprocess.load_image`` with the model's own mean/std from the
+  registry already applied (``edgebench.normalization`` = ``external``, and the
+  constants in ``edgebench.input_preprocessing``, in the ONNX metadata);
+- output ``logits`` float32 [batch, 1000], raw logits in ImageNet-1k class order;
 - exporting again with the same tool versions gives a byte-identical file.
 """
 
@@ -34,7 +35,7 @@ from common.model_registry import (
     OUTPUT_NAME,
     ModelSpec,
 )
-from common.preprocess import PREPROCESS_DESCRIPTION
+from common.preprocess import preprocess_description
 
 # Largest accepted absolute difference between two FP32 logit vectors for the
 # same image (ONNX Runtime CPU vs PyTorch, or batch N vs batch 1).
@@ -65,36 +66,46 @@ def sha256_file(path: Path) -> str:
 
 def tool_versions() -> dict[str, str]:
     import onnx
+    import timm
     import torch
     import torchvision
 
-    return {"onnx": onnx.__version__, "torch": torch.__version__,
+    return {"onnx": onnx.__version__, "timm": timm.__version__, "torch": torch.__version__,
             "torchvision": torchvision.__version__}
 
 
 # --- weights -----------------------------------------------------------------
 
 
-def weights_path(spec: ModelSpec) -> Path:
-    import torch
+def _hf_weights(spec: ModelSpec, download: bool) -> Path:
+    from huggingface_hub import hf_hub_download
+    from huggingface_hub.errors import LocalEntryNotFoundError
 
-    return Path(torch.hub.get_dir()) / "checkpoints" / Path(spec.weights_url).name
+    try:
+        return Path(hf_hub_download(spec.hf_repo, spec.weights_file, revision=spec.hf_revision,
+                                    local_files_only=not download))
+    except LocalEntryNotFoundError as exc:
+        raise FileNotFoundError(f"weights for {spec.name} not downloaded "
+                                f"({spec.hf_repo}@{spec.hf_revision})") from exc
 
 
 def ensure_weights(spec: ModelSpec, download: bool = True) -> Path:
-    """The verified weights file in torch's cache, downloading it if needed.
+    """The verified weights file in the torch or Hugging Face cache, downloaded if needed.
 
     Raises FileNotFoundError if it is missing and ``download`` is false, and
     RuntimeError if its SHA256 is not the pinned one.
     """
     import torch
 
-    path = weights_path(spec)
-    if not path.is_file():
-        if not download:
-            raise FileNotFoundError(f"weights for {spec.name} not downloaded: {path}")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        torch.hub.download_url_to_file(spec.weights_url, str(path), progress=False)
+    if spec.source == "timm":
+        path = _hf_weights(spec, download)
+    else:
+        path = Path(torch.hub.get_dir()) / "checkpoints" / Path(spec.weights_url).name
+        if not path.is_file():
+            if not download:
+                raise FileNotFoundError(f"weights for {spec.name} not downloaded: {path}")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            torch.hub.download_url_to_file(spec.weights_url, str(path), progress=False)
     digest = sha256_file(path)
     if digest != spec.weights_sha256:
         raise RuntimeError(f"SHA256 mismatch for {path}\n  expected {spec.weights_sha256}\n"
@@ -102,15 +113,38 @@ def ensure_weights(spec: ModelSpec, download: bool = True) -> Path:
     return path
 
 
+def _check_normalization(spec: ModelSpec, mean: Any, std: Any) -> None:
+    # Wrong constants do not fail loudly, they only cost accuracy, so the registry's
+    # values must match what the weights' publisher declares.
+    declared = (tuple(round(float(v), 6) for v in mean), tuple(round(float(v), 6) for v in std))
+    if declared != (tuple(spec.mean), tuple(spec.std)):
+        raise RuntimeError(f"{spec.weights_id} declares mean/std {declared}, "
+                           f"the registry has {(spec.mean, spec.std)}")
+
+
 def load_torch_model(spec: ModelSpec, download: bool = True) -> Any:
-    """The torchvision model with its pinned, verified weights, in eval mode."""
+    """The model with its pinned, verified weights, in eval mode."""
+    path = ensure_weights(spec, download)
+    if spec.source == "timm":
+        import timm
+
+        model = timm.create_model(f"{spec.constructor}.{spec.weights}", pretrained=True,
+                                  pretrained_cfg_overlay={"file": str(path)})
+        cfg = model.pretrained_cfg
+        if cfg.get("hf_hub_id") != spec.hf_repo:
+            raise RuntimeError(f"timm maps {spec.constructor}.{spec.weights} to "
+                               f"{cfg.get('hf_hub_id')}, not {spec.hf_repo}")
+        _check_normalization(spec, cfg["mean"], cfg["std"])
+        return model.eval()
+
     import torchvision
 
-    ensure_weights(spec, download)
     weights = getattr(getattr(torchvision.models, spec.weights_enum), spec.weights)
     if Path(weights.url).name != Path(spec.weights_url).name:
         raise RuntimeError(f"torchvision {spec.weights_id} now points at {weights.url}, "
                            f"not the pinned {spec.weights_url}")
+    transform = weights.transforms()
+    _check_normalization(spec, transform.mean, transform.std)
     return getattr(torchvision.models, spec.constructor)(weights=weights).eval()
 
 
@@ -124,20 +158,24 @@ def input_shape(spec: ModelSpec, batch: int) -> tuple[int, int, int, int]:
 def model_metadata(spec: ModelSpec, variant: str, batch: int,
                    versions: dict[str, str]) -> dict[str, str]:
     """Key/value pairs stored in the ONNX file's metadata_props."""
-    return {
+    metadata = {
         META_PREFIX + "model": spec.name,
         META_PREFIX + "variant": variant,
         META_PREFIX + "batch_size": str(batch),
         META_PREFIX + "weights": spec.weights_id,
         META_PREFIX + "weights_sha256": spec.weights_sha256,
         META_NORMALIZATION: "external",
-        META_PREFIX + "input_preprocessing": json.dumps(PREPROCESS_DESCRIPTION, sort_keys=True),
+        META_PREFIX + "input_preprocessing": json.dumps(
+            preprocess_description(spec.mean, spec.std), sort_keys=True),
         META_PREFIX + "exporter": EXPORTER,
         META_PREFIX + "opset": str(OPSET),
         META_PREFIX + "torch_version": versions["torch"],
         META_PREFIX + "torchvision_version": versions["torchvision"],
         META_PREFIX + "onnx_version": versions["onnx"],
     }
+    if spec.source == "timm":
+        metadata[META_PREFIX + "timm_version"] = versions["timm"]
+    return metadata
 
 
 def export_fp32(spec: ModelSpec, batch: int, model: Any = None) -> bytes:
@@ -271,7 +309,10 @@ CHECK_IMAGES = 64  # spread evenly over eval-quick, so over 64 different classes
 
 
 def check_images(count: int = CHECK_IMAGES) -> tuple[list[str], Any] | None:
-    """Preprocessed ImageNetV2 eval-quick images [count, 3, 224, 224], or None if absent."""
+    """ImageNetV2 eval-quick images [count, 3, 224, 224] in [0, 1], or None if absent.
+
+    Not normalized: apply ``normalize_for(spec, x)`` for a given model.
+    """
     import numpy as np
 
     from common.manifests import EVAL_QUICK_MANIFEST, IMAGENETV2_ROOT, read_manifest
@@ -281,5 +322,12 @@ def check_images(count: int = CHECK_IMAGES) -> tuple[list[str], Any] | None:
         return None
     entries = read_manifest(EVAL_QUICK_MANIFEST)
     chosen = [entries[i * len(entries) // count] for i in range(count)]
-    x = np.concatenate([load_image(IMAGENETV2_ROOT / e.path) for e in chosen])
+    x = np.concatenate([load_image(IMAGENETV2_ROOT / e.path, normalized=False) for e in chosen])
     return [e.path for e in chosen], x
+
+
+def normalize_for(spec: ModelSpec, x_unit: Any) -> Any:
+    """``x_unit`` in [0, 1] normalized with the model's own mean/std."""
+    from common.preprocess import normalize
+
+    return normalize(x_unit, spec.mean, spec.std)

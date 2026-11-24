@@ -2,10 +2,26 @@
   "description": "SHA256 and size of every model file produced by scripts/export_models.py with the tool versions below. Paths are relative to models/.",
   "tools": {
     "onnx": "1.23.2",
+    "timm": "1.0.31",
     "torch": "2.13.0+cpu",
     "torchvision": "0.28.0+8fb8771"
   },
   "files": [
+    {
+      "file": "efficientnet_lite0/efficientnet_lite0_fp32_b1.onnx",
+      "sha256": "c4ba45ec1484ec614c7007c0814444d88884633823a7de96fc1ba0c3d95fc8f6",
+      "size_bytes": 18560934
+    },
+    {
+      "file": "efficientnet_lite0/efficientnet_lite0_fp32_b4.onnx",
+      "sha256": "fbd68441cc9d839f87b4b00ad3ab3188c7f82c6bc07a132070e9b8ca71facecd",
+      "size_bytes": 18560934
+    },
+    {
+      "file": "efficientnet_lite0/efficientnet_lite0_fp32_b8.onnx",
+      "sha256": "57214e397d24bb43d401ed50e8e10e6ff2f10aab9b06dd9f0505b94e5e3ed591",
+      "size_bytes": 18560934
+    },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_b1.onnx",
       "sha256": "3b80d618151c020c1bcce93085b7a1a2d6aabde15612b462db0d2b9f07867e95",

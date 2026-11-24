@@ -1,4 +1,4 @@
-"""Export torchvision classifiers to fixed-shape FP32 ONNX files, one per batch size.
+"""Export torchvision and timm classifiers to fixed-shape FP32 ONNX files, one per batch size.
 
 For every model in ``common/model_registry.py`` (``--model``, default all) and
 batch size (``--batch``, default 1 4 8) this writes
@@ -21,7 +21,7 @@ The weights are verified against the SHA256 pinned in the registry before use.
 the files on disk, without writing anything. Byte-identical output needs the
 same torch, torchvision and onnx versions as recorded in the manifest.
 
-The models expect normalized input (ImageNet mean/std applied by
+The models expect normalized input (each model's own mean/std, applied by
 ``common/preprocess.py``); see docs/models.md.
 
 Usage:
@@ -112,7 +112,8 @@ def export(names: list[str], batches: list[int]) -> int:
     for name in names:
         spec = MODELS[name]
         model = ox.load_torch_model(spec)
-        reference = ox.run_torch(model, images[1]) if images else None
+        x = ox.normalize_for(spec, images[1]) if images else None
+        reference = ox.run_torch(model, x) if images else None
         b1_logits = None
         for batch in sorted(batches):
             rel = relative_path(name, VARIANT, batch)
@@ -134,14 +135,14 @@ def export(names: list[str], batches: list[int]) -> int:
 
             torch_check = batch_check = None
             if images:
-                logits = ox.run_ort(session, images[1])
+                logits = ox.run_ort(session, x)
                 torch_check = ox.compare_logits(logits, reference)
                 failures += not ox.within_tolerance(torch_check)
                 if batch == 1:
                     b1_logits = logits
                 elif b1_logits is None and (MODELS_DIR / relative_path(name, VARIANT, 1)).is_file():
                     b1_logits = ox.run_ort(
-                        ox.ort_session(MODELS_DIR / relative_path(name, VARIANT, 1)), images[1])
+                        ox.ort_session(MODELS_DIR / relative_path(name, VARIANT, 1)), x)
                 if batch != 1 and b1_logits is not None:
                     batch_check = ox.compare_logits(logits, b1_logits)
                     failures += not ox.within_tolerance(batch_check)
@@ -158,7 +159,8 @@ def export(names: list[str], batches: list[int]) -> int:
                 "ir_version": info["ir_version"],
                 "versions": versions,
                 "input": {"name": "input", "shape": info["shapes"]["input"], "dtype": "float32",
-                          "normalization": "external"},
+                          "normalization": "external", "mean": list(spec.mean),
+                          "std": list(spec.std)},
                 "output": {"name": "logits", "shape": info["shapes"]["logits"],
                            "dtype": "float32", "semantics": "logits"},
                 "onnx_metadata": info["metadata"],

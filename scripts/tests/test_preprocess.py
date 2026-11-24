@@ -110,6 +110,25 @@ def test_output_is_identical_across_calls_and_pinned():
     assert hashlib.sha256(unit.tobytes()).hexdigest() == PINNED_UNIT_SHA256
 
 
+def test_normalize_uses_the_given_constants():
+    unit = preprocess.preprocess_image_unit(make_image(300, 260, seed=5))
+    half = preprocess.normalize(unit, (0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    np.testing.assert_allclose(half, unit * 2 - 1, rtol=0, atol=1e-6)
+    # Default arguments are the ImageNet constants.
+    np.testing.assert_array_equal(preprocess.normalize(unit),
+                                  preprocess.normalize(unit, preprocess.MEAN, preprocess.STD))
+
+
+def test_preprocess_description_records_the_constants():
+    d = preprocess.preprocess_description((0.5, 0.5, 0.5), (0.25, 0.25, 0.25))
+    assert d["mean"] == [0.5, 0.5, 0.5] and d["std"] == [0.25, 0.25, 0.25]
+    # The default must stay exactly what existing model metadata was written with.
+    assert json.dumps(preprocess.preprocess_description(), sort_keys=True) == (
+        '{"center_crop": 224, "dtype": "float32", "interpolation": "bilinear (PIL)", '
+        '"layout": "NCHW", "mean": [0.485, 0.456, 0.406], "resize_shorter_side": 256, '
+        '"scale": "1/255", "std": [0.229, 0.224, 0.225]}')
+
+
 def test_load_image_matches_torchvision_on_imagenetv2_images():
     transforms = pytest.importorskip("torchvision.transforms")
     from common import manifests

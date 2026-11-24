@@ -1,9 +1,11 @@
 """Models EdgeBench exports, and the manifest of exported files (standard library only).
 
-Each ``ModelSpec`` says which torchvision constructor and pretrained weights a
-model comes from, and pins the weights file by SHA256. torchvision's file
-names only carry the first 8 hex digits of the hash, and its download check
-only compares that prefix, so the full hash is checked here after download.
+Each ``ModelSpec`` says which torchvision constructor or timm architecture and
+which pretrained weights a model comes from, pins the weights file by SHA256
+(and, for timm, by Hugging Face revision), and holds the mean/std the weights
+were trained with. torchvision's file names only carry the first 8 hex digits
+of the hash, and its download check only compares that prefix, so the full
+hash is checked here after download.
 
 Exported files are named ``<model>_<variant>_b<batch>.onnx`` and live in
 ``models/<model>/``. ``models/manifest.json`` (committed) lists the SHA256 and
@@ -45,16 +47,32 @@ META_NORMALIZATION = META_PREFIX + "normalization"
 NORMALIZATIONS = ("external", "in_graph", "folded")
 
 
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD = (0.229, 0.224, 0.225)
+
+
 @dataclass(frozen=True)
 class ModelSpec:
     name: str                 # file and directory name, e.g. "mobilenetv2"
     display_name: str
-    constructor: str          # function in torchvision.models
-    weights_enum: str         # class in torchvision.models
-    weights: str              # member of weights_enum
-    weights_url: str          # what torchvision downloads for these weights
+    # torchvision: function in torchvision.models; timm: architecture name.
+    constructor: str
+    # torchvision: weights enum class in torchvision.models; timm: "" (unused).
+    weights_enum: str
+    # torchvision: member of weights_enum; timm: pretrained tag (model "<constructor>.<tag>").
+    weights: str
+    weights_url: str          # where the weights file is downloaded from
     weights_sha256: str       # full SHA256 of that file
     weights_size_bytes: int
+    source: str = "torchvision"  # "torchvision" or "timm"
+    # timm only: Hugging Face repository, pinned revision and file of the weights.
+    hf_repo: str = ""
+    hf_revision: str = ""
+    weights_file: str = ""
+    # Normalization the weights were trained with; the exported model expects
+    # input normalized with exactly these (see common/preprocess.py).
+    mean: tuple[float, float, float] = IMAGENET_MEAN
+    std: tuple[float, float, float] = IMAGENET_STD
     input_size: int = 224     # square input, NCHW [batch, 3, size, size]
     # Optional self-check on a tensor filled with probe_value: expected top-1 class.
     probe_value: float | None = None
@@ -63,6 +81,8 @@ class ModelSpec:
 
     @property
     def weights_id(self) -> str:
+        if self.source == "timm":
+            return f"timm {self.constructor}.{self.weights} ({self.hf_repo}@{self.hf_revision})"
         return f"torchvision {self.weights_enum}.{self.weights}"
 
 
@@ -95,6 +115,27 @@ MODELS: dict[str, ModelSpec] = {
             weights_size_bytes=46_830_571,
             notes="The only ImageNet weights torchvision provides for ResNet-18 (original "
                   "recipe); ImageNet-1k top-1 69.758 as reported by torchvision.",
+        ),
+        ModelSpec(
+            name="efficientnet_lite0",
+            display_name="EfficientNet-Lite0",
+            source="timm",
+            constructor="efficientnet_lite0",
+            weights_enum="",
+            weights="ra_in1k",
+            hf_repo="timm/efficientnet_lite0.ra_in1k",
+            hf_revision="29046ba6cc39eacfd5c7e6ffc1ae6188cfaa7609",
+            weights_file="model.safetensors",
+            weights_url="https://huggingface.co/timm/efficientnet_lite0.ra_in1k/resolve/"
+                        "29046ba6cc39eacfd5c7e6ffc1ae6188cfaa7609/model.safetensors",
+            weights_sha256="96c33bc4ce15e6f834b0f7da41d4bae33547fff1e88e0ba1e812a148693d5dd4",
+            weights_size_bytes=18_802_812,
+            # ImageNet mean/std (the defaults); timm evaluates these weights with a bicubic
+            # resize and crop_pct 0.875 (= resize 256, crop 224).
+            notes="Trained in timm (RandAugment recipe). Chosen over the ported TensorFlow "
+                  "weights (tf_efficientnet_lite0.in1k), whose TF-style 'same' padding "
+                  "exports as runtime shape arithmetic feeding Pad nodes, which does not "
+                  "fold to constants; see docs/models.md.",
         ),
     )
 }
