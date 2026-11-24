@@ -3,7 +3,8 @@
 For every model (``--model``, default all) and batch size (``--batch``, default
 1 4 8) this reads ``models/<model>/<model>_fp32_b<batch>.onnx`` (from
 ``scripts/export_models.py``; it must match ``models/manifest.json``) and writes
-``models/<model>/<model>_fp32_folded_b<batch>.onnx`` plus a JSON sidecar: the
+``models/<model>/<model>_fp32_folded_b<batch>.onnx`` plus a JSON sidecar with
+the checks and a recipe sidecar (``<name>.recipe.json``): the
 same model with its input normalization (the registry's mean/std) folded into
 the first convolution. The convolution's zero padding becomes padding with the
 per-channel mean, which keeps the fold exact (see ``common/onnx_fold.py``). The
@@ -39,7 +40,6 @@ from common.model_registry import (  # noqa: E402
     MANIFEST_PATH,
     MODELS,
     MODELS_DIR,
-    ManifestFile,
     read_manifest,
     relative_path,
     write_manifest,
@@ -92,6 +92,7 @@ def verify(names: list[str], batches: list[int]) -> int:
 
 def fold(names: list[str], batches: list[int]) -> int:
     from common import onnx_export as ox
+    from common.model_recipe import record_model_file
 
     manifest, tools = read_manifest()
     by_file = {f.file: f for f in manifest}
@@ -109,7 +110,7 @@ def fold(names: list[str], batches: list[int]) -> int:
             tmp = path.with_name(path.name + ".tmp")
             tmp.write_bytes(data)
             tmp.replace(path)
-            by_file[rel] = ManifestFile(rel, ox.sha256_bytes(data), len(data))
+            by_file[rel] = record_model_file(path, rel, data)
 
             checks: dict = {}
             if images is not None:

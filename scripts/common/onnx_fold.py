@@ -42,6 +42,8 @@ import numpy as np
 import onnx
 from onnx import helper, numpy_helper
 
+from common.model_registry import INPUT_RANGE_FOLDED
+
 
 class FoldError(ValueError):
     """The model does not have the first-convolution pattern folding requires."""
@@ -211,7 +213,7 @@ def folded_metadata(source_meta: dict[str, str], mean, std, variant: str, info: 
         "edgebench.variant": variant,
         "edgebench.normalization": "folded",
         "edgebench.input_preprocessing": json.dumps(preprocessing, sort_keys=True),
-        "edgebench.input_range": "[0, 1]",
+        "edgebench.input_range": INPUT_RANGE_FOLDED,
         "edgebench.folded_mean": json.dumps(list(mean)),
         "edgebench.folded_std": json.dumps(list(std)),
         "edgebench.fold_padding": info["padding"],

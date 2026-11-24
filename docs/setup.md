@@ -47,8 +47,8 @@ The ARM64 build is the one tagged `-arm64`. Confirm it with `sysconfig`:
 > |---|---|---|
 > | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `scripts/export_models.py`, `scripts/export_mobilenetv2.py`, `scripts/fold_models.py`, `scripts/quantize_models.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `scripts/npu_overhead.py`, `tools/qnn_rejection_check.py`, `tools/ort_probe/reference.py`, `tools/ort_probe/make_reference.py` |
 > | Environment diagnostic | Runs and reports the problem prominently | `scripts/check_env.py` |
-> | Downloads and platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/get_data.py`, `scripts/get_aihub_baseline.py`, `scripts/validate_results.py`, `scripts/make_test_models.py`, `scripts/check_hygiene.py`, `scripts/coverage_summary.py`, and the tests in `scripts/tests/` |
-> | Shared modules in `scripts/common/` | Not checked themselves. `npu_harness.py` and `ort_qnn.py` load ONNX Runtime and are imported only by guarded scripts, after the check; `onnx_export.py` and `onnx_quantize.py` import torch, onnx and ONNX Runtime inside their functions and are used by `export_models.py`, `fold_models.py`, `quantize_models.py` and their tests; `onnx_fold.py` needs onnx and NumPy only; the others (`preprocess.py`, `manifests.py`, `model_registry.py`, `accuracy.py`, `qnn_log.py`, `onnx_prune.py`, `qdq_inspect.py`, `results_io.py`, `cli.py`) do not | – |
+> | Downloads and platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/get_data.py`, `scripts/get_aihub_baseline.py`, `scripts/validate_results.py`, `scripts/make_test_models.py`, `scripts/check_hygiene.py`, `scripts/coverage_summary.py`, `scripts/model_recipes.py`, `scripts/model_info.py` (they read model files with onnx but never run them), and the tests in `scripts/tests/` |
+> | Shared modules in `scripts/common/` | Not checked themselves. `npu_harness.py` and `ort_qnn.py` load ONNX Runtime and are imported only by guarded scripts, after the check; `onnx_export.py` and `onnx_quantize.py` import torch, onnx and ONNX Runtime inside their functions and are used by `export_models.py`, `fold_models.py`, `quantize_models.py` and their tests; `onnx_fold.py` needs onnx and NumPy only; `model_recipe.py` imports onnx inside the functions that read model files; the others (`preprocess.py`, `manifests.py`, `model_registry.py`, `accuracy.py`, `qnn_log.py`, `onnx_prune.py`, `qdq_inspect.py`, `results_io.py`, `cli.py`) do not | – |
 >
 > The C++ build accepts ARM64 (the measurement build) and x64 (CPU only, for
 > continuous integration; it reports emulation at run time), and rejects
@@ -224,7 +224,11 @@ fixed-shape FP32 ONNX files, one per batch size (1, 4, 8):
 output `logits` [batch, 1000]. The
 weights are checked against pinned SHA256s; every file is checked with
 `onnx.checker` and shape inference, compared with PyTorch on ImageNetV2 images
-(from step 1), and listed with its SHA256 in the committed `models/manifest.json`.
+(from step 1), and listed in the committed `models/manifest.json`. Each file
+gets a recipe sidecar (`<name>.recipe.json`) built from its metadata;
+`scripts\model_info.py <file.onnx>` prints it with the file's lineage, and
+`scripts\model_recipes.py --check` checks sidecars, manifest and lineage
+([models.md](models.md#recipes-and-the-manifest)).
 `--verify` re-exports and compares with the manifest. Details, tolerances and
 the ONNX metadata are in [models.md](models.md).
 `scripts\export_mobilenetv2.py` exports only `mobilenetv2_fp32_b1.onnx`, the
@@ -586,7 +590,7 @@ the `unit` and `ort` labels only, never `models` or `npu`.
 
 | Job | Runner | What it does |
 |---|---|---|
-| `python (validator, hygiene)` | `ubuntu-latest`, Python 3.12 | Installs `requirements-ci.txt` (jsonschema and pytest, pinned); runs the validator, hygiene-check, coverage-summary, dataset-manifest and model-registry tests; validates `docs/examples/` and `benchmarks/results/published/` with `--strict`; runs the hygiene check |
+| `python (validator, hygiene)` | `ubuntu-latest`, Python 3.12 | Installs `requirements-ci.txt` (jsonschema and pytest, pinned); runs the validator, hygiene-check, coverage-summary, dataset-manifest, model-registry and model-manifest/recipe tests; validates `docs/examples/` and `benchmarks/results/published/` with `--strict`; runs the hygiene check |
 | `windows-x64` | `windows-latest` | MSVC x64 environment; fetches the x64 ONNX Runtime; `x64` preset, Release, `/W4 /WX`; `ctest -L "unit\|ort"`; uploads the CTest log on failure |
 | `windows-arm64` | `windows-11-arm` | The same for ARM64 (`arm64-ninja` preset); the QNN files are bundled, but there is no NPU, so no `npu` tests run |
 | `coverage (x64)` | `windows-latest` | x64 Debug build; the `unit` and `ort` tests under [OpenCppCoverage](https://github.com/OpenCppCoverage/OpenCppCoverage) 0.9.9.0 (installer pinned by SHA256), including child processes, filtered to `engine/src`; uploads the HTML and Cobertura report (`coverage-x64` artifact) and prints per-file line coverage in the job summary. Report only, no threshold |
@@ -601,7 +605,7 @@ To run the same checks locally:
 
 ```powershell
 # python job (any OS; with the full .venv or a venv with requirements-ci.txt)
-python -m pytest scripts/tests/test_validate_results.py scripts/tests/test_check_hygiene.py scripts/tests/test_coverage_summary.py scripts/tests/test_manifests.py scripts/tests/test_export_models.py
+python -m pytest scripts/tests/test_validate_results.py scripts/tests/test_check_hygiene.py scripts/tests/test_coverage_summary.py scripts/tests/test_manifests.py scripts/tests/test_export_models.py scripts/tests/test_model_recipes.py
 python scripts/validate_results.py --strict docs/examples benchmarks/results/published
 python scripts/check_hygiene.py
 

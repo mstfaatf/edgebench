@@ -9,7 +9,8 @@ hash is checked here after download.
 
 Exported files are named ``<model>_<variant>_b<batch>.onnx`` and live in
 ``models/<model>/``. ``models/manifest.json`` (committed) lists the SHA256 and
-size of every exported file; ``scripts/export_models.py --verify`` re-exports
+size of every model file, what it is and which file it was made from (see the
+manifest section below); ``scripts/export_models.py --verify`` re-exports
 and compares against it.
 
 To add a model: add a ``ModelSpec`` to ``MODELS``, run
@@ -45,6 +46,9 @@ META_NORMALIZATION = META_PREFIX + "normalization"
 # model.normalization: "external" (the caller passes normalized input),
 # "in_graph" (Sub/Div nodes in the model) or "folded" (merged into the first conv).
 NORMALIZATIONS = ("external", "in_graph", "folded")
+# edgebench.input_range: what the input tensor holds.
+INPUT_RANGE_EXTERNAL = "(x - mean) / std for x in [0, 1]"
+INPUT_RANGE_FOLDED = "[0, 1]"
 
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
@@ -168,6 +172,31 @@ def all_expected_files() -> list[str]:
 
 
 # --- manifest ------------------------------------------------------------------
+#
+# models/manifest.json is the committed index of every model file: its hash and
+# size, what it is (from the file's edgebench.* metadata, which stays the source
+# of truth) and the SHA256 of the file it was derived from. Following parents
+# always ends at an FP32 export with external normalization (a "root").
+
+MANIFEST_VERSION = "1.0.0"
+MANIFEST_SCHEMA = REPO_ROOT / "schemas" / f"model-manifest.v{MANIFEST_VERSION}.schema.json"
+ROOT_VARIANT = "fp32"
+# Variant -> the variant of the file it is made from (roots have none).
+PARENT_VARIANT = {"fp32_folded": "fp32", "int8": "fp32", "int8_unpruned": "fp32",
+                  "int8_folded": "fp32_folded", "int8_folded_unpruned": "fp32_folded"}
+
+
+class MetadataError(ValueError):
+    """A model file's edgebench.* metadata lacks a key, or holds an unusable value."""
+
+
+def meta_value(meta: dict[str, str], key: str, where: str = "") -> str:
+    """``meta["edgebench.<key>"]``; MetadataError naming the key if it is missing or empty."""
+    value = meta.get(META_PREFIX + key)
+    if value is None or value == "":
+        raise MetadataError(f"{where + ': ' if where else ''}metadata key "
+                            f"'{META_PREFIX + key}' is missing")
+    return value
 
 
 @dataclass(frozen=True)
@@ -175,15 +204,43 @@ class ManifestFile:
     file: str          # relative to models/
     sha256: str
     size_bytes: int
+    model: str
+    variant: str
+    precision: str     # "fp32" or "int8"
+    normalization: str  # "external" or "folded"
+    batch_size: int
+    pruned: bool | None          # INT8 only: dead Q/DQ chains removed; None for FP32
+    parent_sha256: str | None    # the file this one was made from; None for roots
+
+
+ENTRY_KEYS = tuple(ManifestFile.__dataclass_fields__)
+
+
+def manifest_entry(rel: str, sha256: str, size_bytes: int, meta: dict[str, str]) -> ManifestFile:
+    """The manifest entry of a model file, from its edgebench.* metadata."""
+    variant = meta_value(meta, "variant", rel)
+    precision = meta_value(meta, "precision", rel)
+    pruned = None
+    if precision == "int8":
+        flag = meta_value(meta, "quant.pruned", rel)
+        if flag not in ("true", "false"):
+            raise MetadataError(f"{rel}: '{META_PREFIX}quant.pruned' is {flag!r}")
+        pruned = flag == "true"
+    parent = None if variant == ROOT_VARIANT else meta_value(meta, "source_sha256", rel)
+    return ManifestFile(rel, sha256, size_bytes, meta_value(meta, "model", rel), variant,
+                        precision, meta_value(meta, "normalization", rel),
+                        int(meta_value(meta, "batch_size", rel)), pruned, parent)
 
 
 def format_manifest(files: list[ManifestFile], tools: dict[str, str]) -> str:
     doc = {
-        "description": "SHA256 and size of every model file produced by "
-                       "scripts/export_models.py with the tool versions below. "
-                       "Paths are relative to models/.",
+        "manifest_version": MANIFEST_VERSION,
+        "description": "Every model file produced by scripts/export_models.py, fold_models.py "
+                       "and quantize_models.py with the export tool versions below: SHA256, "
+                       "size, what it is (from the file's edgebench.* metadata) and the SHA256 "
+                       "of the file it was made from. Paths are relative to models/.",
         "tools": dict(sorted(tools.items())),
-        "files": [{"file": f.file, "sha256": f.sha256, "size_bytes": f.size_bytes}
+        "files": [{k: getattr(f, k) for k in ENTRY_KEYS}
                   for f in sorted(files, key=lambda f: f.file)],
     }
     return json.dumps(doc, indent=2) + "\n"
@@ -191,7 +248,15 @@ def format_manifest(files: list[ManifestFile], tools: dict[str, str]) -> str:
 
 def parse_manifest(text: str) -> tuple[list[ManifestFile], dict[str, str]]:
     doc = json.loads(text)
-    files = [ManifestFile(f["file"], f["sha256"], int(f["size_bytes"])) for f in doc["files"]]
+    if doc.get("manifest_version") != MANIFEST_VERSION:
+        raise ValueError(f"manifest_version is {doc.get('manifest_version')!r}, "
+                         f"expected {MANIFEST_VERSION!r}")
+    files = []
+    for f in doc["files"]:
+        missing = [k for k in ENTRY_KEYS if k not in f]
+        if missing:
+            raise ValueError(f"manifest entry {f.get('file')!r} lacks {', '.join(missing)}")
+        files.append(ManifestFile(**{k: f[k] for k in ENTRY_KEYS}))
     names = [f.file for f in files]
     if names != sorted(names) or len(set(names)) != len(names):
         raise ValueError("manifest files must be unique and sorted by path")
@@ -207,3 +272,53 @@ def read_manifest(path: Path = MANIFEST_PATH) -> tuple[list[ManifestFile], dict[
 def write_manifest(files: list[ManifestFile], tools: dict[str, str],
                    path: Path = MANIFEST_PATH) -> None:
     path.write_text(format_manifest(files, tools), encoding="utf-8", newline="\n")
+
+
+def lineage(files: list[ManifestFile], entry: ManifestFile) -> list[ManifestFile]:
+    """``entry`` and its ancestors, nearest first, ending at a root; ValueError if broken."""
+    by_sha = {f.sha256: f for f in files}
+    chain = [entry]
+    while chain[-1].parent_sha256 is not None:
+        parent = by_sha.get(chain[-1].parent_sha256)
+        if parent is None:
+            raise ValueError(f"{chain[-1].file}: parent {chain[-1].parent_sha256} "
+                             "is not in the manifest")
+        if parent in chain:
+            raise ValueError(f"{entry.file}: lineage has a cycle at {parent.file}")
+        chain.append(parent)
+    return chain
+
+
+def lineage_problems(files: list[ManifestFile]) -> list[str]:
+    """Everything wrong with the manifest's parent links (empty list: all fine).
+
+    Every file must lead, through parents present in the manifest and without
+    cycles, to a root: an FP32 export with external normalization. Each step
+    must go to the expected parent variant of the same model and batch size.
+    """
+    problems = []
+    shas = [f.sha256 for f in files]
+    if len(set(shas)) != len(shas):
+        problems.append("two manifest entries have the same SHA256")
+    for f in files:
+        if f.variant == ROOT_VARIANT:
+            if f.parent_sha256 is not None:
+                problems.append(f"{f.file}: a root (variant {ROOT_VARIANT}) has a parent")
+            if f.normalization != "external" or f.precision != "fp32":
+                problems.append(f"{f.file}: a root must be FP32 with external normalization")
+            continue
+        if f.variant not in PARENT_VARIANT:
+            problems.append(f"{f.file}: unknown variant {f.variant!r}")
+            continue
+        try:
+            chain = lineage(files, f)
+        except ValueError as exc:
+            problems.append(str(exc))
+            continue
+        parent = chain[1]
+        if parent.variant != PARENT_VARIANT[f.variant]:
+            problems.append(f"{f.file}: parent {parent.file} is {parent.variant}, "
+                            f"expected {PARENT_VARIANT[f.variant]}")
+        if (parent.model, parent.batch_size) != (f.model, f.batch_size):
+            problems.append(f"{f.file}: parent {parent.file} is another model or batch size")
+    return problems

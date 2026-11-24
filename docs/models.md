@@ -119,17 +119,22 @@ two can be told apart from the file alone.
 
 ### ONNX metadata
 
-Every exported file carries these `metadata_props`:
+Every exported file carries these `metadata_props`. They are the source of
+truth for how the file was made; the [recipe sidecar and the
+manifest](#recipes-and-the-manifest) are built from them.
 
 | Key | Example |
 |---|---|
 | `edgebench.model` | `mobilenetv2` |
-| `edgebench.variant` | `fp32` |
+| `edgebench.variant`, `edgebench.precision` | `fp32`, `fp32` |
 | `edgebench.batch_size` | `4` |
 | `edgebench.normalization` | `external` |
+| `edgebench.input_range` | `(x - mean) / std for x in [0, 1]` (`[0, 1]` for folded files) |
 | `edgebench.input_preprocessing` | JSON: resize, crop, scale, mean, std, layout, dtype |
 | `edgebench.weights` | `torchvision MobileNet_V2_Weights.IMAGENET1K_V2`, or `timm efficientnet_lite0.ra_in1k (timm/efficientnet_lite0.ra_in1k@<revision>)` |
+| `edgebench.weights_source`, `edgebench.weights_url` | `torchvision` or `timm`, the download URL |
 | `edgebench.weights_sha256` | SHA256 of the weights file |
+| `edgebench.weights_hf_repo`, `.weights_hf_revision`, `.weights_file` (timm models only) | `timm/efficientnet_lite0.ra_in1k`, the pinned revision, `model.safetensors` |
 | `edgebench.exporter`, `edgebench.opset`, `edgebench.ir_version` | `torch.onnx.export (TorchScript, dynamo=False)`, `17`, `8` |
 | `edgebench.torch_version`, `edgebench.torchvision_version`, `edgebench.onnx_version` | `2.13.0+cpu`, `0.28.0+8fb8771`, `1.23.2` |
 | `edgebench.timm_version` (timm models only) | `1.0.31` |
@@ -138,9 +143,9 @@ Every exported file carries these `metadata_props`:
 
 ```
 models/
-  manifest.json                       committed: SHA256 and size of every file below
+  manifest.json                       committed: index of every file below (hash, lineage)
   mobilenetv2/
-    mobilenetv2_fp32_b1.onnx          + mobilenetv2_fp32_b1.json (sidecar)
+    mobilenetv2_fp32_b1.onnx          + .json (checks) + .recipe.json (recipe)
     mobilenetv2_fp32_b4.onnx
     mobilenetv2_fp32_b8.onnx
     mobilenetv2_int8_b1.onnx          + .json: INT8 QDQ, pruned (the benchmarked files)
@@ -159,9 +164,12 @@ Files are named `<model>_<variant>_b<batch>.onnx`, with variant `fp32`, `int8`
 or `int8_unpruned`, and the normalization-folded `fp32_folded`, `int8_folded`
 and `int8_folded_unpruned` ([below](#normalization-folded-models)). The `.onnx` files and
 sidecars are not committed (`models/` is gitignored except its README and
-`manifest.json`). Each sidecar records the weights, exporter, versions, shapes,
-ONNX metadata and the results of the checks below. The INT8 models of the
-feasibility study (`scripts/quantize_qnn.py`) also live in `models/mobilenetv2/`.
+`manifest.json`); they travel together. Two sidecars sit next to each file:
+`<name>.json` records the results of the checks the making script ran (see
+below), and `<name>.recipe.json` records how the file was made
+([Recipes and the manifest](#recipes-and-the-manifest)). The INT8 models of the
+feasibility study (`scripts/quantize_qnn.py`) also live in `models/mobilenetv2/`;
+they have no recipe sidecar and are not in the manifest.
 
 ## Exporting and verifying
 
@@ -294,8 +302,8 @@ file must give bit-identical logits on 64 ImageNetV2 images.
 ### Metadata
 
 INT8 files keep the FP32 file's `edgebench.*` keys that describe the model and
-its input (model, batch size, weights, `normalization`, `input_preprocessing`,
-export versions), and rewrite or add:
+its input (model, batch size, weights and their source, `normalization`,
+`input_range`, `input_preprocessing`, export versions), and rewrite or add:
 
 | Key | Value |
 |---|---|
@@ -309,9 +317,10 @@ export versions), and rewrite or add:
 | `edgebench.quant.activation_type`, `.activation_symmetric`, `.bias_type` | `uint8`, `false`, `int32` |
 | `edgebench.quant.calibration_method`, `.calibration_dataset`, `.calibration_count`, `.calibration_manifest_sha256`, `.calibration_batch` | `MinMax`, the calibration split, `200`, SHA256 of `calibration.tsv`, `1 (ranges shared by all batch sizes)` |
 | `edgebench.quant.tool`, `.qnn_preprocess`, `.pruned` | quantizer and version, whether QNN preprocessing changed the graph, `true`/`false` |
+| `edgebench.quant.pruned_chains`, `.pruned_nodes` | dead Q/DQ chains and nodes removed by pruning (`0` in the unpruned files) |
 
-The `edgebench.quant.*` keys are flat strings so a recipe file can be generated
-from them. `edgebench run` reports these models as `stored_precision: int8`,
+The `edgebench.quant.*` keys are flat strings; the recipe sidecar turns them
+into typed fields. `edgebench run` reports these models as `stored_precision: int8`,
 `quantization.method: static`, `format: qdq`, int8 weights and uint8
 activations (read from the graph), fills `quantization.calibration` (dataset,
 sample count) and `quantization.tool` from the metadata, and keeps
@@ -484,3 +493,97 @@ checks every folded file against the external one on 64 images (1e-4, top-1
 identical) and batch 4 and 8 against batch 1, and is deterministic: folding
 again gives byte-identical files.
 
+## Recipes and the manifest
+
+Three things describe each model file, with one source of truth:
+
+| What | Where | Committed | Role |
+|---|---|---|---|
+| ONNX metadata (`edgebench.*`) | inside the `.onnx` file | with the file | the source: written by export, fold and quantize |
+| Recipe sidecar | `<name>.recipe.json` next to the file | no (travels with the file) | a structured, readable copy of the metadata |
+| Manifest | `models/manifest.json` | yes | the index: every file, its hash and what it was made from |
+
+### Recipe sidecar
+
+`<name>.recipe.json` is built from the model file alone: its metadata, its
+graph inputs and outputs, its SHA256 and size (`scripts/common/model_recipe.py`).
+So it can be regenerated from the `.onnx` file at any time, and a file without
+a sidecar loses nothing. Schema: `schemas/model-recipe.v1.0.0.schema.json`
+(recipe version `1.0.0`). Groups:
+
+| Group | Fields |
+|---|---|
+| `identity` | file, model, variant, precision, normalization, batch size, SHA256, size |
+| `weights` | library (`torchvision`/`timm`), weights id, URL, weights-file SHA256; for timm also the Hugging Face repository, revision and file |
+| `export` | exporter, opset, IR version, input and output names, dtypes and shapes, torch/torchvision/onnx (and timm) versions |
+| `preprocessing` | resize, interpolation, crop, scale, layout, dtype, mean/std, where normalization is applied (by the caller, or folded into the model), what the input tensor holds, and for folded files the padding method and first convolution |
+| `quantization` | INT8 only (`null` for FP32): format, method, weight type and symmetry, per-channel, activation type and symmetry, bias type, calibration (method, dataset, calibration-manifest SHA256, image count, batch), QNN preprocessing, pruned or not, chains and nodes pruned, quantizer and ONNX Runtime versions |
+| `lineage` | the parent file and its SHA256 (`null` for an FP32 export, which is made from the weights) |
+
+A key the recipe needs that is missing from the metadata is an error that names
+the key; no field is filled with a guess or `null`. The schema allows `null`
+only where it means "not applicable": `quantization` for FP32 files,
+`preprocessing.fold` for external normalization and `lineage.parent` for FP32
+exports.
+
+### Manifest
+
+Each entry of `models/manifest.json` (manifest version `1.0.0`, schema
+`schemas/model-manifest.v1.0.0.schema.json`) records `file`, `sha256`,
+`size_bytes`, `model`, `variant`, `precision`, `normalization`, `batch_size`,
+`pruned` (INT8 only, `null` for FP32) and `parent_sha256` (`null` for FP32
+exports). Every field except the hash and size comes from the file's metadata.
+The parents form a tree per model and batch size:
+
+```
+<model>_fp32_b<n>                      (from the weights)
+  <- <model>_int8_b<n>, <model>_int8_unpruned_b<n>
+  <- <model>_fp32_folded_b<n>
+       <- <model>_int8_folded_b<n>, <model>_int8_folded_unpruned_b<n>
+```
+
+Lineage check: every parent SHA256 is in the manifest, following parents
+always ends at an FP32 export with external normalization of the same model and
+batch size, each step goes to the expected parent variant, and there are no
+cycles or duplicate hashes (`lineage_problems` in `scripts/common/model_registry.py`).
+
+### Regenerating and checking
+
+Export, fold and quantize write the recipe sidecar and the manifest entry of
+every file they make. For files that already exist:
+
+```powershell
+# rewrite every sidecar from its model file
+.\.venv\Scripts\python.exe scripts\model_recipes.py
+
+# write nothing; fail if anything disagrees
+.\.venv\Scripts\python.exe scripts\model_recipes.py --check
+```
+
+`--check` validates the manifest against its schema and its lineage, then for
+every file on disk checks that the sidecar exists, matches the recipe schema
+and equals the recipe rebuilt from the file, and that the manifest entry equals
+what the file's metadata, hash and size say. Files listed but not on disk are
+reported and skipped. The manifest, lineage and recipe-schema tests
+(`scripts/tests/test_model_recipes.py`) need only the standard library and
+jsonschema and run in CI; the tests on real files skip when the files are
+absent.
+
+### Inspecting a model file
+
+```powershell
+.\.venv\Scripts\python.exe scripts\model_info.py models\efficientnet_lite0\efficientnet_lite0_int8_folded_b4.onnx
+```
+
+prints the recipe (from the sidecar when it matches the file's SHA256,
+otherwise from the file's metadata) and the lineage, followed through the
+manifest:
+
+```
+lineage
+     efficientnet_lite0/efficientnet_lite0_int8_folded_b4.onnx (int8_folded, sha256 1b28616d545a)
+  <- efficientnet_lite0/efficientnet_lite0_fp32_folded_b4.onnx (fp32_folded, sha256 dd64f81b21ea)
+  <- efficientnet_lite0/efficientnet_lite0_fp32_b4.onnx (fp32, sha256 0ec46a6818d0)
+```
+
+`--json` prints the recipe document instead.

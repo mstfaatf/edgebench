@@ -2,8 +2,9 @@
 
 For every model in ``common/model_registry.py`` (``--model``, default all) and
 batch size (``--batch``, default 1 4 8) this writes
-``models/<model>/<model>_fp32_b<batch>.onnx`` and a JSON sidecar next to it,
-then updates ``models/manifest.json`` with the file's SHA256 and size.
+``models/<model>/<model>_fp32_b<batch>.onnx``, a JSON sidecar with the checks
+and its recipe sidecar (``<name>.recipe.json``, see ``common/model_recipe.py``)
+next to it, then updates the file's entry in ``models/manifest.json``.
 
 Each file is checked before it is written: ``onnx.checker`` (full check),
 strict shape inference, concrete dimensions on every graph input and output,
@@ -44,7 +45,6 @@ from common.model_registry import (  # noqa: E402
     MANIFEST_PATH,
     MODELS,
     MODELS_DIR,
-    ManifestFile,
     read_manifest,
     relative_path,
     write_manifest,
@@ -99,6 +99,7 @@ def verify(names: list[str], batches: list[int]) -> int:
 
 def export(names: list[str], batches: list[int]) -> int:
     from common import onnx_export as ox
+    from common.model_recipe import record_model_file
 
     versions = ox.tool_versions()
     manifest, tools = read_manifest()
@@ -176,7 +177,7 @@ def export(names: list[str], batches: list[int]) -> int:
             }
             path.with_suffix(".json").write_text(json.dumps(sidecar, indent=2) + "\n",
                                                  encoding="utf-8", newline="\n")
-            by_file[rel] = ManifestFile(rel, sidecar["sha256"], len(data))
+            by_file[rel] = record_model_file(path, rel, data)
 
             parts = [f"{len(data)} bytes", f"sha256 {sidecar['sha256'][:12]}"]
             if probe:

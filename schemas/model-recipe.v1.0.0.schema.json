@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/mstfaatf/edgebench/main/schemas/model-recipe.v1.0.0.schema.json",
+  "title": "EdgeBench model recipe",
+  "description": "How one model file was made, built from the file's own edgebench.* ONNX metadata, graph inputs/outputs, SHA256 and size (scripts/common/model_recipe.py). Recipe version 1.0.0. See docs/models.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["recipe_version", "identity", "weights", "export", "preprocessing", "quantization", "lineage"],
+  "properties": {
+    "recipe_version": {"const": "1.0.0"},
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "model", "variant", "precision", "normalization", "batch_size", "sha256", "size_bytes"],
+      "properties": {
+        "file": {"type": "string", "description": "Path relative to models/, forward slashes.", "pattern": "^[a-z0-9_]+/[a-z0-9_]+\\.onnx$"},
+        "model": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+        "variant": {"enum": ["fp32", "fp32_folded", "int8", "int8_unpruned", "int8_folded", "int8_folded_unpruned"]},
+        "precision": {"enum": ["fp32", "int8"]},
+        "normalization": {"enum": ["external", "folded"]},
+        "batch_size": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "weights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["library", "id", "url", "sha256"],
+      "properties": {
+        "library": {"enum": ["torchvision", "timm"]},
+        "id": {"type": "string", "minLength": 1, "description": "Weights identifier, e.g. torchvision MobileNet_V2_Weights.IMAGENET1K_V2."},
+        "url": {"type": "string", "pattern": "^https://"},
+        "sha256": {"$ref": "#/$defs/sha256", "description": "SHA256 of the downloaded weights file."},
+        "hf_repo": {"type": "string", "minLength": 1},
+        "hf_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "file": {"type": "string", "minLength": 1}
+      },
+      "if": {"properties": {"library": {"const": "timm"}}},
+      "then": {"required": ["hf_repo", "hf_revision", "file"]},
+      "else": {"not": {"anyOf": [{"required": ["hf_repo"]}, {"required": ["hf_revision"]}, {"required": ["file"]}]}}
+    },
+    "export": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exporter", "opset", "ir_version", "inputs", "outputs", "tool_versions"],
+      "properties": {
+        "exporter": {"type": "string", "minLength": 1},
+        "opset": {"type": "integer", "minimum": 1},
+        "ir_version": {"type": "integer", "minimum": 1},
+        "inputs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/tensor"}},
+        "outputs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/tensor"}},
+        "tool_versions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["onnx", "torch", "torchvision"],
+          "properties": {
+            "onnx": {"type": "string", "minLength": 1},
+            "torch": {"type": "string", "minLength": 1},
+            "torchvision": {"type": "string", "minLength": 1},
+            "timm": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "preprocessing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resize_shorter_side", "interpolation", "center_crop", "scale", "layout", "dtype", "mean", "std",
+                   "normalization", "normalization_applied_by", "input_range", "fold"],
+      "properties": {
+        "resize_shorter_side": {"type": "integer", "minimum": 1},
+        "interpolation": {"type": "string", "minLength": 1},
+        "center_crop": {"type": "integer", "minimum": 1},
+        "scale": {"type": "string", "minLength": 1},
+        "layout": {"const": "NCHW"},
+        "dtype": {"const": "float32"},
+        "mean": {"$ref": "#/$defs/rgb"},
+        "std": {"$ref": "#/$defs/rgb"},
+        "normalization": {"enum": ["external", "folded"]},
+        "normalization_applied_by": {"type": "string", "minLength": 1},
+        "input_range": {"type": "string", "minLength": 1, "description": "What the input tensor holds."},
+        "fold": {
+          "description": "How normalization was folded into the model; null for external normalization.",
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["padding", "first_conv"],
+              "properties": {
+                "padding": {"enum": ["mean_pad", "none"]},
+                "first_conv": {"type": "string", "minLength": 1}
+              }
+            }
+          ]
+        }
+      },
+      "if": {"properties": {"normalization": {"const": "external"}}},
+      "then": {"properties": {"fold": {"type": "null"}}},
+      "else": {"properties": {"fold": {"type": "object"}}}
+    },
+    "quantization": {
+      "description": "The quantization recipe; null for FP32 files.",
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["format", "method", "weight_type", "weight_symmetric", "per_channel", "activation_type",
+                       "activation_symmetric", "bias_type", "calibration", "qnn_preprocess", "pruned",
+                       "pruned_chains", "pruned_nodes", "quantizer", "onnxruntime_version"],
+          "properties": {
+            "format": {"enum": ["qdq", "qoperator"]},
+            "method": {"enum": ["static", "dynamic"]},
+            "weight_type": {"enum": ["int8", "uint8"]},
+            "weight_symmetric": {"type": "boolean"},
+            "per_channel": {"type": "boolean"},
+            "activation_type": {"enum": ["int8", "uint8"]},
+            "activation_symmetric": {"type": "boolean"},
+            "bias_type": {"type": "string", "minLength": 1},
+            "calibration": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["method", "dataset", "manifest_sha256", "image_count", "batch"],
+              "properties": {
+                "method": {"type": "string", "minLength": 1},
+                "dataset": {"type": "string", "minLength": 1},
+                "manifest_sha256": {"$ref": "#/$defs/sha256", "description": "SHA256 of the calibration split manifest."},
+                "image_count": {"type": "integer", "minimum": 1},
+                "batch": {"type": "string", "minLength": 1}
+              }
+            },
+            "qnn_preprocess": {"type": "string", "minLength": 1},
+            "pruned": {"type": "boolean"},
+            "pruned_chains": {"type": "integer", "minimum": 0, "description": "Dead QuantizeLinear/DequantizeLinear chains removed by pruning (0 if not pruned)."},
+            "pruned_nodes": {"type": "integer", "minimum": 0, "description": "Nodes removed by pruning (0 if not pruned)."},
+            "quantizer": {"type": "string", "minLength": 1},
+            "onnxruntime_version": {"type": "string", "minLength": 1}
+          },
+          "if": {"properties": {"pruned": {"const": false}}},
+          "then": {"properties": {"pruned_chains": {"const": 0}, "pruned_nodes": {"const": 0}}}
+        }
+      ]
+    },
+    "lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parent"],
+      "properties": {
+        "parent": {
+          "description": "The file this one was made from; null for an FP32 export (made from the weights).",
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["file", "sha256"],
+              "properties": {
+                "file": {"type": "string", "pattern": "^[a-z0-9_]+/[a-z0-9_]+\\.onnx$"},
+                "sha256": {"$ref": "#/$defs/sha256"}
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"identity": {"properties": {"precision": {"const": "fp32"}}}}},
+      "then": {"properties": {"quantization": {"type": "null"}}},
+      "else": {"properties": {"quantization": {"type": "object"}}}
+    },
+    {
+      "if": {"properties": {"identity": {"properties": {"variant": {"const": "fp32"}}}}},
+      "then": {"properties": {"lineage": {"properties": {"parent": {"type": "null"}}}}},
+      "else": {"properties": {"lineage": {"properties": {"parent": {"type": "object"}}}}}
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "rgb": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number", "exclusiveMinimum": 0}},
+    "tensor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "dtype", "shape"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "dtype": {"type": "string", "minLength": 1},
+        "shape": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1}}
+      }
+    }
+  }
+}

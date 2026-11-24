@@ -13,7 +13,8 @@ and writes, next to it:
   ``<model>_int8_folded_b<batch>.onnx`` and ``<model>_int8_folded_unpruned_b<batch>.onnx``,
   calibrated with [0, 1] images (no mean/std), since those models take raw input.
 
-Both are added to ``models/manifest.json``. The recipe (per-channel symmetric
+Every file gets a recipe sidecar (``<name>.recipe.json``, see
+``common/model_recipe.py``) and an entry in ``models/manifest.json``. The recipe (per-channel symmetric
 int8 weights, uint8 activations, MinMax calibration on the 200 Imagenette
 calibration images, batch-1 ranges shared by all batch sizes) is described in
 ``common/onnx_quantize.py`` and docs/models.md.
@@ -49,7 +50,6 @@ from common.model_registry import (  # noqa: E402
     MANIFEST_PATH,
     MODELS,
     MODELS_DIR,
-    ManifestFile,
     read_manifest,
     relative_path,
     write_manifest,
@@ -112,6 +112,7 @@ def quantize(names: list[str], batches: list[int], sources: list[str]) -> int:
 
     from common import onnx_export as ox
     from common import onnx_quantize as oq
+    from common.model_recipe import record_model_file
 
     if not oq.calibration_images_present():
         print("Imagenette calibration images missing: run scripts/get_data.py first",
@@ -148,9 +149,9 @@ def quantize(names: list[str], batches: list[int], sources: list[str]) -> int:
             rel_unpruned = relative_path(name, unpruned_variant, batch)
             write_atomically(MODELS_DIR / rel, r["pruned"])
             write_atomically(MODELS_DIR / rel_unpruned, r["unpruned"])
-            by_file[rel] = ManifestFile(rel, ox.sha256_bytes(r["pruned"]), len(r["pruned"]))
-            by_file[rel_unpruned] = ManifestFile(rel_unpruned, ox.sha256_bytes(r["unpruned"]),
-                                                 len(r["unpruned"]))
+            by_file[rel] = record_model_file(MODELS_DIR / rel, rel, r["pruned"])
+            by_file[rel_unpruned] = record_model_file(MODELS_DIR / rel_unpruned, rel_unpruned,
+                                                      r["unpruned"])
 
             checks: dict = {}
             if x is not None:

@@ -28,6 +28,7 @@ from typing import Any
 from common.model_registry import (
     EXPORTER,
     INPUT_NAME,
+    INPUT_RANGE_EXTERNAL,
     META_NORMALIZATION,
     META_PREFIX,
     NUM_CLASSES,
@@ -162,9 +163,13 @@ def model_metadata(spec: ModelSpec, variant: str, batch: int,
         META_PREFIX + "model": spec.name,
         META_PREFIX + "variant": variant,
         META_PREFIX + "batch_size": str(batch),
+        META_PREFIX + "precision": "fp32",
         META_PREFIX + "weights": spec.weights_id,
+        META_PREFIX + "weights_source": spec.source,
+        META_PREFIX + "weights_url": spec.weights_url,
         META_PREFIX + "weights_sha256": spec.weights_sha256,
         META_NORMALIZATION: "external",
+        META_PREFIX + "input_range": INPUT_RANGE_EXTERNAL,
         META_PREFIX + "input_preprocessing": json.dumps(
             preprocess_description(spec.mean, spec.std), sort_keys=True),
         META_PREFIX + "exporter": EXPORTER,
@@ -175,6 +180,9 @@ def model_metadata(spec: ModelSpec, variant: str, batch: int,
     }
     if spec.source == "timm":
         metadata[META_PREFIX + "timm_version"] = versions["timm"]
+        metadata[META_PREFIX + "weights_hf_repo"] = spec.hf_repo
+        metadata[META_PREFIX + "weights_hf_revision"] = spec.hf_revision
+        metadata[META_PREFIX + "weights_file"] = spec.weights_file
     return metadata
 
 

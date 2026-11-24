@@ -22,10 +22,11 @@ Recipe (the default INT8 recipe; see docs/models.md):
   kept as a reference with bit-identical outputs.
 
 Metadata: the FP32 source's ``edgebench.*`` keys that describe the model and its
-input carry over (model, batch_size, weights, normalization, input
-preprocessing, export versions); variant, precision, opset and IR version are
-rewritten, and the recipe is added as flat ``edgebench.quant.*`` keys plus the
-source model's path and SHA256.
+input carry over (model, batch_size, weights and their source, normalization,
+input range and preprocessing, export versions); variant, precision, opset and
+IR version are rewritten, and the recipe (including what pruning removed) is
+added as flat ``edgebench.quant.*`` keys plus the source model's path and
+SHA256.
 """
 
 from __future__ import annotations
@@ -55,12 +56,13 @@ QUANT_PREFIX = META_PREFIX + "quant."
 
 # Source keys that describe the model, its input or how the FP32 file was made,
 # and so stay valid for the quantized file.
-CARRIED_KEYS = ("model", "batch_size", "weights", "weights_sha256", "normalization",
-                "input_preprocessing", "exporter", "torch_version", "torchvision_version",
-                "onnx_version", "timm_version",
+CARRIED_KEYS = ("model", "batch_size", "weights", "weights_source", "weights_url",
+                "weights_sha256", "normalization", "input_range", "input_preprocessing",
+                "exporter", "torch_version", "torchvision_version", "onnx_version",
+                # timm models only
+                "timm_version", "weights_hf_repo", "weights_hf_revision", "weights_file",
                 # normalization-folded sources only (see common/onnx_fold.py)
-                "input_range", "folded_mean", "folded_std", "fold_padding",
-                "fold_first_conv")
+                "folded_mean", "folded_std", "fold_padding", "fold_first_conv")
 
 
 def calibration_entries() -> list:
@@ -94,7 +96,8 @@ def _reader(spec: ModelSpec, entries: list, normalized: bool) -> Any:
 
 def quant_metadata(spec: ModelSpec, source_meta: dict[str, str], variant: str, proto: Any,
                    source_rel: str, source_sha256: str, preprocess_changed: bool,
-                   calibration_count: int) -> dict[str, str]:
+                   calibration_count: int, prune_report: Any = None) -> dict[str, str]:
+    """INT8 metadata; ``prune_report`` is the pruning of this file (None: not pruned)."""
     import onnxruntime as ort
 
     meta = {META_PREFIX + k: source_meta[META_PREFIX + k] for k in CARRIED_KEYS
@@ -126,6 +129,12 @@ def quant_metadata(spec: ModelSpec, source_meta: dict[str, str], variant: str, p
                                "(qnn_preprocess_model, get_qnn_qdq_config, quantize_static)",
         QUANT_PREFIX + "qnn_preprocess": "applied" if preprocess_changed else "no changes",
         QUANT_PREFIX + "pruned": "true" if variant in (INT8, INT8_FOLDED) else "false",
+        # Dead QuantizeLinear/DequantizeLinear chains on constants, and all nodes,
+        # removed by pruning (0 for the unpruned reference file).
+        QUANT_PREFIX + "pruned_chains": str(
+            prune_report.removed_nodes.get("QuantizeLinear", 0) if prune_report else 0),
+        QUANT_PREFIX + "pruned_nodes": str(
+            sum(prune_report.removed_nodes.values()) if prune_report else 0),
     })
     return dict(sorted(meta.items()))
 
@@ -216,9 +225,10 @@ def quantize(spec: ModelSpec, batches: list[int], calibration_count: int | None 
             unpruned = onnx.load(str(out))
             pruned = onnx.load(str(out))
             report = prune(pruned)
-            for proto, variant in ((unpruned, unpruned_variant), (pruned, pruned_variant)):
+            for proto, variant, pruning in ((unpruned, unpruned_variant, None),
+                                            (pruned, pruned_variant, report)):
                 _set_metadata(proto, quant_metadata(spec, source_meta, variant, proto, source_rel,
-                                                    source_sha, changed, len(entries)))
+                                                    source_sha, changed, len(entries), pruning))
                 onnx.checker.check_model(proto, full_check=True)
             results[batch] = {
                 "unpruned": unpruned.SerializeToString(),

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/mstfaatf/edgebench/main/schemas/model-manifest.v1.0.0.schema.json",
+  "title": "EdgeBench model manifest",
+  "description": "models/manifest.json: the committed index of every model file, what it is and which file it was made from. Manifest version 1.0.0. Lineage (every parent present, ending at an FP32 export with external normalization) is checked by scripts/common/model_registry.py lineage_problems(). See docs/models.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifest_version", "description", "tools", "files"],
+  "properties": {
+    "manifest_version": {"const": "1.0.0"},
+    "description": {"type": "string"},
+    "tools": {
+      "description": "Versions of the export tools the files were made with.",
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "sha256", "size_bytes", "model", "variant", "precision", "normalization", "batch_size",
+                     "pruned", "parent_sha256"],
+        "properties": {
+          "file": {"type": "string", "pattern": "^[a-z0-9_]+/[a-z0-9_]+\\.onnx$"},
+          "sha256": {"$ref": "#/$defs/sha256"},
+          "size_bytes": {"type": "integer", "minimum": 1},
+          "model": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+          "variant": {"enum": ["fp32", "fp32_folded", "int8", "int8_unpruned", "int8_folded", "int8_folded_unpruned"]},
+          "precision": {"enum": ["fp32", "int8"]},
+          "normalization": {"enum": ["external", "folded"]},
+          "batch_size": {"type": "integer", "minimum": 1},
+          "pruned": {"type": ["boolean", "null"], "description": "INT8 only: dead Q/DQ chains removed; null for FP32."},
+          "parent_sha256": {
+            "description": "SHA256 of the file this one was made from; null for an FP32 export.",
+            "oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]
+          }
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"precision": {"const": "fp32"}}},
+            "then": {"properties": {"pruned": {"type": "null"}}},
+            "else": {"properties": {"pruned": {"type": "boolean"}}}
+          },
+          {
+            "if": {"properties": {"variant": {"const": "fp32"}}},
+            "then": {"properties": {"parent_sha256": {"type": "null"}}},
+            "else": {"properties": {"parent_sha256": {"type": "string"}}}
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

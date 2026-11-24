@@ -97,6 +97,10 @@ def test_metadata_describes_the_int8_recipe(oq, quantized, rel):
     assert meta["edgebench.variant"] == ("int8" if pruned else "int8_unpruned")
     assert meta["edgebench.precision"] == "int8"
     assert meta["edgebench.quant.pruned"] == ("true" if pruned else "false")
+    # Dead Constant -> QuantizeLinear -> DequantizeLinear chains (docs/models.md, Pruning).
+    chains = {"mobilenetv2": 70, "resnet18": 0, "efficientnet_lite0": 66}[name] if pruned else 0
+    assert meta["edgebench.quant.pruned_chains"] == str(chains)
+    assert meta["edgebench.quant.pruned_nodes"] == str(3 * chains)
     assert meta["edgebench.source_model"] == source_rel
     manifest = {f.file: f for f in reg.read_manifest()[0]}
     assert meta["edgebench.source_sha256"] == manifest[source_rel].sha256

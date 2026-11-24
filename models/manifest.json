@@ -1,5 +1,6 @@
 {
-  "description": "SHA256 and size of every model file produced by scripts/export_models.py with the tool versions below. Paths are relative to models/.",
+  "manifest_version": "1.0.0",
+  "description": "Every model file produced by scripts/export_models.py, fold_models.py and quantize_models.py with the export tool versions below: SHA256, size, what it is (from the file's edgebench.* metadata) and the SHA256 of the file it was made from. Paths are relative to models/.",
   "tools": {
     "onnx": "1.23.2",
     "timm": "1.0.31",
@@ -9,273 +10,651 @@
   "files": [
     {
       "file": "efficientnet_lite0/efficientnet_lite0_fp32_b1.onnx",
-      "sha256": "c4ba45ec1484ec614c7007c0814444d88884633823a7de96fc1ba0c3d95fc8f6",
-      "size_bytes": 18560934
+      "sha256": "d4a9e1f6ee6512a2cae1c1f032cff1ba284717bc54ee9d32a8d95dd9385f1a4e",
+      "size_bytes": 18561387,
+      "model": "efficientnet_lite0",
+      "variant": "fp32",
+      "precision": "fp32",
+      "normalization": "external",
+      "batch_size": 1,
+      "pruned": null,
+      "parent_sha256": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_fp32_b4.onnx",
-      "sha256": "fbd68441cc9d839f87b4b00ad3ab3188c7f82c6bc07a132070e9b8ca71facecd",
-      "size_bytes": 18560934
+      "sha256": "0ec46a6818d060a0b09c4644270e066f169c4b89d3e9513b30b783f59941eed9",
+      "size_bytes": 18561387,
+      "model": "efficientnet_lite0",
+      "variant": "fp32",
+      "precision": "fp32",
+      "normalization": "external",
+      "batch_size": 4,
+      "pruned": null,
+      "parent_sha256": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_fp32_b8.onnx",
-      "sha256": "57214e397d24bb43d401ed50e8e10e6ff2f10aab9b06dd9f0505b94e5e3ed591",
-      "size_bytes": 18560934
+      "sha256": "57498cb34760db223b44cc26ccd42be3def46c1a41144b705d8a838c32dd03b9",
+      "size_bytes": 18561387,
+      "model": "efficientnet_lite0",
+      "variant": "fp32",
+      "precision": "fp32",
+      "normalization": "external",
+      "batch_size": 8,
+      "pruned": null,
+      "parent_sha256": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_fp32_folded_b1.onnx",
-      "sha256": "28a68dc7fea429b153959fc99d18ce105d947965d71e3e6617f184899e78083f",
-      "size_bytes": 18572756
+      "sha256": "d966af5ae1e29f97d416399de5c77070d7655145ecc12162644897a609bbf22a",
+      "size_bytes": 18573150,
+      "model": "efficientnet_lite0",
+      "variant": "fp32_folded",
+      "precision": "fp32",
+      "normalization": "folded",
+      "batch_size": 1,
+      "pruned": null,
+      "parent_sha256": "d4a9e1f6ee6512a2cae1c1f032cff1ba284717bc54ee9d32a8d95dd9385f1a4e"
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_fp32_folded_b4.onnx",
-      "sha256": "69e5c69ce1070cd5d5497422dbdb71f9041b916ae2cf39fd6f4a238e336dfe67",
-      "size_bytes": 18605156
+      "sha256": "dd64f81b21ea60385e13f4ba5ccb21f16aee69cbc95f5fb7d22b29037d83b81f",
+      "size_bytes": 18605550,
+      "model": "efficientnet_lite0",
+      "variant": "fp32_folded",
+      "precision": "fp32",
+      "normalization": "folded",
+      "batch_size": 4,
+      "pruned": null,
+      "parent_sha256": "0ec46a6818d060a0b09c4644270e066f169c4b89d3e9513b30b783f59941eed9"
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_fp32_folded_b8.onnx",
-      "sha256": "f74aa3ea99d7aa3c2e4b50a3e968ac9c31f7d390e55f78552694e2ae5473c2dd",
-      "size_bytes": 18648364
+      "sha256": "da05590cd9f551d4c2fb2dd7f270b5bed9b3fa0d14076d48e854b4b3eddd66ff",
+      "size_bytes": 18648758,
+      "model": "efficientnet_lite0",
+      "variant": "fp32_folded",
+      "precision": "fp32",
+      "normalization": "folded",
+      "batch_size": 8,
+      "pruned": null,
+      "parent_sha256": "57498cb34760db223b44cc26ccd42be3def46c1a41144b705d8a838c32dd03b9"
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_b1.onnx",
-      "sha256": "b42a5215fdec7109f7840d2d67b008934184b7cc32f37bbe5b7f429ccce01664",
-      "size_bytes": 5086322
+      "sha256": "2403764478fd08197383200c35620d1b592ca2fa853d2024db38e840c31b4cd3",
+      "size_bytes": 5086820,
+      "model": "efficientnet_lite0",
+      "variant": "int8",
+      "precision": "int8",
+      "normalization": "external",
+      "batch_size": 1,
+      "pruned": true,
+      "parent_sha256": "d4a9e1f6ee6512a2cae1c1f032cff1ba284717bc54ee9d32a8d95dd9385f1a4e"
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_b4.onnx",
-      "sha256": "59262f53bde7c0ecfe6a081e6ab29a729416e03a402afaa9229ba1e6d9f9d355",
-      "size_bytes": 5086322
+      "sha256": "83cd4f35193748408c5b7a6e76db5da3f235108cea996b6ca9e96c9617d01a2f",
+      "size_bytes": 5086820,
+      "model": "efficientnet_lite0",
+      "variant": "int8",
+      "precision": "int8",
+      "normalization": "external",
+      "batch_size": 4,
+      "pruned": true,
+      "parent_sha256": "0ec46a6818d060a0b09c4644270e066f169c4b89d3e9513b30b783f59941eed9"
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_b8.onnx",
-      "sha256": "95803342d656e3e41f20825bc229afff9d1ee465a5a03301a097a8293def3b99",
-      "size_bytes": 5086322
+      "sha256": "c79c66a4242e8cfa2c3ad58094c78670bf1cecb06217d51d8152dedf8a61a1c8",
+      "size_bytes": 5086820,
+      "model": "efficientnet_lite0",
+      "variant": "int8",
+      "precision": "int8",
+      "normalization": "external",
+      "batch_size": 8,
+      "pruned": true,
+      "parent_sha256": "57498cb34760db223b44cc26ccd42be3def46c1a41144b705d8a838c32dd03b9"
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_folded_b1.onnx",
-      "sha256": "6c0db506d1654e098b99762c8f40eba168bf15ae91c50baf727840e897edaf88",
-      "size_bytes": 5092884
+      "sha256": "5fef2c3c07e6fe35522d9a821edfbc56846c17b6dae1f8cfd2e5306e9ae62900",
+      "size_bytes": 5093323,
+      "model": "efficientnet_lite0",
+      "variant": "int8_folded",
+      "precision": "int8",
+      "normalization": "folded",
+      "batch_size": 1,
+      "pruned": true,
+      "parent_sha256": "d966af5ae1e29f97d416399de5c77070d7655145ecc12162644897a609bbf22a"
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_folded_b4.onnx",
-      "sha256": "b1612468ed695263cabc997ebfe6ee4c5ad90b369fbf8ea4e8e2820111a0ffba",
-      "size_bytes": 5100984
+      "sha256": "1b28616d545a7f8e903f7d4196b029434af17b45482350b206287a7a0122487e",
+      "size_bytes": 5101423,
+      "model": "efficientnet_lite0",
+      "variant": "int8_folded",
+      "precision": "int8",
+      "normalization": "folded",
+      "batch_size": 4,
+      "pruned": true,
+      "parent_sha256": "dd64f81b21ea60385e13f4ba5ccb21f16aee69cbc95f5fb7d22b29037d83b81f"
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_folded_b8.onnx",
-      "sha256": "c295cc7db1e9e781f56e9c4526212de743594e6ce8048ca6bd1e9543d9a8ad7c",
-      "size_bytes": 5111784
+      "sha256": "dab34fbe2bfda560c6cc653ab1d9bb956bf3d3af9ddc11ce003a23e7a2d01911",
+      "size_bytes": 5112223,
+      "model": "efficientnet_lite0",
+      "variant": "int8_folded",
+      "precision": "int8",
+      "normalization": "folded",
+      "batch_size": 8,
+      "pruned": true,
+      "parent_sha256": "da05590cd9f551d4c2fb2dd7f270b5bed9b3fa0d14076d48e854b4b3eddd66ff"
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_folded_unpruned_b1.onnx",
-      "sha256": "5494741c1ca40b6b4a954244af806d370cfd2ee5921f924b1315379ddb611d93",
-      "size_bytes": 5165334
+      "sha256": "c4a6c43f254b9d42c50a15ec1cfb21838f50ab4a4f1a819ff13f2fbda109b05e",
+      "size_bytes": 5165770,
+      "model": "efficientnet_lite0",
+      "variant": "int8_folded_unpruned",
+      "precision": "int8",
+      "normalization": "folded",
+      "batch_size": 1,
+      "pruned": false,
+      "parent_sha256": "d966af5ae1e29f97d416399de5c77070d7655145ecc12162644897a609bbf22a"
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_folded_unpruned_b4.onnx",
-      "sha256": "9a336ad2aff6c3323c829515b78b81db68f0da9de2acf57a56de5fb85cc2792b",
-      "size_bytes": 5173434
+      "sha256": "c84d07be490cf960a2e8e0524974e2429971c56301ab999e3749e437821bb325",
+      "size_bytes": 5173870,
+      "model": "efficientnet_lite0",
+      "variant": "int8_folded_unpruned",
+      "precision": "int8",
+      "normalization": "folded",
+      "batch_size": 4,
+      "pruned": false,
+      "parent_sha256": "dd64f81b21ea60385e13f4ba5ccb21f16aee69cbc95f5fb7d22b29037d83b81f"
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_folded_unpruned_b8.onnx",
-      "sha256": "dd45ba97ab59a78731de42a9433170e149955e22a564d5586f38a7294d479c35",
-      "size_bytes": 5184234
+      "sha256": "5102e535e7a500169e495cc9528ddc07ffffe71789d46344771494d1fdb88222",
+      "size_bytes": 5184670,
+      "model": "efficientnet_lite0",
+      "variant": "int8_folded_unpruned",
+      "precision": "int8",
+      "normalization": "folded",
+      "batch_size": 8,
+      "pruned": false,
+      "parent_sha256": "da05590cd9f551d4c2fb2dd7f270b5bed9b3fa0d14076d48e854b4b3eddd66ff"
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_unpruned_b1.onnx",
-      "sha256": "ac98782a74bff56a9eaa34a6c041fe3ec0fb1b8a04bf9981066d214c4c2e3e7f",
-      "size_bytes": 5158772
+      "sha256": "1609c347b0662fff7ed3ad0ae04b8d7b22959462e9c0786b7a86b0586542f610",
+      "size_bytes": 5159267,
+      "model": "efficientnet_lite0",
+      "variant": "int8_unpruned",
+      "precision": "int8",
+      "normalization": "external",
+      "batch_size": 1,
+      "pruned": false,
+      "parent_sha256": "d4a9e1f6ee6512a2cae1c1f032cff1ba284717bc54ee9d32a8d95dd9385f1a4e"
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_unpruned_b4.onnx",
-      "sha256": "5b28c756321191e0fb3732648d111efffd3de8658c5b1216579e3cc441574a54",
-      "size_bytes": 5158772
+      "sha256": "02d0fb458f71ce238e3991701941de033d2c4c5f5d4f0c40bf720d1c508e4210",
+      "size_bytes": 5159267,
+      "model": "efficientnet_lite0",
+      "variant": "int8_unpruned",
+      "precision": "int8",
+      "normalization": "external",
+      "batch_size": 4,
+      "pruned": false,
+      "parent_sha256": "0ec46a6818d060a0b09c4644270e066f169c4b89d3e9513b30b783f59941eed9"
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_unpruned_b8.onnx",
-      "sha256": "560e8db935a4ee4d9b788dad2074616412b53c31ff0820bb340173f8ea217c0a",
-      "size_bytes": 5158772
+      "sha256": "d875d2b7bca7f8d28d8def0614f66cfa9da83cf0715e6ad37e82d67cfe790e5f",
+      "size_bytes": 5159267,
+      "model": "efficientnet_lite0",
+      "variant": "int8_unpruned",
+      "precision": "int8",
+      "normalization": "external",
+      "batch_size": 8,
+      "pruned": false,
+      "parent_sha256": "57498cb34760db223b44cc26ccd42be3def46c1a41144b705d8a838c32dd03b9"
     },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_b1.onnx",
-      "sha256": "3b80d618151c020c1bcce93085b7a1a2d6aabde15612b462db0d2b9f07867e95",
-      "size_bytes": 13993027
+      "sha256": "bcf75698a82b096f63ce9d2048b0f50cb152ba3ea60882cdac06be3c12b6b674",
+      "size_bytes": 13993244,
+      "model": "mobilenetv2",
+      "variant": "fp32",
+      "precision": "fp32",
+      "normalization": "external",
+      "batch_size": 1,
+      "pruned": null,
+      "parent_sha256": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_b4.onnx",
-      "sha256": "d4661e82b717734669a6fab11ba6f2aba8d10ee053078a6215ffc3c23804bda4",
-      "size_bytes": 13993027
+      "sha256": "bca0e84d05262d7936bfc79548ba3132d0098aaf02c11fe35d00f9cc24cd286a",
+      "size_bytes": 13993244,
+      "model": "mobilenetv2",
+      "variant": "fp32",
+      "precision": "fp32",
+      "normalization": "external",
+      "batch_size": 4,
+      "pruned": null,
+      "parent_sha256": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_b8.onnx",
-      "sha256": "2954b6c5cba4d7526d67396c6c4ddf26aa59163013a586723941adecab40195a",
-      "size_bytes": 13993027
+      "sha256": "43ee5ee32a75664f49837efaa6f3561411e023127946379db4cc5fbd44c21128",
+      "size_bytes": 13993244,
+      "model": "mobilenetv2",
+      "variant": "fp32",
+      "precision": "fp32",
+      "normalization": "external",
+      "batch_size": 8,
+      "pruned": null,
+      "parent_sha256": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_folded_b1.onnx",
-      "sha256": "4e2e3eb03e90235e23a74d22dd5b5b5cdcecb05663e7cb92ce46cad4ae6e28f0",
-      "size_bytes": 14005180
+      "sha256": "9d46447ed9a1d26334cfba193c2d7d206d98eba2934b481fb3f40e95e315f82f",
+      "size_bytes": 14005338,
+      "model": "mobilenetv2",
+      "variant": "fp32_folded",
+      "precision": "fp32",
+      "normalization": "folded",
+      "batch_size": 1,
+      "pruned": null,
+      "parent_sha256": "bcf75698a82b096f63ce9d2048b0f50cb152ba3ea60882cdac06be3c12b6b674"
     },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_folded_b4.onnx",
-      "sha256": "c77e45c6d5700667a9fd0d70f2d3d4a6b72f8f00e98991c6935377a3c35ea8e9",
-      "size_bytes": 14037580
+      "sha256": "e1c642e7aa46fa388df12a691b4ad0e1b17c15ec6e397e13ad9d6bf25adad2cd",
+      "size_bytes": 14037738,
+      "model": "mobilenetv2",
+      "variant": "fp32_folded",
+      "precision": "fp32",
+      "normalization": "folded",
+      "batch_size": 4,
+      "pruned": null,
+      "parent_sha256": "bca0e84d05262d7936bfc79548ba3132d0098aaf02c11fe35d00f9cc24cd286a"
     },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_folded_b8.onnx",
-      "sha256": "3409d40dc0b972a0fffa241955ce924e55990b0e9d92af7096f9cd7667482fa7",
-      "size_bytes": 14080788
+      "sha256": "c40af92ba09a45a260edebb25538ec4b33e44ddc7fa38bd0070cb7e1d84dad45",
+      "size_bytes": 14080946,
+      "model": "mobilenetv2",
+      "variant": "fp32_folded",
+      "precision": "fp32",
+      "normalization": "folded",
+      "batch_size": 8,
+      "pruned": null,
+      "parent_sha256": "43ee5ee32a75664f49837efaa6f3561411e023127946379db4cc5fbd44c21128"
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_b1.onnx",
-      "sha256": "9444da253ec3cb093d3a024f407d4ddc531dd18689f49088054d9017a1fd32db",
-      "size_bytes": 3887980
+      "sha256": "197ffa4d0b301e864fbbf1674c47a4c3f6df17363b267c6d93d5b7bb01819b03",
+      "size_bytes": 3888242,
+      "model": "mobilenetv2",
+      "variant": "int8",
+      "precision": "int8",
+      "normalization": "external",
+      "batch_size": 1,
+      "pruned": true,
+      "parent_sha256": "bcf75698a82b096f63ce9d2048b0f50cb152ba3ea60882cdac06be3c12b6b674"
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_b4.onnx",
-      "sha256": "016168aded19602c2df63c3f35b994dae6f26de9a683001825f0195e5aef55a7",
-      "size_bytes": 3887980
+      "sha256": "aa52572889a76b971a682439a887b5f07a75bad46a2976ca31d3a6a134abd360",
+      "size_bytes": 3888242,
+      "model": "mobilenetv2",
+      "variant": "int8",
+      "precision": "int8",
+      "normalization": "external",
+      "batch_size": 4,
+      "pruned": true,
+      "parent_sha256": "bca0e84d05262d7936bfc79548ba3132d0098aaf02c11fe35d00f9cc24cd286a"
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_b8.onnx",
-      "sha256": "13c9dd0ba419d5655b7dc588b0e8a7c80373b9780c0efd468234ebd8c1b15af2",
-      "size_bytes": 3887980
+      "sha256": "622f0adcba586dfa787a712bd59d1d17bf590fa56a5c1ce980cd61ee03504ec2",
+      "size_bytes": 3888242,
+      "model": "mobilenetv2",
+      "variant": "int8",
+      "precision": "int8",
+      "normalization": "external",
+      "batch_size": 8,
+      "pruned": true,
+      "parent_sha256": "43ee5ee32a75664f49837efaa6f3561411e023127946379db4cc5fbd44c21128"
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_folded_b1.onnx",
-      "sha256": "e1eb3db997f19aaf4fa85ca66cfc6c0e73f8cb096ceb08fdb056f39147229b98",
-      "size_bytes": 3896129
+      "sha256": "51ec54fe6974c8c7bec78dad34fbf08d54c77131f8b3d7398290799b06962b0e",
+      "size_bytes": 3896332,
+      "model": "mobilenetv2",
+      "variant": "int8_folded",
+      "precision": "int8",
+      "normalization": "folded",
+      "batch_size": 1,
+      "pruned": true,
+      "parent_sha256": "9d46447ed9a1d26334cfba193c2d7d206d98eba2934b481fb3f40e95e315f82f"
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_folded_b4.onnx",
-      "sha256": "431022c98e008fad639c92df32197e164e190036a199a61d888b126e2cfcfa05",
-      "size_bytes": 3904229
+      "sha256": "be2e79012e36aef1e7051c4e250f6573f33e5dd246072f4474cef354087f8809",
+      "size_bytes": 3904432,
+      "model": "mobilenetv2",
+      "variant": "int8_folded",
+      "precision": "int8",
+      "normalization": "folded",
+      "batch_size": 4,
+      "pruned": true,
+      "parent_sha256": "e1c642e7aa46fa388df12a691b4ad0e1b17c15ec6e397e13ad9d6bf25adad2cd"
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_folded_b8.onnx",
-      "sha256": "e8fe6f2888348fb86d531166a44621bfd592f843e6818df4fb1e68a23a4a7628",
-      "size_bytes": 3915029
+      "sha256": "6f721b44b2e6ac376c7637966ab02f7234b0793dfc1095812edc4df73af4852f",
+      "size_bytes": 3915232,
+      "model": "mobilenetv2",
+      "variant": "int8_folded",
+      "precision": "int8",
+      "normalization": "folded",
+      "batch_size": 8,
+      "pruned": true,
+      "parent_sha256": "c40af92ba09a45a260edebb25538ec4b33e44ddc7fa38bd0070cb7e1d84dad45"
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_folded_unpruned_b1.onnx",
-      "sha256": "a473990c63d5bdfdbd3800a6a9e427f07a012882bf3c473e6ad0ccbd66b31fe0",
-      "size_bytes": 3981317
+      "sha256": "b029d1810e95e6ab77440fec57adc239090cc54d34c11a1eee3297c3b9a8ecbe",
+      "size_bytes": 3981517,
+      "model": "mobilenetv2",
+      "variant": "int8_folded_unpruned",
+      "precision": "int8",
+      "normalization": "folded",
+      "batch_size": 1,
+      "pruned": false,
+      "parent_sha256": "9d46447ed9a1d26334cfba193c2d7d206d98eba2934b481fb3f40e95e315f82f"
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_folded_unpruned_b4.onnx",
-      "sha256": "1fbbe9328c68ef76617101c2a2f2958abc08d425e9c20f90e33191f6d594e783",
-      "size_bytes": 3989417
+      "sha256": "9cec3e352a8de3300bd39ee15193b8369f5ce8324cc9569f642d84ccf60862dc",
+      "size_bytes": 3989617,
+      "model": "mobilenetv2",
+      "variant": "int8_folded_unpruned",
+      "precision": "int8",
+      "normalization": "folded",
+      "batch_size": 4,
+      "pruned": false,
+      "parent_sha256": "e1c642e7aa46fa388df12a691b4ad0e1b17c15ec6e397e13ad9d6bf25adad2cd"
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_folded_unpruned_b8.onnx",
-      "sha256": "b5512f28ddee23245e322f88ec64e3609f7795eebdddcc89007efe668fd46a58",
-      "size_bytes": 4000217
+      "sha256": "1f017e368749ae574f7bf7ea8d783bae7e8385528ef2f671fd10eebcfc8a502a",
+      "size_bytes": 4000417,
+      "model": "mobilenetv2",
+      "variant": "int8_folded_unpruned",
+      "precision": "int8",
+      "normalization": "folded",
+      "batch_size": 8,
+      "pruned": false,
+      "parent_sha256": "c40af92ba09a45a260edebb25538ec4b33e44ddc7fa38bd0070cb7e1d84dad45"
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_unpruned_b1.onnx",
-      "sha256": "a012cd4375c0c009fc1e6a40f976c6dee8ac14c89dfcbe95c93f9a895db671c2",
-      "size_bytes": 3973168
+      "sha256": "f98bb0b8f874a260c90e006361e2e541c68ac00268a3a9b0e6371bafeac7c694",
+      "size_bytes": 3973427,
+      "model": "mobilenetv2",
+      "variant": "int8_unpruned",
+      "precision": "int8",
+      "normalization": "external",
+      "batch_size": 1,
+      "pruned": false,
+      "parent_sha256": "bcf75698a82b096f63ce9d2048b0f50cb152ba3ea60882cdac06be3c12b6b674"
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_unpruned_b4.onnx",
-      "sha256": "3c845aa118b3c646433859cb8a1488ad5b1cf14a176e6b0a90f02fcaa86d26aa",
-      "size_bytes": 3973168
+      "sha256": "0c7c39add71be773a11d1ea154b2ae90179e2808f08247f98bb1bceb6a4c09af",
+      "size_bytes": 3973427,
+      "model": "mobilenetv2",
+      "variant": "int8_unpruned",
+      "precision": "int8",
+      "normalization": "external",
+      "batch_size": 4,
+      "pruned": false,
+      "parent_sha256": "bca0e84d05262d7936bfc79548ba3132d0098aaf02c11fe35d00f9cc24cd286a"
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_unpruned_b8.onnx",
-      "sha256": "6240b92386eb6a817544fb2196ee0936b15d9864972d91b4d6a770637393d83f",
-      "size_bytes": 3973168
+      "sha256": "c93dba97f5273d81ed5fd1fadf97dfba1ee2eea487f7b77d02bcf7f9535c563f",
+      "size_bytes": 3973427,
+      "model": "mobilenetv2",
+      "variant": "int8_unpruned",
+      "precision": "int8",
+      "normalization": "external",
+      "batch_size": 8,
+      "pruned": false,
+      "parent_sha256": "43ee5ee32a75664f49837efaa6f3561411e023127946379db4cc5fbd44c21128"
     },
     {
       "file": "resnet18/resnet18_fp32_b1.onnx",
-      "sha256": "2e0f2425e8293c5479a79703b502fd4ad400559c6c23acb904cd5367fb8051fe",
-      "size_bytes": 46749308
+      "sha256": "5fd8a508cb03f38b8985af740a1287291a27ab2a03ecc6ee61217d0749cf33b2",
+      "size_bytes": 46749521,
+      "model": "resnet18",
+      "variant": "fp32",
+      "precision": "fp32",
+      "normalization": "external",
+      "batch_size": 1,
+      "pruned": null,
+      "parent_sha256": null
     },
     {
       "file": "resnet18/resnet18_fp32_b4.onnx",
-      "sha256": "bfd1db53cd168bdac90acb2bae341b06be92b1a93cd4edc8680afb73da4f7245",
-      "size_bytes": 46749308
+      "sha256": "f1b54297b2d1b0061606ce71007445e8a564919c7ccb9ff8782a35c12d5adc1b",
+      "size_bytes": 46749521,
+      "model": "resnet18",
+      "variant": "fp32",
+      "precision": "fp32",
+      "normalization": "external",
+      "batch_size": 4,
+      "pruned": null,
+      "parent_sha256": null
     },
     {
       "file": "resnet18/resnet18_fp32_b8.onnx",
-      "sha256": "043aee989ef7a03db79cea5eeddea55d9bb6e7b0a643b55965024dbd54b0008e",
-      "size_bytes": 46749308
+      "sha256": "9a348fc10c50ad222c71bfe0b1028470682da2cc7d76d62078bef853c7727c5a",
+      "size_bytes": 46749521,
+      "model": "resnet18",
+      "variant": "fp32",
+      "precision": "fp32",
+      "normalization": "external",
+      "batch_size": 8,
+      "pruned": null,
+      "parent_sha256": null
     },
     {
       "file": "resnet18/resnet18_fp32_folded_b1.onnx",
-      "sha256": "bbc3a833b62c1ebd0791adb44b86cd611ccba3a81ec0ae882170b3b8ac29dbd9",
-      "size_bytes": 46782938
+      "sha256": "1c2ab3d215d769e959ba58f08bb3bbcd24840e1455846c283e6c4a06e64f07d0",
+      "size_bytes": 46783092,
+      "model": "resnet18",
+      "variant": "fp32_folded",
+      "precision": "fp32",
+      "normalization": "folded",
+      "batch_size": 1,
+      "pruned": null,
+      "parent_sha256": "5fd8a508cb03f38b8985af740a1287291a27ab2a03ecc6ee61217d0749cf33b2"
     },
     {
       "file": "resnet18/resnet18_fp32_folded_b4.onnx",
-      "sha256": "ac2bd9b0a883081e059d5a9d97f8754b1e738f156fb429c99f15b5231b405b40",
-      "size_bytes": 46881010
+      "sha256": "23a3e2f0b83ae8116d07c30929ee9582fe4615d81800a85be057381489d316a8",
+      "size_bytes": 46881164,
+      "model": "resnet18",
+      "variant": "fp32_folded",
+      "precision": "fp32",
+      "normalization": "folded",
+      "batch_size": 4,
+      "pruned": null,
+      "parent_sha256": "f1b54297b2d1b0061606ce71007445e8a564919c7ccb9ff8782a35c12d5adc1b"
     },
     {
       "file": "resnet18/resnet18_fp32_folded_b8.onnx",
-      "sha256": "cb1e7c5e0f141e1598deadab00a3907d4554d0b8125e37e52355a0a6ca4ca5c4",
-      "size_bytes": 47011762
+      "sha256": "747fd510a139e978ce8a15bbf411e6bde6af61f09dae04060b9343f7dc19159c",
+      "size_bytes": 47011916,
+      "model": "resnet18",
+      "variant": "fp32_folded",
+      "precision": "fp32",
+      "normalization": "folded",
+      "batch_size": 8,
+      "pruned": null,
+      "parent_sha256": "9a348fc10c50ad222c71bfe0b1028470682da2cc7d76d62078bef853c7727c5a"
     },
     {
       "file": "resnet18/resnet18_int8_b1.onnx",
-      "sha256": "28f2982bb406e16bb75e3e61bfc9470b3d169459c40db78ead97439f5b36bb23",
-      "size_bytes": 11823212
+      "sha256": "72831876dc9974548ed5a4fdb8ae2f5e7695f68aed5c8b881ceaa37026c30937",
+      "size_bytes": 11823467,
+      "model": "resnet18",
+      "variant": "int8",
+      "precision": "int8",
+      "normalization": "external",
+      "batch_size": 1,
+      "pruned": true,
+      "parent_sha256": "5fd8a508cb03f38b8985af740a1287291a27ab2a03ecc6ee61217d0749cf33b2"
     },
     {
       "file": "resnet18/resnet18_int8_b4.onnx",
-      "sha256": "a0faf0d60d00fd33f39471bd8e065f6180150c611f4b54fcce68e3369b69ae35",
-      "size_bytes": 11823212
+      "sha256": "73ca4d6cf227d73e39879bcc66a990560a9834d9d94ffbbc66cbc84b567e0129",
+      "size_bytes": 11823467,
+      "model": "resnet18",
+      "variant": "int8",
+      "precision": "int8",
+      "normalization": "external",
+      "batch_size": 4,
+      "pruned": true,
+      "parent_sha256": "f1b54297b2d1b0061606ce71007445e8a564919c7ccb9ff8782a35c12d5adc1b"
     },
     {
       "file": "resnet18/resnet18_int8_b8.onnx",
-      "sha256": "49a007b8a69a9778bfbcff2c273463ae363ac3c793981b701e4cd91251f57f8f",
-      "size_bytes": 11823212
+      "sha256": "720093425d636d31703260d7db96bb62e08e3f5b1ac06aa523d92c830c9fdd86",
+      "size_bytes": 11823467,
+      "model": "resnet18",
+      "variant": "int8",
+      "precision": "int8",
+      "normalization": "external",
+      "batch_size": 8,
+      "pruned": true,
+      "parent_sha256": "9a348fc10c50ad222c71bfe0b1028470682da2cc7d76d62078bef853c7727c5a"
     },
     {
       "file": "resnet18/resnet18_int8_folded_b1.onnx",
-      "sha256": "126d2d866b1a948bfd6bbf7d15655d7f2a63f71fc9b84e70bda0c0f39e1e8f14",
-      "size_bytes": 11834970
+      "sha256": "74912302af2507e4a2d1a3e2e8e41781052d8697052c67d2e139b625ba2232ad",
+      "size_bytes": 11835166,
+      "model": "resnet18",
+      "variant": "int8_folded",
+      "precision": "int8",
+      "normalization": "folded",
+      "batch_size": 1,
+      "pruned": true,
+      "parent_sha256": "1c2ab3d215d769e959ba58f08bb3bbcd24840e1455846c283e6c4a06e64f07d0"
     },
     {
       "file": "resnet18/resnet18_int8_folded_b4.onnx",
-      "sha256": "ae619ca3be99dd19fa7be0639f9252ef128d833a03f1a78c3af2fe12ba70777b",
-      "size_bytes": 11859486
+      "sha256": "af7e6278ba7a91319f2d66c8bd2edce19575e2cb2c0cd31c93289f18f61b1557",
+      "size_bytes": 11859682,
+      "model": "resnet18",
+      "variant": "int8_folded",
+      "precision": "int8",
+      "normalization": "folded",
+      "batch_size": 4,
+      "pruned": true,
+      "parent_sha256": "23a3e2f0b83ae8116d07c30929ee9582fe4615d81800a85be057381489d316a8"
     },
     {
       "file": "resnet18/resnet18_int8_folded_b8.onnx",
-      "sha256": "e8ad9ae3654d50283410eac5111050ee66ae11f155ff7d7eacb4722f63c5f556",
-      "size_bytes": 11892178
+      "sha256": "2f5935443046df4907b35b3d57f433fbeee5f7a4eff7783f5fe1417b0d3784db",
+      "size_bytes": 11892374,
+      "model": "resnet18",
+      "variant": "int8_folded",
+      "precision": "int8",
+      "normalization": "folded",
+      "batch_size": 8,
+      "pruned": true,
+      "parent_sha256": "747fd510a139e978ce8a15bbf411e6bde6af61f09dae04060b9343f7dc19159c"
     },
     {
       "file": "resnet18/resnet18_int8_folded_unpruned_b1.onnx",
-      "sha256": "6dc0d19509d5323469bc3778207f62c3a59b8aceb42a82eb2cd2a77591a1de7f",
-      "size_bytes": 11836008
+      "sha256": "e0bdeb9760fe0362e0648e55d6553207604c4c618c0b79f6e187a632c7d61d92",
+      "size_bytes": 11836204,
+      "model": "resnet18",
+      "variant": "int8_folded_unpruned",
+      "precision": "int8",
+      "normalization": "folded",
+      "batch_size": 1,
+      "pruned": false,
+      "parent_sha256": "1c2ab3d215d769e959ba58f08bb3bbcd24840e1455846c283e6c4a06e64f07d0"
     },
     {
       "file": "resnet18/resnet18_int8_folded_unpruned_b4.onnx",
-      "sha256": "df4c2ceca420b2e09489cec3e7ee55de80a87529c014ece4866d5104f435c4b7",
-      "size_bytes": 11860524
+      "sha256": "c5a9bf561854b84e9d277f675611761abd563a813e114a30f6731e06eac5f539",
+      "size_bytes": 11860720,
+      "model": "resnet18",
+      "variant": "int8_folded_unpruned",
+      "precision": "int8",
+      "normalization": "folded",
+      "batch_size": 4,
+      "pruned": false,
+      "parent_sha256": "23a3e2f0b83ae8116d07c30929ee9582fe4615d81800a85be057381489d316a8"
     },
     {
       "file": "resnet18/resnet18_int8_folded_unpruned_b8.onnx",
-      "sha256": "4320ce7dc441dd8c4ed56851c2de264009355b97b5d98b7380377f828b8558d7",
-      "size_bytes": 11893216
+      "sha256": "01c2dfa2dcec28627dd5e9528eefb3c012bcf83f9bae021b0991d590dc223d2b",
+      "size_bytes": 11893412,
+      "model": "resnet18",
+      "variant": "int8_folded_unpruned",
+      "precision": "int8",
+      "normalization": "folded",
+      "batch_size": 8,
+      "pruned": false,
+      "parent_sha256": "747fd510a139e978ce8a15bbf411e6bde6af61f09dae04060b9343f7dc19159c"
     },
     {
       "file": "resnet18/resnet18_int8_unpruned_b1.onnx",
-      "sha256": "9f92edfa41470450dfe7af3d68858b236ec9a2285f598ee4702e56458d1c1f86",
-      "size_bytes": 11824250
+      "sha256": "9cd8a2d5c538f031206a149ff486e535ccc28ff6d3b6cfd2a353a70dd83ca47a",
+      "size_bytes": 11824505,
+      "model": "resnet18",
+      "variant": "int8_unpruned",
+      "precision": "int8",
+      "normalization": "external",
+      "batch_size": 1,
+      "pruned": false,
+      "parent_sha256": "5fd8a508cb03f38b8985af740a1287291a27ab2a03ecc6ee61217d0749cf33b2"
     },
     {
       "file": "resnet18/resnet18_int8_unpruned_b4.onnx",
-      "sha256": "0d8ddef2bc366bb283c224d12db67d3c9ea9cf15bc7e8a058ed8fd7cf4e7ea7d",
-      "size_bytes": 11824250
+      "sha256": "cee046c4edc9fb8ba49ef51deac7aa11a20986f5d5e0baa871498605fe69a624",
+      "size_bytes": 11824505,
+      "model": "resnet18",
+      "variant": "int8_unpruned",
+      "precision": "int8",
+      "normalization": "external",
+      "batch_size": 4,
+      "pruned": false,
+      "parent_sha256": "f1b54297b2d1b0061606ce71007445e8a564919c7ccb9ff8782a35c12d5adc1b"
     },
     {
       "file": "resnet18/resnet18_int8_unpruned_b8.onnx",
-      "sha256": "b15c4cc350bbec541a46ae2ebd1d4e1ca0a5480e20d794c9793ee20972717c72",
-      "size_bytes": 11824250
+      "sha256": "40e2d96c2d6e3922f62695db8e8c139de18671c399df4781e0505ad1ba1339a9",
+      "size_bytes": 11824505,
+      "model": "resnet18",
+      "variant": "int8_unpruned",
+      "precision": "int8",
+      "normalization": "external",
+      "batch_size": 8,
+      "pruned": false,
+      "parent_sha256": "9a348fc10c50ad222c71bfe0b1028470682da2cc7d76d62078bef853c7727c5a"
     }
   ]
 }

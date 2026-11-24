@@ -65,21 +65,6 @@ def test_file_naming():
         "resnet18/resnet18_fp32_b8.onnx"]
 
 
-def test_manifest_round_trip():
-    files = [reg.ManifestFile("b/x.onnx", "b" * 64, 2), reg.ManifestFile("a/x.onnx", "a" * 64, 1)]
-    text = reg.format_manifest(files, {"torch": "1", "onnx": "2"})
-    parsed, tools = reg.parse_manifest(text)
-    assert [f.file for f in parsed] == ["a/x.onnx", "b/x.onnx"]
-    assert tools == {"onnx": "2", "torch": "1"}
-
-
-def test_manifest_rejects_unsorted_or_duplicate_files():
-    good = reg.format_manifest([reg.ManifestFile("a.onnx", "a" * 64, 1)], {})
-    with pytest.raises(ValueError):
-        reg.parse_manifest(good.replace('"files": [', '"files": [{"file": "z.onnx", '
-                                        '"sha256": "' + "c" * 64 + '", "size_bytes": 1}, '))
-
-
 def test_committed_manifest_lists_every_fp32_export():
     text = reg.MANIFEST_PATH.read_text(encoding="utf-8")
     files, tools = reg.parse_manifest(text)
@@ -203,6 +188,16 @@ def test_exported_file_is_static_fp32_with_external_normalization(ox, exported, 
     preprocessing = json.loads(meta["edgebench.input_preprocessing"])
     assert (preprocessing["mean"], preprocessing["std"]) == (list(spec.mean), list(spec.std))
     assert ("edgebench.timm_version" in meta) == (spec.source == "timm")
+    assert meta["edgebench.precision"] == "fp32"
+    assert meta["edgebench.input_range"] == reg.INPUT_RANGE_EXTERNAL
+    assert meta["edgebench.weights_source"] == spec.source
+    assert meta["edgebench.weights_url"] == spec.weights_url
+    hf = {k: meta.get("edgebench.weights_" + k) for k in ("hf_repo", "hf_revision", "file")}
+    if spec.source == "timm":
+        assert hf == {"hf_repo": spec.hf_repo, "hf_revision": spec.hf_revision,
+                      "file": spec.weights_file}
+    else:
+        assert hf == {"hf_repo": None, "hf_revision": None, "file": None}
 
 
 def test_static_shape_problems_finds_symbolic_and_missing_dims(ox):
