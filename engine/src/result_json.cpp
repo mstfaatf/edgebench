@@ -113,6 +113,19 @@ json runtime_json(const BenchmarkResult& r) {
     };
 }
 
+// Calibration and tool only describe a quantized model (the schema requires
+// null for method "none"); both come from the file's edgebench.quant.* metadata.
+bool quantized(const ModelResult& m) {
+    return m.precision.quantization_method != "none";
+}
+
+json calibration_json(const ModelResult& m) {
+    const QuantizationRecord& q = m.quantization_record;
+    if (!quantized(m) || (!q.calibration_dataset && !q.calibration_count))
+        return nullptr;
+    return {{"dataset", opt(q.calibration_dataset)}, {"sample_count", opt(q.calibration_count)}};
+}
+
 json model_json(const BenchmarkResult& r) {
     if (!r.known.model)
         return nullptr;
@@ -135,8 +148,8 @@ json model_json(const BenchmarkResult& r) {
           {"format", opt(p.quantization_format)},
           {"activation_dtype", opt(p.activation_dtype)},
           {"weight_dtype", opt(p.weight_dtype)},
-          {"calibration", nullptr},
-          {"tool", nullptr}}},
+          {"calibration", calibration_json(m)},
+          {"tool", quantized(m) ? opt(m.quantization_record.tool) : json(nullptr)}}},
         {"precision_notes", nullptr},
         {"normalization", opt(m.normalization)},
     };

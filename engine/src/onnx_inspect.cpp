@@ -3,6 +3,7 @@
 #include <onnxruntime_c_api.h>
 
 #include <algorithm>
+#include <charconv>
 #include <fstream>
 #include <set>
 #include <string_view>
@@ -334,6 +335,25 @@ std::optional<std::string> normalization_from_metadata(const OnnxGraphSummary& g
             return it->second;
     }
     return std::nullopt;
+}
+
+QuantizationRecord quantization_from_metadata(const OnnxGraphSummary& graph) {
+    auto get = [&graph](const char* key) -> std::optional<std::string> {
+        const auto it = graph.metadata.find(key);
+        if (it == graph.metadata.end() || it->second.empty())
+            return std::nullopt;
+        return it->second;
+    };
+    QuantizationRecord q;
+    q.calibration_dataset = get("edgebench.quant.calibration_dataset");
+    q.tool = get("edgebench.quant.tool");
+    if (const auto count = get("edgebench.quant.calibration_count")) {
+        std::int64_t value = 0;
+        const auto [end, ec] = std::from_chars(count->data(), count->data() + count->size(), value);
+        if (ec == std::errc{} && end == count->data() + count->size() && value > 0)
+            q.calibration_count = value;
+    }
+    return q;
 }
 
 ModelPrecision infer_precision(const OnnxGraphSummary& g) {

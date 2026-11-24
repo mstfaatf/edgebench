@@ -58,6 +58,15 @@ inline constexpr std::string_view kNormalizationMetadataKey = "edgebench.normali
 /// "folded"; nullopt if the key is absent or holds another value.
 std::optional<std::string> normalization_from_metadata(const OnnxGraphSummary& graph);
 
+/// What EdgeBench's quantization pipeline recorded in the file's metadata
+/// (edgebench.quant.*): results schema model.quantization.calibration and tool.
+struct QuantizationRecord {
+    std::optional<std::string> calibration_dataset;
+    std::optional<std::int64_t> calibration_count;
+    std::optional<std::string> tool;
+};
+QuantizationRecord quantization_from_metadata(const OnnxGraphSummary& graph);
+
 /// Precision and quantization inferred from the graph: QuantizeLinear /
 /// DequantizeLinear nodes make a QDQ model (static, or dynamic with
 /// DynamicQuantizeLinear), QLinear* and *Integer ops a QOperator model. An

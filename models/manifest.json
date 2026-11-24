@@ -23,6 +23,36 @@
       "size_bytes": 18560934
     },
     {
+      "file": "efficientnet_lite0/efficientnet_lite0_int8_b1.onnx",
+      "sha256": "b42a5215fdec7109f7840d2d67b008934184b7cc32f37bbe5b7f429ccce01664",
+      "size_bytes": 5086322
+    },
+    {
+      "file": "efficientnet_lite0/efficientnet_lite0_int8_b4.onnx",
+      "sha256": "59262f53bde7c0ecfe6a081e6ab29a729416e03a402afaa9229ba1e6d9f9d355",
+      "size_bytes": 5086322
+    },
+    {
+      "file": "efficientnet_lite0/efficientnet_lite0_int8_b8.onnx",
+      "sha256": "95803342d656e3e41f20825bc229afff9d1ee465a5a03301a097a8293def3b99",
+      "size_bytes": 5086322
+    },
+    {
+      "file": "efficientnet_lite0/efficientnet_lite0_int8_unpruned_b1.onnx",
+      "sha256": "ac98782a74bff56a9eaa34a6c041fe3ec0fb1b8a04bf9981066d214c4c2e3e7f",
+      "size_bytes": 5158772
+    },
+    {
+      "file": "efficientnet_lite0/efficientnet_lite0_int8_unpruned_b4.onnx",
+      "sha256": "5b28c756321191e0fb3732648d111efffd3de8658c5b1216579e3cc441574a54",
+      "size_bytes": 5158772
+    },
+    {
+      "file": "efficientnet_lite0/efficientnet_lite0_int8_unpruned_b8.onnx",
+      "sha256": "560e8db935a4ee4d9b788dad2074616412b53c31ff0820bb340173f8ea217c0a",
+      "size_bytes": 5158772
+    },
+    {
       "file": "mobilenetv2/mobilenetv2_fp32_b1.onnx",
       "sha256": "3b80d618151c020c1bcce93085b7a1a2d6aabde15612b462db0d2b9f07867e95",
       "size_bytes": 13993027
@@ -38,6 +68,36 @@
       "size_bytes": 13993027
     },
     {
+      "file": "mobilenetv2/mobilenetv2_int8_b1.onnx",
+      "sha256": "9444da253ec3cb093d3a024f407d4ddc531dd18689f49088054d9017a1fd32db",
+      "size_bytes": 3887980
+    },
+    {
+      "file": "mobilenetv2/mobilenetv2_int8_b4.onnx",
+      "sha256": "016168aded19602c2df63c3f35b994dae6f26de9a683001825f0195e5aef55a7",
+      "size_bytes": 3887980
+    },
+    {
+      "file": "mobilenetv2/mobilenetv2_int8_b8.onnx",
+      "sha256": "13c9dd0ba419d5655b7dc588b0e8a7c80373b9780c0efd468234ebd8c1b15af2",
+      "size_bytes": 3887980
+    },
+    {
+      "file": "mobilenetv2/mobilenetv2_int8_unpruned_b1.onnx",
+      "sha256": "a012cd4375c0c009fc1e6a40f976c6dee8ac14c89dfcbe95c93f9a895db671c2",
+      "size_bytes": 3973168
+    },
+    {
+      "file": "mobilenetv2/mobilenetv2_int8_unpruned_b4.onnx",
+      "sha256": "3c845aa118b3c646433859cb8a1488ad5b1cf14a176e6b0a90f02fcaa86d26aa",
+      "size_bytes": 3973168
+    },
+    {
+      "file": "mobilenetv2/mobilenetv2_int8_unpruned_b8.onnx",
+      "sha256": "6240b92386eb6a817544fb2196ee0936b15d9864972d91b4d6a770637393d83f",
+      "size_bytes": 3973168
+    },
+    {
       "file": "resnet18/resnet18_fp32_b1.onnx",
       "sha256": "2e0f2425e8293c5479a79703b502fd4ad400559c6c23acb904cd5367fb8051fe",
       "size_bytes": 46749308
@@ -51,6 +111,36 @@
       "file": "resnet18/resnet18_fp32_b8.onnx",
       "sha256": "043aee989ef7a03db79cea5eeddea55d9bb6e7b0a643b55965024dbd54b0008e",
       "size_bytes": 46749308
+    },
+    {
+      "file": "resnet18/resnet18_int8_b1.onnx",
+      "sha256": "28f2982bb406e16bb75e3e61bfc9470b3d169459c40db78ead97439f5b36bb23",
+      "size_bytes": 11823212
+    },
+    {
+      "file": "resnet18/resnet18_int8_b4.onnx",
+      "sha256": "a0faf0d60d00fd33f39471bd8e065f6180150c611f4b54fcce68e3369b69ae35",
+      "size_bytes": 11823212
+    },
+    {
+      "file": "resnet18/resnet18_int8_b8.onnx",
+      "sha256": "49a007b8a69a9778bfbcff2c273463ae363ac3c793981b701e4cd91251f57f8f",
+      "size_bytes": 11823212
+    },
+    {
+      "file": "resnet18/resnet18_int8_unpruned_b1.onnx",
+      "sha256": "9f92edfa41470450dfe7af3d68858b236ec9a2285f598ee4702e56458d1c1f86",
+      "size_bytes": 11824250
+    },
+    {
+      "file": "resnet18/resnet18_int8_unpruned_b4.onnx",
+      "sha256": "0d8ddef2bc366bb283c224d12db67d3c9ea9cf15bc7e8a058ed8fd7cf4e7ea7d",
+      "size_bytes": 11824250
+    },
+    {
+      "file": "resnet18/resnet18_int8_unpruned_b8.onnx",
+      "sha256": "b15c4cc350bbec541a46ae2ebd1d4e1ca0a5480e20d794c9793ee20972717c72",
+      "size_bytes": 11824250
     }
   ]
 }

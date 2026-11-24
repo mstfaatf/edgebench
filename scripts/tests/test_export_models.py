@@ -84,13 +84,15 @@ def test_committed_manifest_lists_every_fp32_export():
     text = reg.MANIFEST_PATH.read_text(encoding="utf-8")
     files, tools = reg.parse_manifest(text)
     assert text == reg.format_manifest(files, tools)  # canonical: LF, sorted, stable
-    assert [f.file for f in files] == reg.expected_files()
+    assert [f.file for f in files] == reg.all_expected_files()
     assert set(tools) == {"onnx", "timm", "torch", "torchvision"}
     for f in files:
         assert SHA_RE.fullmatch(f.sha256) and f.size_bytes > 0
-    # A model's files differ only in the batch dimension, so they have the same size.
+    # A model's files of one variant differ only in the batch dimension: same size.
     for name in reg.MODELS:
-        assert len({f.size_bytes for f in files if f.file.startswith(name + "/")}) == 1
+        for variant in reg.VARIANTS:
+            prefix = f"{name}/{name}_{variant}_b"
+            assert len({f.size_bytes for f in files if f.file.startswith(prefix)}) == 1
 
 
 # --- needs torch, onnx, onnxruntime -----------------------------------------------------
@@ -171,7 +173,8 @@ def test_exported_files_match_the_manifest(ox, exported):
     if tools != ox.tool_versions():
         pytest.skip(f"manifest written with {tools}, this environment has {ox.tool_versions()}")
     for f in files:
-        assert ox.sha256_file(exported[f.file]) == f.sha256, f.file
+        if f.file in exported:  # FP32 files; INT8 ones are checked in test_quantize_models.py
+            assert ox.sha256_file(exported[f.file]) == f.sha256, f.file
 
 
 @pytest.mark.parametrize("rel", reg.expected_files())

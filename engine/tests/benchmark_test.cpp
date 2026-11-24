@@ -474,6 +474,42 @@ TEST(OnnxInspectModels, ExportedFp32ModelsHaveFixedShapes) {
         GTEST_SKIP() << "no exported models (run scripts/export_models.py, see docs/models.md)";
 }
 
+// Every pruned INT8 file from scripts/quantize_models.py: QDQ, per-channel int8
+// weights, uint8 activations, metadata recipe, normalization carried over.
+TEST(OnnxInspectModels, Int8ModelsAreStaticQdq) {
+    int found = 0;
+    for (const std::string model : {"mobilenetv2", "resnet18", "efficientnet_lite0"}) {
+        for (const std::int64_t batch : {1, 4, 8}) {
+            const fs::path path = kSourceDir / "models" / model /
+                                  (model + "_int8_b" + std::to_string(batch) + ".onnx");
+            if (!fs::is_regular_file(path))
+                continue;
+            ++found;
+            SCOPED_TRACE(path.filename().string());
+            const auto g = eb::inspect_onnx_file(path);
+            ASSERT_TRUE(g.ok());
+            const eb::OnnxGraphSummary& s = g.value();
+            const eb::ModelPrecision p = eb::infer_precision(s);
+            EXPECT_EQ(p.stored_precision, "int8");
+            EXPECT_EQ(p.quantization_method, "static");
+            EXPECT_EQ(p.quantization_format, "qdq");
+            EXPECT_EQ(p.weight_dtype, "int8");
+            EXPECT_EQ(p.activation_dtype, "uint8");
+            ASSERT_EQ(s.inputs.size(), 1u);
+            EXPECT_EQ(s.inputs[0].shape, (std::vector<std::int64_t>{batch, 3, 224, 224}));
+            EXPECT_EQ(eb::normalization_from_metadata(s), "external");
+            EXPECT_EQ(s.metadata.at("edgebench.variant"), "int8");
+            EXPECT_EQ(s.metadata.at("edgebench.quant.pruned"), "true");
+            const eb::QuantizationRecord q = eb::quantization_from_metadata(s);
+            EXPECT_EQ(q.calibration_count, 200);
+            EXPECT_TRUE(q.calibration_dataset.has_value());
+            EXPECT_TRUE(q.tool.has_value());
+        }
+    }
+    if (found == 0)
+        GTEST_SKIP() << "no INT8 models (run scripts/quantize_models.py, see docs/models.md)";
+}
+
 TEST(OnnxInspectModels, MobileNetV2) {
     const fs::path models = kSourceDir / "models" / "mobilenetv2";
     const fs::path fp32 = models / "mobilenetv2_fp32_b1.onnx";

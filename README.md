@@ -62,8 +62,8 @@ the `schema` test is not added; configure again after creating it.
 To benchmark a model you need an ONNX file with fixed input shapes. The
 [setup guide](docs/setup.md#preparing-data-and-models) creates FP32 models
 (MobileNetV2, ResNet-18 and EfficientNet-Lite0, batch sizes 1, 4 and 8; see [docs/models.md](docs/models.md))
-and INT8 MobileNetV2 with a Python environment (`scripts\export_models.py`,
-`scripts\quantize_qnn.py`). Then:
+and their static INT8 QDQ versions with a Python environment
+(`scripts\export_models.py`, `scripts\quantize_models.py`). Then:
 
 ```powershell
 .\build\arm64-release\bin\Release\edgebench.exe run --model models\mobilenetv2\mobilenetv2_fp32_b1.onnx

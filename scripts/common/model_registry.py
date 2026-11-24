@@ -156,6 +156,15 @@ def expected_files(models: list[str] | None = None, variant: str = "fp32",
     return sorted(relative_path(m, variant, b) for m in names for b in batches)
 
 
+# Variants listed in the manifest: FP32 exports, pruned INT8 QDQ models, and the
+# unpruned quantizer output kept as a reference.
+VARIANTS = ("fp32", "int8", "int8_unpruned")
+
+
+def all_expected_files() -> list[str]:
+    return sorted(f for v in VARIANTS for f in expected_files(variant=v))
+
+
 # --- manifest ------------------------------------------------------------------
 
 

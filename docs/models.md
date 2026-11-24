@@ -1,9 +1,9 @@
 # Models
 
 EdgeBench benchmarks ImageNet classifiers exported from PyTorch (torchvision and
-timm) to ONNX with fixed shapes, one file per batch size. This page describes which models,
-where their weights come from, how they are exported and checked, and what
-input they expect.
+timm) to ONNX with fixed shapes, one file per batch size, in FP32 and as static
+INT8 QDQ models. This page describes which models, where their weights come
+from, how they are exported, quantized and checked, and what input they expect.
 
 ## Supported models
 
@@ -138,11 +138,15 @@ Every exported file carries these `metadata_props`:
 
 ```
 models/
-  manifest.json                     committed: SHA256 and size of every exported file
+  manifest.json                       committed: SHA256 and size of every file below
   mobilenetv2/
-    mobilenetv2_fp32_b1.onnx        + mobilenetv2_fp32_b1.json (sidecar)
+    mobilenetv2_fp32_b1.onnx          + mobilenetv2_fp32_b1.json (sidecar)
     mobilenetv2_fp32_b4.onnx
     mobilenetv2_fp32_b8.onnx
+    mobilenetv2_int8_b1.onnx          + .json: INT8 QDQ, pruned (the benchmarked files)
+    mobilenetv2_int8_b4.onnx, ..._b8.onnx
+    mobilenetv2_int8_unpruned_b1.onnx   quantizer output before pruning (reference)
+    ...
   resnet18/
     resnet18_fp32_b1.onnx
     ...
@@ -151,7 +155,8 @@ models/
     ...
 ```
 
-Files are named `<model>_<variant>_b<batch>.onnx`. The `.onnx` files and
+Files are named `<model>_<variant>_b<batch>.onnx`, with variant `fp32`, `int8`
+or `int8_unpruned`. The `.onnx` files and
 sidecars are not committed (`models/` is gitignored except its README and
 `manifest.json`). Each sidecar records the weights, exporter, versions, shapes,
 ONNX metadata and the results of the checks below. The INT8 models of the
@@ -239,3 +244,111 @@ skip with a reason when torch, the weights, the exported files or ImageNetV2
 are missing); `OnnxInspectModels.ExportedFp32ModelsHaveFixedShapes` (CTest
 label `models`) checks the shapes and metadata with the engine's own ONNX
 reader.
+
+## INT8 QDQ models
+
+`scripts/quantize_models.py` turns every FP32 file into a static INT8 model in
+QDQ format (QuantizeLinear/DequantizeLinear around FP32 operators), the format
+both the ONNX Runtime CPU EP and the QNN HTP (NPU) backend run as integer code.
+
+### Recipe
+
+| Setting | Value |
+|---|---|
+| Tool | ONNX Runtime 1.32.0 quantization with its QNN helpers: `qnn_preprocess_model`, `get_qnn_qdq_config(per_channel=True, weight_type=QInt8)`, `quantize_static` |
+| Weights | signed int8, symmetric (zero point 0), per output channel |
+| Activations | uint8, asymmetric, per tensor |
+| Biases | int32 |
+| Calibration | MinMax over the 200 Imagenette calibration images ([`datasets/imagenette/calibration.tsv`](../datasets/README.md)), in manifest order, preprocessed with the model's own mean/std, one image at a time on the batch-1 model |
+| Batch sizes | 4 and 8 reuse the batch-1 calibration ranges (ONNX Runtime's calibration cache), so all batch sizes of a model have identical scales and zero points |
+| Pruning | dead QuantizeLinear/DequantizeLinear chains on constants removed (see below) |
+| Normalization | unchanged: input normalized outside the model, as for FP32 |
+
+This is the recipe the feasibility study settled on for MobileNetV2 ("s8w"):
+per-channel int8 weights agree best with FP32 on the CPU and run fully on the
+NPU in strict mode ([feasibility.md](feasibility.md)). The MobileNetV2 batch-1
+INT8 graph is identical to that study's `mobilenetv2_int8qdq_pc_s8w_b1.onnx`,
+apart from the metadata.
+
+The quantizer reads the FP32 graph without its metadata (ONNX Runtime 1.32's
+`qnn_preprocess_model` fails on models that carry `metadata_props`), and the
+INT8 metadata is written from the FP32 file afterwards.
+
+### Pruning
+
+For `Clip` (ReLU6) nodes, the quantizer folds the clipping into the activation
+ranges but leaves a Constant -> QuantizeLinear -> DequantizeLinear chain on each
+min/max constant that nothing reads any more, and ONNX Runtime does not remove
+them. `scripts/common/onnx_prune.py` removes nodes whose outputs nothing
+consumes (repeatedly), then unused initializers and stale `value_info`. The
+unpruned file is kept as `<model>_int8_unpruned_b<batch>.onnx`, and the pruned
+file must give bit-identical logits on 64 ImageNetV2 images.
+
+| Model | Nodes before -> after | Removed |
+|---|---|---|
+| MobileNetV2 | 513 -> 303 | 70 chains (70 Constant, 70 QuantizeLinear, 70 DequantizeLinear) |
+| ResNet-18 | 140 -> 140 | none (ReLU, no Clip); 17 stale `value_info` entries |
+| EfficientNet-Lite0 | 483 -> 285 | 66 chains |
+
+### Metadata
+
+INT8 files keep the FP32 file's `edgebench.*` keys that describe the model and
+its input (model, batch size, weights, `normalization`, `input_preprocessing`,
+export versions), and rewrite or add:
+
+| Key | Value |
+|---|---|
+| `edgebench.variant` | `int8` (`int8_unpruned` for the reference copies) |
+| `edgebench.precision` | `int8` |
+| `edgebench.opset`, `edgebench.ir_version` | of the INT8 file |
+| `edgebench.source_model`, `edgebench.source_sha256` | the FP32 file it was made from |
+| `edgebench.onnxruntime_version` | `1.32.0` |
+| `edgebench.quant.format`, `.method` | `qdq`, `static` |
+| `edgebench.quant.weight_type`, `.weight_symmetric`, `.per_channel` | `int8`, `true`, `true` |
+| `edgebench.quant.activation_type`, `.activation_symmetric`, `.bias_type` | `uint8`, `false`, `int32` |
+| `edgebench.quant.calibration_method`, `.calibration_dataset`, `.calibration_count`, `.calibration_manifest_sha256`, `.calibration_batch` | `MinMax`, the calibration split, `200`, SHA256 of `calibration.tsv`, `1 (ranges shared by all batch sizes)` |
+| `edgebench.quant.tool`, `.qnn_preprocess`, `.pruned` | quantizer and version, whether QNN preprocessing changed the graph, `true`/`false` |
+
+The `edgebench.quant.*` keys are flat strings so a recipe file can be generated
+from them. `edgebench run` reports these models as `stored_precision: int8`,
+`quantization.method: static`, `format: qdq`, int8 weights and uint8
+activations (read from the graph), fills `quantization.calibration` (dataset,
+sample count) and `quantization.tool` from the metadata, and keeps
+`model.normalization: external`.
+
+### Quantizing and verifying
+
+```powershell
+# needs the FP32 exports and the Imagenette calibration images (get_data.py)
+.\.venv\Scripts\python.exe scripts\quantize_models.py
+.\.venv\Scripts\python.exe scripts\quantize_models.py --model resnet18 --batch 1
+
+# quantize again in memory and compare with models/manifest.json (writes nothing)
+.\.venv\Scripts\python.exe scripts\quantize_models.py --verify
+```
+
+Quantization is deterministic: running it again gives byte-identical files,
+pruned and unpruned, which `--verify` checks against the manifest. The script
+fails if any scale or zero point differs between the batch sizes of a model, if
+a pruned file's logits differ from its unpruned file's, or if batch 4 or 8
+differs from batch 1 (1e-4, as for FP32; measured: identical).
+
+### Sanity accuracy (not the published evaluation)
+
+ImageNetV2 eval-quick (1,000 images, one per class), ONNX Runtime CPU EP:
+
+| Model | FP32 top-1 | INT8 top-1 | FP32/INT8 top-1 agreement |
+|---|---|---|---|
+| MobileNetV2 | 58.7% | 58.9% | 92.6% |
+| ResNet-18 | 56.4% | 57.3% | 94.6% |
+| EfficientNet-Lite0 | 62.1% | 61.6% | 95.2% |
+
+These only show that quantization did not break the models; with 1,000
+images, differences of a point are noise. Published accuracy uses eval-full.
+
+On the NPU (QNN HTP, strict mode: session creation fails if any node would
+fall back to the CPU), every INT8 batch-1 model creates a session and runs.
+Top-1 agreement with the same INT8 model on the CPU EP, on 64 ImageNetV2
+images: MobileNetV2 92.2%, ResNet-18 90.6%, EfficientNet-Lite0 98.4%. The HTP's
+integer kernels round differently from ONNX Runtime's CPU kernels, so the two
+are not bit-identical.

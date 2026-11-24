@@ -49,6 +49,7 @@ struct ModelResult {
     ModelPrecision precision;
     std::optional<std::string> export_tool;  // producer name and version from the file
     std::optional<std::string> normalization;  // from the file's metadata, if recorded
+    QuantizationRecord quantization_record;    // from the file's metadata, if recorded
     std::vector<TensorInfo> inputs, outputs;
 };
 

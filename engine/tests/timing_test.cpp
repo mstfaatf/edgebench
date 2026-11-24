@@ -381,6 +381,24 @@ TEST(OnnxInspect, NormalizationOnlyFromKnownValues) {
     EXPECT_FALSE(eb::normalization_from_metadata(f.value()).has_value());
 }
 
+TEST(OnnxInspect, QuantizationRecordFromMetadata) {
+    const auto g = inspect_string(model_with_metadata(
+        {{"edgebench.quant.calibration_dataset", "Imagenette calibration split"},
+         {"edgebench.quant.calibration_count", "200"},
+         {"edgebench.quant.tool", "onnxruntime.quantization 1.32.0"}}));
+    const eb::QuantizationRecord q = eb::quantization_from_metadata(g);
+    EXPECT_EQ(q.calibration_dataset, "Imagenette calibration split");
+    EXPECT_EQ(q.calibration_count, 200);
+    EXPECT_EQ(q.tool, "onnxruntime.quantization 1.32.0");
+
+    for (const std::string bad : {"", "0", "-3", "20x", "x"}) {
+        const auto b = inspect_string(model_with_metadata({{"edgebench.quant.calibration_count", bad}}));
+        EXPECT_FALSE(eb::quantization_from_metadata(b).calibration_count.has_value()) << bad;
+    }
+    const eb::QuantizationRecord none = eb::quantization_from_metadata(inspect_string(model_with_metadata({})));
+    EXPECT_FALSE(none.calibration_dataset || none.calibration_count || none.tool);
+}
+
 TEST(OnnxInspect, RejectsNonOnnxBytes) {
     const std::string junk = "this is not an ONNX model";
     const auto r = eb::inspect_onnx(std::as_bytes(std::span(junk.data(), junk.size())));
