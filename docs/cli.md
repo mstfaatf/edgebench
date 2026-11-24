@@ -157,7 +157,7 @@ Surface Laptop 7 (plugged in, *Balanced* power mode, with an editor and a
 terminal open):
 
 ```text
-Model       mobilenetv2_fp32_b1.onnx (fp32, 13992263 bytes, sha256 163fa832dc77)
+Model       mobilenetv2_fp32_b1.onnx (fp32, 13993244 bytes, sha256 bcf75698a82b)
 Provider    CPUExecutionProvider, 4 intra-op threads, binding iobinding_preallocated, graph optimization enable_all
 Trials      3 x 200 measured iterations (20 warm-up, 2000 ms cooldown), batch size 1
 Input       random
@@ -330,8 +330,8 @@ Output for the FP32 MobileNetV2 model (`run --model models\mobilenetv2\mobilenet
   "model": {
     "path": "C:\\dev\\edgebench\\models\\mobilenetv2\\mobilenetv2_fp32_b1.onnx",
     "file_name": "mobilenetv2_fp32_b1.onnx",
-    "size_bytes": 13992263,
-    "sha256": "163fa832dc77de88f24dd0f81588bc9a81167b6e08d9631f4a33c776a7e31dce",
+    "size_bytes": 13993244,
+    "sha256": "bcf75698a82b096f63ce9d2048b0f50cb152ba3ea60882cdac06be3c12b6b674",
     "inputs": [
       {
         "name": "input",

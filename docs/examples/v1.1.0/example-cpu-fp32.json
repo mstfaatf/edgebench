@@ -146,8 +146,8 @@
   "model": {
     "name": "mobilenet_v2",
     "file_name": "mobilenetv2_fp32_b1.onnx",
-    "sha256": "163fa832dc77de88f24dd0f81588bc9a81167b6e08d9631f4a33c776a7e31dce",
-    "size_bytes": 13992263,
+    "sha256": "bcf75698a82b096f63ce9d2048b0f50cb152ba3ea60882cdac06be3c12b6b674",
+    "size_bytes": 13993244,
     "opset": 17,
     "ir_version": 8,
     "stored_precision": "fp32",

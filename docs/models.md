@@ -587,3 +587,82 @@ lineage
 ```
 
 `--json` prints the recipe document instead.
+
+## Reference outputs
+
+`models/references/` holds an answer key for every file in the manifest: what
+Python's ONNX Runtime computes for that file on two fixed input sets. The C++
+engine is tested against it, so a benchmark number always comes from an engine
+that is known to compute the same outputs as the reference implementation.
+
+### Input sets
+
+| Input set | Contents | Runs per file |
+|---|---|---|
+| `images-normalized-<hash>` / `images-unit` | 8 ImageNetV2 eval-quick images, preprocessed with `scripts/common/preprocess.py` (resize 256, crop 224, scale to [0, 1]); normalized with the model's own mean/std for external-normalization files (`<hash>` identifies the mean/std), left in [0, 1] for folded files, as each file's recipe says | batch 1: 8, batch 4: 2, batch 8: 1 |
+| `splitmix64-seed0-b<batch>` | the input `edgebench run` generates and times by default (`--input random --seed 0`), reproduced in Python from the documented generator ([cli.md](cli.md#input-data)) | 1 |
+
+The images are a seeded sample of distinct classes:
+`random.Random(20261124).sample` over eval-quick in (label, path) order, the
+first 8 distinct classes (labels 843, 177, 691, 975, 3, 45, 688, 815).
+`models/references/inputs.json` records the rule, each image's path, label
+and SHA256, and the SHA256 of every input tensor.
+
+### What is stored
+
+| Device | Files | Session |
+|---|---|---|
+| `cpu` | all 54 | CPU EP, 4 intra-op threads, sequential execution, all graph optimizations, `session.intra_op.allow_spinning` 1 (the engine's CPU provider settings) |
+| `npu` | the 36 INT8 files | QNN HTP, strict (`session.disable_cpu_ep_fallback` 1, so session creation fails if any node would run on the CPU), burst performance mode |
+
+Tensors are raw little-endian float32 files (the format
+`tools/ort_probe/make_reference.py` already used), listed in
+`models/references/index.tsv` with input set, model file, device, run, the
+input files of the run, shape and SHA256. One JSON record per file and device
+(`outputs/<model>/<file stem>/<device>.json`) holds the model file's SHA256,
+the input sets, device and execution provider, thread count or provider
+options, the ONNX Runtime version (and for the NPU the QNN execution provider
+version and the QNN backend version from `QnnHtp.dll`), and every output's
+SHA256 and top-1 classes. NPU records also say whether running the same input
+twice gave identical outputs, and the top-1 agreement with the CPU on the
+images. Like the models, the references are not committed (22 MB).
+
+```powershell
+# write all references (CPU and NPU; --no-npu for CPU only); about 2 minutes
+.\.venv\Scripts\python.exe scripts\make_references.py
+
+# write nothing; fail on missing, stale or damaged references
+.\.venv\Scripts\python.exe scripts\make_references.py --check
+```
+
+A reference is stale when the model SHA256 in its record is not the current
+file's: regenerating a model file (for example after a metadata change)
+requires regenerating the references. `--check` also verifies every tensor
+against the SHA256 in the index and that the image selection is still the
+documented one.
+
+### What the C++ tests prove
+
+`engine/tests/reference_models_test.cpp` (suite `ReferenceModels`, ctest label
+`models`) has one test per model file. Each creates the session exactly as
+`edgebench run` does, through the CPU provider with IoBinding and
+preallocated buffers (the timed mode), 4 threads, and checks:
+
+- the input the engine generated for `--input random --seed 0` equals the
+  Python reproduction byte for byte;
+- every output equals the Python output byte for byte, on the generated input
+  and on the images.
+
+No tolerance: the engine and the Python package use the same ONNX Runtime
+version, thread count and session settings, and all 54 files (FP32 and INT8,
+external and folded, pruned and unpruned, all batch sizes) match bit for bit.
+A further test checks that the index lists exactly the files the tests cover.
+Without the model files or the references the tests are skipped with the
+reason (CI has neither).
+
+The NPU references are not used by a C++ test yet: they are the answer key for
+the engine's NPU provider. Repeated NPU runs of the same input are bit-identical,
+so that provider can be held to the NPU reference exactly; NPU and CPU outputs
+of the same INT8 file differ (different kernels and accumulation), with top-1
+agreement on the 8 images of 8/8 for every INT8 file except EfficientNet-Lite0's
+folded ones (7/8).

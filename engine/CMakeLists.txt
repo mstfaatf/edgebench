@@ -135,6 +135,7 @@ if(EDGEBENCH_BUILD_TESTS)
     tests/ort_loader_test.cpp
     tests/edgebench_exe_test.cpp
     tests/provider_test.cpp
+    tests/reference_models_test.cpp
     tests/test_runtime.cpp
     tests/process_util.cpp
     tests/validator.cpp)
