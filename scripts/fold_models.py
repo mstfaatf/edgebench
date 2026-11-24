@@ -5,9 +5,9 @@ For every model (``--model``, default all) and batch size (``--batch``, default
 ``scripts/export_models.py``; it must match ``models/manifest.json``) and writes
 ``models/<model>/<model>_fp32_folded_b<batch>.onnx`` plus a JSON sidecar: the
 same model with its input normalization (the registry's mean/std) folded into
-the first convolution, including the border correction that makes the fold
-exact for a zero-padded convolution (see ``common/onnx_fold.py``). The folded
-file takes the [0, 1] image tensor directly, without mean/std.
+the first convolution. The convolution's zero padding becomes padding with the
+per-channel mean, which keeps the fold exact (see ``common/onnx_fold.py``). The
+folded file takes the [0, 1] image tensor directly, without mean/std.
 
 Checks, each of which fails the run: ``onnx.checker`` (full check); with
 ImageNetV2 downloaded, on 64 images, the folded file fed raw images gives the
@@ -145,9 +145,9 @@ def fold(names: list[str], batches: list[int]) -> int:
             }
             path.with_suffix(".json").write_text(json.dumps(sidecar, indent=2) + "\n",
                                                  encoding="utf-8", newline="\n")
-            line = (f"{rel}: {len(data)} bytes, sha256 {by_file[rel].sha256[:12]}; border "
-                    f"correction {info['border_correction']}"
-                    + (f" {info['map_shape']}" if info["border_correction"] else ""))
+            line = (f"{rel}: {len(data)} bytes, sha256 {by_file[rel].sha256[:12]}; padding "
+                    f"{info['padding']}"
+                    + (f" {info['mean_pad']}" if info["padding"] == "mean_pad" else ""))
             if checks:
                 c = checks["vs_external"]
                 line += (f"; vs external max |diff| {c['max_abs_diff']:.3g}, "

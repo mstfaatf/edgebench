@@ -89,10 +89,16 @@ def test_committed_manifest_lists_every_fp32_export():
     for f in files:
         assert SHA_RE.fullmatch(f.sha256) and f.size_bytes > 0
     # A model's files of one variant differ only in the batch dimension: same size.
+    # Folded files are the exception: their mean-padding constants have a batch dimension.
     for name in reg.MODELS:
         for variant in reg.VARIANTS:
             prefix = f"{name}/{name}_{variant}_b"
-            assert len({f.size_bytes for f in files if f.file.startswith(prefix)}) == 1
+            sizes = [f.size_bytes for f in sorted(files, key=lambda f: f.file)
+                     if f.file.startswith(prefix)]
+            if "folded" in variant:
+                assert sizes == sorted(sizes) and len(set(sizes)) == len(sizes), (prefix, sizes)
+            else:
+                assert len(set(sizes)) == 1, (prefix, sizes)
 
 
 # --- needs torch, onnx, onnxruntime -----------------------------------------------------

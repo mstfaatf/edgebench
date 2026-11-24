@@ -376,45 +376,68 @@ twice and gives wrong predictions without any error. The file says so in its
 metadata (`edgebench.normalization = folded`, `edgebench.input_range = [0, 1]`),
 and `edgebench run` reports `model.normalization: folded`.
 
-### How the fold works, and why it needs a border correction
+### How the fold works: padding with the mean
 
 With raw input `x`, mean `m` and std `s` (per channel), the external model
 computes `y = conv(pad0((x - m) / s), W) + b`. Folding gives the usual
 `W' = W / s` (per input channel) and `b' = b - sum(W * m / s)`. That alone is
 exact only for an unpadded convolution: the original model pads with zeros in
-**normalized** space (a raw value of `m`), the folded one with zeros in **raw**
-space, so outputs whose kernel touches the padding differ. Because convolution
-is linear, the difference does not depend on the input:
+**normalized** space, the folded one would pad with zeros in **raw** space, so
+outputs whose kernel touches the padding would differ.
+
+A zero in normalized space is the value `m` in raw space. So the folded model
+pads the raw image with the per-channel mean instead, and its convolution pads
+nothing:
 
 ```
-y = conv(pad0(x), W') + b' + E
-E = sum(W * m / s) - conv(pad0(m / s), W)
-  = the convolution of an image holding m / s in the padding and 0 inside
+pad0((x - m) / s) = (padm(x) - m) / s
+y = conv(padm(x), W') + b'          (Conv pads set to 0)
 ```
 
-`E` is computed once (in float64) and stored as a constant
-`[1, C_out, H_out, W_out]` tensor added right after the folded convolution
-(`<conv>_border_correction/Add`). It is exactly zero away from the border. A
-first convolution without padding needs no correction and gets none.
+`padm` is two `Concat` nodes in front of the first convolution: constant strips
+holding `m` are concatenated above and below the input (axis 2), then left and
+right of the result (axis 3). Each strip is exactly as wide as the
+convolution's original padding on that side, so asymmetric padding works;
+stride and dilation are unchanged, and a side without padding gets no strip.
+A first convolution without padding gets no `Concat` at all. The strips are
+small (MobileNetV2 and EfficientNet-Lite0: 3x3, stride 2, pad 1, about 11 KB per
+image in the batch; ResNet-18: 7x7, stride 2, pad 3, about 33 KB).
 
-All three models' first convolutions are padded (MobileNetV2 and
-EfficientNet-Lite0: 3x3, stride 2, pad 1; ResNet-18: 7x7, stride 2, pad 3), so
-all carry the map: 32x112x112 floats (1.6 MB) for MobileNetV2 and
-EfficientNet-Lite0, 64x112x112 (3.2 MB) for ResNet-18. Folding is refused,
-with an error, unless the graph input has exactly one consumer: a `Conv` with
-constant weights, `group` 1 and explicit padding.
+Folding is refused, with an error, unless the graph input has exactly one
+consumer (a `Conv` with constant weights, `group` 1 and explicit padding) and a
+fixed NCHW shape.
+
+**Why padding and not a correction after the convolution.** The border error
+of the naive fold does not depend on the input, so it can also be fixed by
+adding a precomputed `[1, C_out, H_out, W_out]` correction tensor after the
+convolution. That is just as exact in FP32, but it puts an `Add` between the
+first convolution and its activation. The quantizer can then no longer merge
+the activation (ReLU6 or ReLU) into the convolution's output range, and that
+tensor is quantized over its full pre-activation range: for MobileNetV2 and
+EfficientNet-Lite0 about [-43, 60] instead of [0, 6], a 17x coarser step
+(ResNet-18: 2x). Mean padding keeps the convolution feeding its activation
+directly, so the folded INT8 models get the same first-convolution output
+scale as the external ones (0.0235 for MobileNetV2 and EfficientNet-Lite0,
+0.0191 for ResNet-18). Measured on ImageNetV2 eval-quick (INT8, CPU EP, not the
+published evaluation):
+
+| Model | INT8 folded top-1, correction after the conv | INT8 folded top-1, mean padding | INT8 external top-1 |
+|---|---|---|---|
+| MobileNetV2 | 56.8% | 59.0% | 58.9% |
+| ResNet-18 | 57.5% | 57.4% | 57.3% |
+| EfficientNet-Lite0 | 60.1% | 62.0% | 61.6% |
 
 Measured on 64 ImageNetV2 images (FP32, ONNX Runtime CPU EP), folded file on
-[0, 1] input vs external file on normalized input:
+[0, 1] input vs external file on normalized input, all batch sizes:
 
-| Model | Exact fold: max abs diff, top-1 agreement | Without the border correction (not shipped) |
+| Model | Mean-padding fold: max abs diff, top-1 agreement | Naive fold, zero padding kept (not shipped) |
 |---|---|---|
-| MobileNetV2 | 7.2e-6 to 8.6e-6, 100% | 0.60, 96.9% |
+| MobileNetV2 | 6.9e-6 to 8.1e-6, 100% | 0.60, 96.9% |
 | ResNet-18 | 1.7e-5, 100% | 2.31, 93.8% |
-| EfficientNet-Lite0 | 8.6e-6 to 9.1e-6, 100% | 1.04, 95.3% |
+| EfficientNet-Lite0 | 8.6e-6 to 9.5e-6, 100% | 1.04, 95.3% |
 
-The exact fold is at float rounding level (within the 1e-4 tolerance used for
-all FP32 checks); the naive fold changes the top-1 class on 3-6% of images.
+The fold is at float rounding level (within the 1e-4 tolerance used for all
+FP32 checks); the naive fold changes the top-1 class on 3-6% of images.
 
 ### INT8 folded models
 
@@ -423,30 +446,28 @@ The folded FP32 files are quantized with the same recipe as the others
 not normalized. Batch sizes share scales and zero points, pruning removes the
 same dead chains, and the unpruned copies are kept. Metadata keeps the folded
 input contract (`edgebench.folded_mean`, `edgebench.folded_std`,
-`edgebench.input_range`, `edgebench.fold_border_correction`) and points
-`edgebench.source_model` at the folded FP32 file.
+`edgebench.input_range`, `edgebench.fold_padding = mean_pad`) and points
+`edgebench.source_model` at the folded FP32 file. The quantizer stores the
+mean strips as INT8 constants with their own scale.
 
 Sanity numbers on ImageNetV2 eval-quick (1,000 images; **not the published
 evaluation**), ONNX Runtime CPU EP:
 
 | Model | INT8 external top-1 | INT8 folded top-1 | INT8 folded vs INT8 external | INT8 folded vs FP32 folded |
 |---|---|---|---|---|
-| MobileNetV2 | 58.9% | 56.8% | 83.6% | 82.5% |
-| ResNet-18 | 57.3% | 57.5% | 94.6% | 93.8% |
-| EfficientNet-Lite0 | 61.6% | 60.1% | 88.0% | 86.6% |
+| MobileNetV2 | 58.9% | 59.0% | 93.7% | 92.2% |
+| ResNet-18 | 57.3% | 57.4% | 95.2% | 95.1% |
+| EfficientNet-Lite0 | 61.6% | 62.0% | 96.8% | 95.4% |
 
-The folded INT8 models are less faithful to FP32 than the external ones for
-MobileNetV2 and EfficientNet-Lite0 (INT8 vs FP32 agreement 92.6% and 95.2%
-for the external files). The reason is the border-correction `Add` between the
-first convolution and its activation: the quantizer can no longer merge the
-ReLU6 into the convolution's output range, so that tensor is quantized over its
-full pre-activation range (about [-43, 60] instead of [0, 6], a 17x coarser
-step). ResNet-18's pre-activation range is small, so it is barely affected.
+The folded INT8 models are as faithful to FP32 as the external ones (INT8 vs
+FP32 agreement 92.6%, 94.6% and 95.2% for the external files).
 
 On the NPU (QNN HTP, strict mode), every folded INT8 batch-1 model creates a
-session and runs. Node counts are the external INT8 model's plus four (the
-`Add` and its QuantizeLinear/DequantizeLinear pairs): MobileNetV2 307 (303),
-ResNet-18 144 (140), EfficientNet-Lite0 289 (285).
+session and runs; NPU and CPU EP agree on the top-1 class for 62 of 64
+ImageNetV2 images for all three models. Node counts are the external INT8
+model's plus ten (the two `Concat` nodes, a DequantizeLinear per strip and a
+QuantizeLinear/DequantizeLinear pair after each `Concat`): MobileNetV2 313
+(303), ResNet-18 150 (140), EfficientNet-Lite0 295 (285).
 
 ### Making and verifying them
 

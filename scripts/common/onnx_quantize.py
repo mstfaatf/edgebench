@@ -59,7 +59,7 @@ CARRIED_KEYS = ("model", "batch_size", "weights", "weights_sha256", "normalizati
                 "input_preprocessing", "exporter", "torch_version", "torchvision_version",
                 "onnx_version", "timm_version",
                 # normalization-folded sources only (see common/onnx_fold.py)
-                "input_range", "folded_mean", "folded_std", "fold_border_correction",
+                "input_range", "folded_mean", "folded_std", "fold_padding",
                 "fold_first_conv")
 
 

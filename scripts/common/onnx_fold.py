@@ -1,28 +1,33 @@
 """Fold input normalization (mean/std) into a model's first convolution.
 
 An external-normalization model computes ``y = conv(pad0((x - m) / s), W) + b``
-for a raw input ``x`` in [0, 1]. Because convolution is linear,
+for a raw input ``x`` in [0, 1], where ``pad0`` pads with zeros. A zero in
+normalized space is the per-channel mean ``m`` in raw space, so
 
-    conv(pad0((x - m) / s), W) = conv(pad0(x), W / s) - conv(pad0(m / s), W)
+    pad0((x - m) / s) = (padm(x) - m) / s
 
-where ``pad0(m / s)`` is the constant image ``m / s`` (per channel) padded with
-zeros. So the folded model computes
+where ``padm`` pads the raw image with ``m`` (per channel). Because
+convolution is linear, the folded model computes
 
-    y = conv(pad0(x), W') + b' + E,   W' = W / s (per input channel),
-                                      b' = b - sum(W * m / s),
-                                      E  = sum(W * m / s) - conv(pad0(m / s), W)
+    y = conv(padm(x), W') + b',   W' = W / s (per input channel),
+                                  b' = b - sum(W * m / s)
 
-``W'`` and ``b'`` are the usual fold. ``E`` is the border correction: it does
-not depend on the input, is zero wherever the kernel does not touch padding,
-and is precomputed once as a constant ``[1, C_out, H_out, W_out]`` tensor added
-after the folded convolution. Without it ("naive" folding) outputs next to the
-border are wrong, because the original model pads with zeros in normalized
-space (raw value = mean) while the folded one pads with zeros in raw space.
-A convolution without padding needs no correction.
+with the convolution's own padding set to 0. ``padm`` is built from two
+``Concat`` nodes (rows, then columns) that put constant strips holding ``m``
+around the input, each strip as wide as the original padding on that side, so
+asymmetric padding works and stride and dilation are unchanged. The fold is
+exact, and the first convolution still feeds its activation directly, which
+lets a quantizer fold the activation (ReLU, ReLU6) into the convolution's
+output range.
+
+``mean_padding=False`` gives the naive fold (``W'``, ``b'`` and the original
+zero padding). Its outputs next to the border are wrong; it exists only for
+comparison. A convolution without padding needs no strips.
 
 Only a plain first convolution is folded: the graph input must have exactly
 one consumer, a ``Conv`` that reads it directly with constant weights (and
-bias), ``group`` 1 and explicit padding. Anything else is refused.
+bias), ``group`` 1 and explicit padding, and the input must have a fixed NCHW
+shape. Anything else is refused.
 
 Needs onnx and NumPy.
 """
@@ -105,27 +110,62 @@ def find_first_conv(proto: Any) -> FirstConv:
                      (pads[0], pads[1], pads[2], pads[3]), tuple(_attr(node, "dilations", [1, 1])))
 
 
-def conv2d(x: np.ndarray, w: np.ndarray, strides, pads, dilations) -> np.ndarray:
-    """Reference 2-D convolution of one image [C_in, H, W] (float64, zero padding)."""
-    x = np.pad(x.astype(np.float64), ((0, 0), (pads[0], pads[2]), (pads[1], pads[3])))
-    c_out, _, kh, kw = w.shape
-    h_out = (x.shape[1] - dilations[0] * (kh - 1) - 1) // strides[0] + 1
-    w_out = (x.shape[2] - dilations[1] * (kw - 1) - 1) // strides[1] + 1
-    out = np.zeros((c_out, h_out, w_out))
-    w64 = w.astype(np.float64)
-    for i in range(kh):
-        for j in range(kw):
-            r, c = i * dilations[0], j * dilations[1]
-            patch = x[:, r:r + strides[0] * h_out:strides[0], c:c + strides[1] * w_out:strides[1]]
-            out += np.einsum("oc,chw->ohw", w64[:, :, i, j], patch)
-    return out
+def _mean_pad(graph: Any, conv: FirstConv, mean: np.ndarray) -> list[int]:
+    """Insert Concat nodes that pad the first Conv's input with ``mean``; pads -> 0.
+
+    Returns the padding that was moved out of the Conv (top, left, bottom, right).
+    """
+    node = conv.node
+    dims = [d.dim_value for d in conv_input(graph).type.tensor_type.shape.dim]
+    if len(dims) != 4 or min(dims) <= 0:
+        raise FoldError(f"the graph input needs a fixed NCHW shape, has {dims}")
+    n, c, h, w = dims
+    top, left, bottom, right = conv.pads
+    prefix = (node.name or "first_conv") + "_mean_pad"
+    value = mean.astype(np.float32).reshape(1, c, 1, 1)
+    new_nodes = []
+    current = node.input[0]
+
+    def concat(axis: int, before: int, after: int, rows: int, label: str) -> None:
+        nonlocal current
+        inputs = []
+        for side, size in (("before", before), ("after", after)):
+            if size:
+                shape = (n, c, size, w) if axis == 2 else (n, c, rows, size)
+                name = f"{prefix}_{label}_{side}"
+                graph.initializer.append(numpy_helper.from_array(
+                    np.ascontiguousarray(np.broadcast_to(value, shape)), name))
+                inputs.append(name)
+        if not inputs:
+            return
+        if before:
+            inputs.insert(1, current)
+        else:
+            inputs.insert(0, current)
+        output = f"{prefix}_{label}"
+        new_nodes.append(helper.make_node("Concat", inputs, [output], axis=axis,
+                                          name=f"{prefix}/Concat_{label}"))
+        current = output
+
+    concat(2, top, bottom, h, "rows")
+    concat(3, left, right, h + top + bottom, "cols")
+    node.input[0] = current
+    for a in node.attribute:
+        if a.name == "pads":
+            del a.ints[:]
+            a.ints.extend([0, 0, 0, 0])
+    index = list(graph.node).index(node)
+    for offset, new in enumerate(new_nodes):
+        graph.node.insert(index + offset, new)
+    return [top, left, bottom, right]
 
 
-def fold(proto: Any, mean, std, *, border_correction: bool = True) -> tuple[Any, dict]:
+def fold(proto: Any, mean, std, *, mean_padding: bool = True) -> tuple[Any, dict]:
     """A copy of ``proto`` with mean/std folded into the first Conv.
 
-    ``border_correction=False`` gives the naive fold, which is wrong next to the
-    border of a padded convolution; it exists only for comparison.
+    ``mean_padding=False`` gives the naive fold, which keeps the Conv's zero
+    padding and is therefore wrong next to the border; it exists only for
+    comparison.
     """
     folded = onnx.ModelProto()
     folded.CopyFrom(proto)
@@ -152,32 +192,12 @@ def fold(proto: Any, mean, std, *, border_correction: bool = True) -> tuple[Any,
         node.input.append(bias_name)
 
     padded = any(conv.pads)
-    info = {"first_conv": node.name, "padded": padded, "border_correction": False}
-    if padded and border_correction:
-        dims = [d.dim_value for d in conv_input(graph).type.tensor_type.shape.dim]
-        if len(dims) != 4 or min(dims) <= 0:
-            raise FoldError(f"the graph input needs a fixed NCHW shape, has {dims}")
-        h, w = dims[2], dims[3]
-        # E = sum(W * m / s) - conv(pad0(m / s), W) is the convolution of an image
-        # that holds m / s in the padding positions and 0 inside: the kernel taps
-        # that fall on padding. Computed that way, E is exactly 0 in the interior.
-        top, left, bottom, right = conv.pads
-        border = np.empty((len(mean64), top + h + bottom, left + w + right))
-        border[:] = (mean64 / std64)[:, None, None]
-        border[:, top:top + h, left:left + w] = 0.0
-        correction = conv2d(border, conv.weight, conv.strides, (0, 0, 0, 0), conv.dilations)
-        correction = correction[np.newaxis].astype(np.float32)
-        out_name = node.output[0]
-        node.output[0] = out_name + "_before_border_correction"
-        map_name = node.name + "_border_correction"
-        graph.initializer.append(numpy_helper.from_array(correction, map_name))
-        index = list(graph.node).index(node)
-        graph.node.insert(index + 1, helper.make_node(
-            "Add", [node.output[0], map_name], [out_name], name=map_name + "/Add"))
-        nonzero = np.abs(correction) > 0
-        info.update(border_correction=True, map_shape=list(correction.shape),
-                    map_nonzero_fraction=float(nonzero.mean()),
-                    map_max_abs=float(np.abs(correction).max()))
+    info = {"first_conv": node.name, "padded": padded, "padding": "none"}
+    if padded:
+        if mean_padding:
+            info.update(padding="mean_pad", mean_pad=_mean_pad(graph, conv, mean64))
+        else:
+            info.update(padding="zero")
     return folded, info
 
 
@@ -194,7 +214,7 @@ def folded_metadata(source_meta: dict[str, str], mean, std, variant: str, info: 
         "edgebench.input_range": "[0, 1]",
         "edgebench.folded_mean": json.dumps(list(mean)),
         "edgebench.folded_std": json.dumps(list(std)),
-        "edgebench.fold_border_correction": "true" if info["border_correction"] else "false",
+        "edgebench.fold_padding": info["padding"],
         "edgebench.fold_first_conv": info["first_conv"],
         "edgebench.source_model": source_rel,
         "edgebench.source_sha256": source_sha256,
