@@ -144,11 +144,30 @@ ProcessResult run_process(const fs::path& exe, const std::vector<std::wstring>& 
     return r;
 }
 
+fs::path short_path(const fs::path& path) {
+    const DWORD n = GetShortPathNameW(path.c_str(), nullptr, 0);
+    if (n == 0)
+        return path;
+    std::wstring buf(n, L'\0');
+    const DWORD m = GetShortPathNameW(path.c_str(), buf.data(), n);
+    if (m == 0 || m >= n)
+        return path;
+    buf.resize(m);
+    return fs::path(std::move(buf));
+}
+
 TempDir::TempDir() : TempDir(L"edgebench_test") {}
 
 TempDir::TempDir(const std::wstring& name) {
     static std::atomic<int> counter{0};
-    const fs::path base = fs::temp_directory_path();
+    // A parent whose name is not 8.3-compatible, addressed by its short name: the
+    // paths then contain a short component whenever the volume has short names,
+    // like a hosted runner's %TEMP% (C:\Users\RUNNER~1\...).
+    static const fs::path base = [] {
+        const fs::path parent = fs::temp_directory_path() / L"edgebench-test-directories";
+        fs::create_directories(parent);
+        return short_path(parent);
+    }();
     for (int attempt = 0; attempt < 100; ++attempt) {
         const fs::path p = base / (name + L"_" + std::to_wstring(GetCurrentProcessId()) + L"_" +
                                    std::to_wstring(counter++));

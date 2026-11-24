@@ -164,7 +164,8 @@ TEST(Doctor, MissingDllIsReported) {
     const ProcessResult r =
         run_process(iso.exe, {L"doctor", L"--load-sample-ms", L"0"}, iso.dir.path());
     expect_doctor_load_failure(r, "dll_not_found");
-    const std::string dll = eb::path_to_utf8(iso.dir.path() / "onnxruntime.dll");
+    // The executable reports its own directory in long form, whatever form it was started with.
+    const std::string dll = eb::path_to_utf8(eb::resolve_path(iso.dir.path()) / "onnxruntime.dll");
     EXPECT_TRUE(contains(r.err, dll + " not found")) << describe(r);
 }
 

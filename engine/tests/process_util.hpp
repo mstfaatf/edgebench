@@ -49,7 +49,15 @@ private:
     std::unique_ptr<State> state_;
 };
 
+/// Short (8.3) form of an existing path, or the path itself if the volume has no
+/// short names.
+std::filesystem::path short_path(const std::filesystem::path& path);
+
 /// A new, empty directory under the system temp directory, deleted on destruction.
+/// It lives in <temp>/edgebench-test-directories, addressed through that
+/// directory's short (8.3) name where the volume has short names, as on hosted
+/// CI runners whose %TEMP% is a short path, so tests see the same kind of path
+/// locally and on CI.
 class TempDir {
 public:
     TempDir();

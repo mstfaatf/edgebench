@@ -416,20 +416,6 @@ TEST(FailurePaths, NodesOffTheRequestedEpAreAWarning) {
 
 namespace {
 
-// Short (8.3) form of an existing path, or the path itself if the volume has no
-// short names.
-fs::path short_path(const fs::path& path) {
-    const DWORD n = GetShortPathNameW(path.c_str(), nullptr, 0);
-    if (n == 0)
-        return path;
-    std::wstring buf(n, L'\0');
-    const DWORD m = GetShortPathNameW(path.c_str(), buf.data(), n);
-    if (m == 0 || m >= n)
-        return path;
-    buf.resize(m);
-    return fs::path(std::move(buf));
-}
-
 // Loads a copy of a system DLL under an ONNX Runtime-like name from a temporary
 // directory, i.e. outside the bundle, for as long as it lives. It is loaded
 // through its short (8.3) path where the volume has short names, as happens
@@ -440,7 +426,7 @@ public:
     ForeignModule() : dir_(L"edgebench_foreign_module") {
         path_ = dir_.path() / "onnxruntime_foreign_test.dll";
         fs::copy_file(LR"(C:\Windows\System32\version.dll)", path_);
-        load_path_ = short_path(path_);
+        load_path_ = eb::test::short_path(path_);
         module_ = LoadLibraryExW(load_path_.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
     }
     ~ForeignModule() {
