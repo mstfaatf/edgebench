@@ -416,14 +416,32 @@ TEST(FailurePaths, NodesOffTheRequestedEpAreAWarning) {
 
 namespace {
 
+// Short (8.3) form of an existing path, or the path itself if the volume has no
+// short names.
+fs::path short_path(const fs::path& path) {
+    const DWORD n = GetShortPathNameW(path.c_str(), nullptr, 0);
+    if (n == 0)
+        return path;
+    std::wstring buf(n, L'\0');
+    const DWORD m = GetShortPathNameW(path.c_str(), buf.data(), n);
+    if (m == 0 || m >= n)
+        return path;
+    buf.resize(m);
+    return fs::path(std::move(buf));
+}
+
 // Loads a copy of a system DLL under an ONNX Runtime-like name from a temporary
-// directory, i.e. outside the bundle, for as long as it lives.
+// directory, i.e. outside the bundle, for as long as it lives. It is loaded
+// through its short (8.3) path where the volume has short names, as happens
+// when %TEMP% is itself a short path (hosted CI runners): the reported path
+// must still be the long one.
 class ForeignModule {
 public:
     ForeignModule() : dir_(L"edgebench_foreign_module") {
         path_ = dir_.path() / "onnxruntime_foreign_test.dll";
         fs::copy_file(LR"(C:\Windows\System32\version.dll)", path_);
-        module_ = LoadLibraryExW(path_.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+        load_path_ = short_path(path_);
+        module_ = LoadLibraryExW(load_path_.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
     }
     ~ForeignModule() {
         if (module_)
@@ -433,10 +451,12 @@ public:
     ForeignModule& operator=(const ForeignModule&) = delete;
     bool loaded() const { return module_ != nullptr; }
     const fs::path& path() const { return path_; }
+    const fs::path& load_path() const { return load_path_; }
 
 private:
     eb::test::TempDir dir_;  // destroyed after the module is freed
     fs::path path_;
+    fs::path load_path_;
     HMODULE module_ = nullptr;
 };
 
@@ -447,10 +467,12 @@ TEST(FailurePaths, ModuleOutsideTheBundleStopsTheRun) {
     const std::unique_ptr<eb::Provider> p = real_provider(c);
     eb::BenchmarkResult r;
     std::string resolved;
+    std::string loaded_as;
     {
         ForeignModule foreign;
         ASSERT_TRUE(foreign.loaded());
         resolved = eb::path_to_utf8(eb::resolve_path(foreign.path()));
+        loaded_as = eb::path_to_utf8(foreign.load_path());
         r = run(*p, c);
     }
     ASSERT_TRUE(r.failure.has_value());
@@ -460,11 +482,15 @@ TEST(FailurePaths, ModuleOutsideTheBundleStopsTheRun) {
     const std::string& m = r.failure->error.message;
     EXPECT_NE(m.find("trial 1 of 2"), std::string::npos) << m;
     EXPECT_NE(m.find("onnxruntime_foreign_test.dll (" + resolved + ")"), std::string::npos) << m;
+    if (loaded_as != resolved)  // loaded through a short path: never reported in that form
+        EXPECT_EQ(m.find(loaded_as), std::string::npos) << m;
     EXPECT_TRUE(r.timing.trials.empty());
     EXPECT_FALSE(r.known.placement);
-    EXPECT_TRUE(std::any_of(
-        r.runtime.loaded_modules.begin(), r.runtime.loaded_modules.end(),
-        [](const eb::LoadedModule& lm) { return lm.name == "onnxruntime_foreign_test.dll"; }));
+    EXPECT_TRUE(std::any_of(r.runtime.loaded_modules.begin(), r.runtime.loaded_modules.end(),
+                            [&](const eb::LoadedModule& lm) {
+                                return lm.name == "onnxruntime_foreign_test.dll" &&
+                                       eb::path_to_utf8(lm.path) == resolved;
+                            }));
     const json doc = write_and_validate(r);
     ASSERT_FALSE(doc.empty());
     EXPECT_EQ(doc.at("status"), "failed");

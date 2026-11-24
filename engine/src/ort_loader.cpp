@@ -44,6 +44,23 @@ std::string to_utf8(std::wstring_view w) {
     return out;
 }
 
+// Expands 8.3 short names (e.g. C:\Users\RUNNER~1) to the long form. A module's
+// path is reported as it was loaded, so a DLL loaded through a short path (for
+// example from a %TEMP% given in short form) would otherwise be recorded and
+// printed differently from the same file loaded through its long path. Links
+// are not followed. Returns the path unchanged if it cannot be expanded.
+fs::path long_path(const fs::path& path) {
+    const DWORD n = GetLongPathNameW(path.c_str(), nullptr, 0);
+    if (n == 0)
+        return path;
+    std::wstring buf(n, L'\0');
+    const DWORD m = GetLongPathNameW(path.c_str(), buf.data(), n);
+    if (m == 0 || m >= n)
+        return path;
+    buf.resize(m);
+    return fs::path(std::move(buf));
+}
+
 fs::path module_file_name(HMODULE module) {
     std::wstring buf(MAX_PATH, L'\0');
     DWORD n = 0;
@@ -52,7 +69,7 @@ fs::path module_file_name(HMODULE module) {
         buf.resize(buf.size() * 2);
     }
     buf.resize(n);
-    return fs::path(buf);
+    return long_path(fs::path(buf));
 }
 
 std::string system_error_text(DWORD code) {
@@ -164,16 +181,7 @@ fs::path resolve_path(const fs::path& path) {
         }
     }
     // Could not open it (e.g. access denied): at least expand short names.
-    const DWORD n = GetLongPathNameW(abs.c_str(), nullptr, 0);
-    if (n > 0) {
-        std::wstring buf(n, L'\0');
-        const DWORD m = GetLongPathNameW(abs.c_str(), buf.data(), n);
-        if (m > 0 && m < n) {
-            buf.resize(m);
-            return fs::path(buf);
-        }
-    }
-    return abs;
+    return long_path(abs);
 }
 
 fs::path loaded_module_path(std::wstring_view file_name) {
@@ -207,7 +215,7 @@ std::vector<LoadedModule> list_ort_modules() {
         if (n == 0)
             continue;  // unloaded between the two calls
         buf.resize(n);
-        const fs::path path(buf);
+        const fs::path path = long_path(fs::path(buf));
         const std::wstring name = path.filename().native();
         if (is_ort_or_qnn_module(name))
             out.push_back({to_utf8(name), path});
