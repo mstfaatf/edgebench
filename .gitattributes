@@ -57,3 +57,6 @@ LICENSE         text eol=lf
 *.webp          binary
 *.ico           binary
 *.pdf           binary
+
+# Committed model sources are pinned by SHA256: never convert line endings.
+models/sources/** binary

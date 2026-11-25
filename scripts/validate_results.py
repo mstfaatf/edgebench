@@ -15,7 +15,8 @@ Usage:
     python scripts/validate_results.py --strict benchmarks/results/published
 
 Directories are searched recursively for *.json files. Accuracy results (files
-with accuracy_schema_version, written by scripts/eval_accuracy.py) are reported
+with accuracy_schema_version or anomaly_schema_version, written by
+scripts/eval_accuracy.py and scripts/eval_anomaly.py) are reported
 as skipped: scripts/validate_accuracy.py checks them. Exits with status 1 if
 any file fails, 2 on usage errors.
 
@@ -575,7 +576,8 @@ def is_accuracy_document(path: Path) -> bool:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
-    return isinstance(doc, dict) and "accuracy_schema_version" in doc
+    return isinstance(doc, dict) and ("accuracy_schema_version" in doc
+                                      or "anomaly_schema_version" in doc)
 
 
 def make_output_safe() -> None:

@@ -1,4 +1,4 @@
-"""Check, before training, that the autoencoder designs run fully on the NPU as INT8.
+"""Check that the autoencoder runs fully on the NPU: untrained stand-ins, or the real model files.
 
 TensorFlow does not run on this machine, so the trained Keras model cannot be
 exported here. QNN HTP op support can be checked without it: this script builds
@@ -21,8 +21,18 @@ The weights are random, so the outputs mean nothing; only op support, node
 counts and agreement between devices are of interest. Files and logs go to
 a new run directory under ``benchmarks/results/local/autoencoder/``.
 
+``--models`` checks the real model files instead (``scripts/prepare_autoencoder.py``),
+without timing: every INT8 file (pruned and unpruned) at batch 1, 4 and 8 as
+INT8, and the cleaned FP32 file at batch 1, 4 and 8 with FP16 compute
+(``enable_htp_fp16_precision=1``), each in a strict QNN HTP session with its
+placement log parsed. On every validation window it records NPU vs CPU
+(the same INT8 file, or the FP32 file), whether a repeated run in the same
+session is bit-identical, and whether batch 4 and 8 give batch 1's outputs bit
+for bit on the NPU (if not, by how much they differ).
+
 Usage:
     python scripts/check_autoencoder_npu.py [--layout NAME ...]
+    python scripts/check_autoencoder_npu.py --models
 """
 
 from __future__ import annotations
@@ -50,26 +60,32 @@ def cpu_session(path: Path):
     return ort.InferenceSession(str(path), options, providers=["CPUExecutionProvider"])
 
 
-def npu_options(log_severity: int, strict: bool):
+FP16 = {"enable_htp_fp16_precision": "1"}
+
+
+def npu_options(log_severity: int, strict: bool, extra: dict | None = None):
     from common import ort_qnn
 
     ort_qnn.register_qnn()
     npu = ort_qnn.select_qnn_npu(ort_qnn.list_devices())
     return ort_qnn.qnn_npu_session_options(
-        npu, {"backend_path": str(ort_qnn.htp_backend_path()), "htp_performance_mode": "burst"},
+        npu, {"backend_path": str(ort_qnn.htp_backend_path()), "htp_performance_mode": "burst",
+              **(extra or {})},
         strict=strict, log_severity=log_severity)
 
 
-def placement(path: Path, log: Path, strict: bool) -> dict:
+def placement(path: Path, log: Path, strict: bool, extra: dict | None = None) -> dict:
     """Verbose session: created or refused, and the placement facts from its log."""
     import onnxruntime as ort
 
     from common import ort_qnn
 
+    log.parent.mkdir(parents=True, exist_ok=True)
     out: dict = {"log_file": log.name}
     with ort_qnn.capture_native_stderr(log):
         try:
-            session = ort.InferenceSession(str(path), sess_options=npu_options(0, strict))
+            session = ort.InferenceSession(str(path),
+                                           sess_options=npu_options(0, strict, extra))
             out["session_created"], out["error"] = True, None
         except Exception as exc:  # noqa: BLE001 - recorded and reported
             session, out["session_created"], out["error"] = None, False, f"{type(exc).__name__}: {exc}"
@@ -188,15 +204,104 @@ def print_table(results: list[dict]) -> None:
                 print(f"{'':18}   rejected: {line}")
 
 
+def run_padded(session, windows, batch: int):
+    """Outputs ``[n, length]`` for all windows ``[n, length]``; the last batch is padded."""
+    import numpy as np
+
+    n = len(windows)
+    pad = (-n) % batch
+    x = windows[:, :, None]
+    if pad:
+        x = np.concatenate([x, np.repeat(x[-1:], pad, axis=0)])
+    name = session.get_inputs()[0].name
+    return np.concatenate([session.run(None, {name: x[i:i + batch]})[0]
+                           for i in range(0, len(x), batch)])[:n, :, 0]
+
+
+def check_model_files(data, run_dir: Path) -> dict:
+    """Strict NPU sessions and batch equivalence for the model files of the autoencoder."""
+    import numpy as np
+    import onnxruntime as ort
+
+    from common.model_registry import IMPORTED_MODELS, MODELS_DIR, relative_path
+
+    (model,) = IMPORTED_MODELS
+    x = data.windows["validation"]
+    checks = []
+    plan = [(v, "int8", None) for v in ("int8", "int8_unpruned")] + [("fp32", "fp16", FP16)]
+    for variant, compute, extra in plan:
+        npu_b1 = None
+        for batch in BATCHES:
+            rel = relative_path(model, variant, batch)
+            path = MODELS_DIR / rel
+            if not path.is_file():
+                raise FileNotFoundError(f"{path}: run scripts/prepare_autoencoder.py first")
+            entry: dict = {"file": rel, "variant": variant, "batch": batch,
+                           "compute_precision": compute, "windows": int(len(x))}
+            entry["strict"] = placement(path, run_dir / "logs" / f"{Path(rel).stem}_{compute}.log",
+                                        strict=True, extra=extra)
+            if entry["strict"]["session_created"]:
+                session = ort.InferenceSession(str(path), sess_options=npu_options(3, True, extra))
+                npu = run_padded(session, x, batch)
+                again = run_padded(session, x, batch)
+                session = None
+                gc.collect()
+                cpu = run_padded(cpu_session(path), x, batch)
+                entry["npu_repeat_identical"] = bool(np.array_equal(npu, again))
+                entry["npu_vs_cpu_same_file_max_abs"] = float(np.abs(npu - cpu).max())
+                if batch == 1:
+                    npu_b1 = npu
+                elif npu_b1 is not None:
+                    differs = npu != npu_b1
+                    entry["npu_identical_to_b1"] = bool(not differs.any())
+                    entry["npu_vs_b1_max_abs"] = float(np.abs(npu - npu_b1).max())
+                    entry["npu_vs_b1_windows_differing"] = int(differs.any(axis=1).sum())
+            checks.append(entry)
+            print(f"  {rel} {compute}: strict "
+                  f"{'ok' if entry['strict']['session_created'] else 'REFUSED'}, all on QNN "
+                  f"{entry['strict']['all_nodes_on_qnn']}, repeat identical "
+                  f"{entry.get('npu_repeat_identical')}, vs CPU "
+                  f"{entry.get('npu_vs_cpu_same_file_max_abs', float('nan')):.4g}"
+                  + (f", == b1 {entry.get('npu_identical_to_b1')} (max |diff| "
+                     f"{entry.get('npu_vs_b1_max_abs', float('nan')):.4g}, "
+                     f"{entry.get('npu_vs_b1_windows_differing')} windows differ)"
+                     if batch != 1 else ""), flush=True)
+    return {"model": model, "checks": checks,
+            "all_strict_on_qnn": all(c["strict"]["all_nodes_on_qnn"] for c in checks)}
+
+
 def main() -> int:
     from common import autoencoder as ae
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--layout", nargs="+", choices=sorted(ae.STANDINS),
                         default=list(ae.STANDINS), help="stand-in layouts to check (default: all)")
+    parser.add_argument("--models", action="store_true",
+                        help="check the real model files (scripts/prepare_autoencoder.py) "
+                             "instead of stand-ins")
     parser.add_argument("--output-dir", type=Path, default=RESULTS_DIR)
     args = parser.parse_args()
     require_native_arm64()
+
+    if args.models:
+        import onnxruntime as ort
+
+        from common import ort_qnn
+        from common.results_io import new_run
+        from common.timeseries import load_split_windows
+
+        out = new_run(args.output_dir, "npu_model_check")
+        run_dir = out.make_run_dir()
+        result = check_model_files(load_split_windows(), run_dir)
+        path = out.write({
+            "description": "QNN HTP strict-mode check of the autoencoder's model files: "
+                           "placement, NPU vs CPU and batch equivalence on every validation "
+                           "window (no timing)",
+            "environment": {"onnxruntime": ort.__version__, **ort_qnn.qnn_versions(),
+                            "power": ort_qnn.power_state()},
+            "run_dir": run_dir.name, **result})
+        print(f"\nwrote {path}")
+        return 0 if result["all_strict_on_qnn"] else 1
 
     import onnx
     import onnxruntime as ort

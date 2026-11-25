@@ -5,9 +5,9 @@
 CPU vs NPU ML inference benchmarking for Windows on Snapdragon, built on
 [ONNX Runtime](https://onnxruntime.ai/).
 
-EdgeBench measures how fast real models (MobileNetV2 to start with) run on the
-CPU and on the Qualcomm Hexagon NPU of a Snapdragon laptop. It records the
-configuration, the software versions, the loaded libraries and the state of the
+EdgeBench measures how fast real models (image classifiers and a time-series
+autoencoder) run on the CPU and on the Qualcomm Hexagon NPU of a Snapdragon
+laptop. It records the configuration, the software versions, the loaded libraries and the state of the
 machine with every result, verifies where each node of the model actually ran,
 and writes results as schema-validated JSON plus CSV.
 
@@ -23,7 +23,9 @@ and writes results as schema-validated JSON plus CSV.
 - **Accuracy results are published**: every model variant on ImageNetV2,
   on the CPU and on the NPU (strict mode), with confidence intervals and paired
   CPU vs NPU comparisons ([docs/accuracy.md](docs/accuracy.md)). On the same
-  INT8 file the NPU matches the CPU within 0.15 top-1 points.
+  INT8 file the NPU matches the CPU within 0.15 top-1 points. The Conv1D
+  autoencoder's anomaly-detection results on the NAB machine-temperature series
+  are published the same way ([docs/autoencoder.md](docs/autoencoder.md)).
 - **No published latency results yet.** Latency numbers in the docs are
   methodology checks from one machine, not benchmark results.
 
@@ -67,7 +69,9 @@ To benchmark a model you need an ONNX file with fixed input shapes. The
 [setup guide](docs/setup.md#preparing-data-and-models) creates FP32 models
 (MobileNetV2, ResNet-18 and EfficientNet-Lite0, batch sizes 1, 4 and 8; see [docs/models.md](docs/models.md))
 and their static INT8 QDQ versions with a Python environment
-(`scripts\export_models.py`, `scripts\quantize_models.py`). Then:
+(`scripts\export_models.py`, `scripts\quantize_models.py`), and the files of the
+Conv1D time-series autoencoder from its committed source
+(`scripts\prepare_autoencoder.py`). Then:
 
 ```powershell
 .\build\arm64-release\bin\Release\edgebench.exe run --model models\mobilenetv2\mobilenetv2_fp32_b1.onnx
@@ -117,13 +121,15 @@ hygiene tests on Linux. See [Test labels](docs/setup.md#test-labels) and
 
 - [docs/methodology.md](docs/methodology.md): what is timed, trial structure,
   statistics, recorded system state, and what EdgeBench does not claim
-- [docs/models.md](docs/models.md): supported models, weights, export settings
-  and checks; the models expect normalized input
+- [docs/models.md](docs/models.md): supported models (MobileNetV2, ResNet-18,
+  EfficientNet-Lite0, and the imported Conv1D autoencoder), weights, export
+  settings and checks; the models expect normalized input
 - [docs/accuracy.md](docs/accuracy.md): accuracy of every variant on ImageNetV2,
   CPU and NPU, and the CPU vs NPU comparison
 - [docs/autoencoder.md](docs/autoencoder.md): time-series anomaly-detection
-  autoencoder (in progress): NAB data, windows and splits, the NPU op-support
-  check, and the Colab training notebook
+  autoencoder: NAB data, windows and splits, Colab training, the committed
+  source and its exact graph clean-up, INT8, NPU checks and the
+  anomaly-detection evaluation on CPU and NPU
 - [docs/cli.md](docs/cli.md): `edgebench` commands, options, output and exit
   codes
 - [docs/results-schema.md](docs/results-schema.md): result file format (JSON
@@ -141,9 +147,10 @@ hygiene tests on Linux. See [Test labels](docs/setup.md#test-labels) and
 | `engine/` | C++ engine: `edgebench_core` library, `edgebench` CLI, tests |
 | `tools/` | Diagnostics: `ort_probe` (C++ CPU/NPU runner), QNN rejection check |
 | `scripts/` | Dependency fetch, data and model preparation, NPU checks, result validation |
-| `schemas/` | JSON Schema for result files, one file per version |
+| `schemas/` | JSON Schema for result, accuracy and model-recipe files, one file per version |
 | `datasets/` | Manifests of the evaluation and calibration data (images: path, label, SHA256; the NAB time series: windows and splits); the data is downloaded, not committed |
 | `notebooks/` | Colab notebook that trains the Keras autoencoder and exports it to ONNX |
+| `models/` | Model manifest (committed), the committed autoencoder source in `models/sources/`; model files are made locally |
 | `benchmarks/` | Configurations and results (`results/published/` is committed, `results/local/` is not) |
 | `ml/`, `dashboard/` | Model training/export pipelines and the static dashboard (planned) |
 | `docs/` | Documentation |

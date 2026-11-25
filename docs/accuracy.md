@@ -5,6 +5,8 @@ image `eval-full` split), on the CPU and on the NPU, so that every latency numbe
 can be read next to the accuracy of the same file on the same device. The
 results are deterministic (a rerun gives identical predictions) and are
 published in [`benchmarks/results/published/accuracy/`](../benchmarks/results/published/accuracy/).
+The time-series autoencoder is evaluated as an anomaly detector instead
+([Anomaly detection](#anomaly-detection)).
 
 ## What was measured
 
@@ -175,3 +177,61 @@ runs, and the McNemar p-values.
 - Accuracy is measured with Python's ONNX Runtime. The C++ engine computes
   bit-identical outputs for the same files on the CPU
   ([models.md](models.md#reference-outputs)), so these numbers hold for it too.
+
+## Anomaly detection
+
+The Conv1D autoencoder ([autoencoder.md](autoencoder.md)) is evaluated on the
+test split of NAB `machine_temperature_system_failure` by
+`scripts/eval_anomaly.py`: the score is each window's reconstruction MSE, the
+threshold is the largest score of any validation window (chosen on the
+validation split only), and the metrics are window-level ROC-AUC, PR-AUC and
+precision / recall / F1 at the threshold, plus how many of the 4 labelled
+anomalies get at least one flagged window, and how early. Each run uses the
+largest batch size whose reconstructions equal batch 1's bit for bit on every
+validation window on that device (b8 for all four).
+
+| Run | ROC-AUC | PR-AUC | F1 | Events detected |
+|---|---|---|---|---|
+| CPU FP32 | 0.709 | 0.427 | 0.111 | 2 of 4 |
+| CPU INT8 | 0.813 | 0.714 | 0.635 | 4 of 4 |
+| NPU INT8 (strict) | 0.805 | 0.706 | 0.637 | 4 of 4 |
+| NPU FP16 (strict, FP32 file) | 0.713 | 0.432 | 0.110 | 2 of 4 |
+
+NPU INT8 and CPU INT8 flag the same test windows except 9 (99.92% agreement)
+and detect the same events within 0 to 4 points; NPU FP16 matches CPU FP32 on
+all but 2 windows. INT8 detects more than FP32 because its input quantization
+range, calibrated on training windows, clips the out-of-range values of the
+failures; see [autoencoder.md](autoencoder.md#anomaly-detection-evaluation)
+for the per-event delays, the comparisons and the limitations (one series, 4
+events, overlapping windows).
+
+**Why a separate schema.** The classification results' blocks (top-1/top-5
+with Wilson intervals, image preprocessing, an ImageNetV2 dataset block,
+top-5 prediction files) do not describe a detector. An additive version of
+the accuracy schema with a task type would have turned each of those blocks
+into a per-task choice and weakened both. Anomaly results therefore have their
+own schema,
+[`schemas/anomaly-result.v1.0.0.schema.json`](../schemas/anomaly-result.v1.0.0.schema.json),
+version key `anomaly_schema_version`, with the same structure (kinds `run`
+and `comparisons`, model file SHA256, execution block, batch equivalence,
+environment) and the detector's own blocks: dataset and split manifest,
+input normalization, score definition, threshold and its rule, test metrics
+with per-event detection, and the SHA256 of the per-window score files (`.npy`,
+in `benchmarks/results/local/accuracy/anomaly_scores/`, not committed). The
+results live in their own directory,
+[`benchmarks/results/published/accuracy/anomaly/`](../benchmarks/results/published/accuracy/anomaly/),
+so the classification checks ("one dataset manifest per directory") stay as
+they are. `scripts/validate_accuracy.py` validates both kinds (it picks the
+schema by version key; CI runs it on the whole `accuracy/` tree): for anomaly
+runs, that the confusion counts add up, precision / recall / F1 follow from
+them, no validation window exceeds the threshold, and each event's detection
+point and delay follow from its first flagged window; for comparisons, that
+the counts match both runs, the discordant windows are the windows flagged by
+only one run, and the McNemar p-values are recomputed. A test recomputes every
+metric from the score files when they are present.
+
+```powershell
+# needs the autoencoder files (prepare_autoencoder.py), the NAB data (get_data.py --dataset nab) and the QNN EP
+.\.venv\Scripts\python.exe scripts\eval_anomaly.py              # under a minute
+.\.venv\Scripts\python.exe scripts\validate_accuracy.py benchmarks\results\published\accuracy
+```

@@ -50,6 +50,8 @@ jobs:
           scripts/tests/test_accuracy_eval.py
           scripts/tests/test_timeseries.py
           scripts/tests/test_autoencoder.py
+          scripts/tests/test_autoencoder_pipeline.py
+          scripts/tests/test_anomaly_eval.py
 
       - name: Validate example and published results
         run: python scripts/validate_results.py --strict docs/examples benchmarks/results/published

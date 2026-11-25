@@ -26,6 +26,8 @@ cache/
 models/*
 !models/README.md
 !models/manifest.json
+# Model sources that cannot be re-created locally (committed, pinned by SHA256)
+!models/sources/
 
 # Model binaries (small test fixtures are allowed)
 *.onnx
@@ -35,6 +37,7 @@ models/*
 *.keras
 *.bin
 !**/tests/fixtures/**
+!models/sources/**
 
 # Scratch benchmark results (published runs live in benchmarks/results/published/)
 benchmarks/results/local/

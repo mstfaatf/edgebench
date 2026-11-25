@@ -194,7 +194,7 @@ def test_consistency_problems_find_disagreements():
     recipe = mr.build_recipe(mf)
     assert mr.consistency_problems(recipe, entry, mf) == []
     stale = json.loads(json.dumps(recipe))
-    stale["quantization"]["calibration"]["image_count"] = 100
+    stale["quantization"]["calibration"]["sample_count"] = 100
     assert "quantization" in mr.consistency_problems(stale, entry, mf)[0]
     wrong = replace(entry, batch_size=4)
     assert "batch_size" in mr.consistency_problems(recipe, wrong, mf)[0]
@@ -260,16 +260,175 @@ def test_committed_manifest_matches_its_schema_and_has_sound_lineage():
     assert reg.lineage_problems(files) == []
     depth = {"fp32": 1, "fp32_folded": 2, "int8": 2, "int8_unpruned": 2,
              "int8_folded": 3, "int8_folded_unpruned": 3}
+    imported_depth = {"fp32_imported": 1, "fp32": 2, "int8": 3, "int8_unpruned": 3}
     for f in files:
         chain = reg.lineage(files, f)
-        assert len(chain) == depth[f.variant], f.file
+        expected = imported_depth if f.model in reg.IMPORTED_MODELS else depth
+        assert len(chain) == expected[f.variant], f.file
         root = chain[-1]
-        assert (root.variant, root.precision, root.normalization) == ("fp32", "fp32", "external")
+        assert (root.variant, root.precision, root.normalization) == \
+            (reg.root_variant(f.model), "fp32", "external")
         assert (root.model, root.batch_size) == (f.model, f.batch_size)
         assert f.file == reg.relative_path(f.model, f.variant, f.batch_size)
         assert f.precision == ("int8" if f.variant.startswith("int8") else "fp32")
         assert f.normalization == ("folded" if "folded" in f.variant else "external")
         assert f.pruned == (None if f.precision == "fp32" else not f.variant.endswith("unpruned"))
+
+
+# --- imported models (CI) ----------------------------------------------------------
+
+AE = "conv1d_autoencoder"
+AE_SPEC = reg.IMPORTED_MODELS[AE]
+
+
+def imported_meta(batch=1, **extra):
+    pre = {"kind": "time_series", "dataset": "nab-machine-temperature",
+           "split_manifest": "datasets/nab-machine-temperature/splits.json",
+           "split_manifest_sha256": SHA["f"], "window_length": 128, "window_stride": 1,
+           "layout": "NWC", "dtype": "float32", "formula": "(x - mean) / std", "mean": 89.97,
+           "std": 8.06, "std_ddof": 0, "computed_on": "train"}
+    meta = {"model": AE, "variant": "fp32_imported", "precision": "fp32",
+            "batch_size": str(batch), "weights_source": "colab_bundle", "weights": "trained in Colab",
+            "weights_sha256": AE_SPEC.source_sha256_of(batch),
+            "weights_path": AE_SPEC.source_file(batch), "weights_notebook": AE_SPEC.notebook,
+            "weights_notebook_commit": AE_SPEC.notebook_commit,
+            "weights_code_commit": AE_SPEC.code_commit,
+            "training_record_sha256": AE_SPEC.training_record_sha256,
+            "normalization": "external", "input_range": "(x - mean) / std",
+            "input_preprocessing": json.dumps(pre), "input_shape": json.dumps([batch, 128, 1]),
+            "fold_not_applicable": "not applicable", "exporter": AE_SPEC.exporter, "opset": "17",
+            "ir_version": "8", "tensorflow_version": "2.21.0", "keras_version": "3.15.1",
+            "tf2onnx_version": "1.17.0", "onnx_version": "1.23.2", "local_onnx_version": "1.23.2"}
+    meta.update(extra)
+    return {reg.META_PREFIX + k: v for k, v in meta.items()}
+
+
+def cleaned(meta, parent_sha):
+    m = dict(meta)
+    m.update({"edgebench.variant": "fp32",
+              "edgebench.source_model": reg.relative_path(AE, "fp32_imported", 1),
+              "edgebench.source_sha256": parent_sha,
+              "edgebench.cleanup": json.dumps({
+                  "tool": "onnx_cleanup", "nodes_before": 26, "nodes_after": 11,
+                  "bias_adds_folded": 5, "squeeze_unsqueeze_pairs_removed": 4,
+                  "reshape_chains_collapsed": 2})})
+    return m
+
+
+def series_file(meta, sha, batch=1):
+    return mr.ModelFile(reg.relative_path(AE, meta["edgebench.variant"], batch), sha, 1000, meta,
+                        [mr.Tensor("input", "float32", [batch, 128, 1])],
+                        [mr.Tensor("reconstruction", "float32", [batch, 128, 1])])
+
+
+def imported_family():
+    """The imported chain: source graph -> cleaned FP32 -> INT8 (+ unpruned)."""
+    root = imported_meta()
+    clean = cleaned(root, SHA["a"])
+    fp32_file = reg.relative_path(AE, "fp32", 1)
+    return [series_file(root, SHA["a"]), series_file(clean, SHA["b"]),
+            series_file(int8(clean, SHA["b"], fp32_file), SHA["c"]),
+            series_file(int8(clean, SHA["b"], fp32_file, pruned=False), SHA["d"])]
+
+
+@pytest.mark.parametrize("index", range(4))
+def test_imported_recipes_match_the_schema(index):
+    recipe = mr.build_recipe(imported_family()[index])
+    assert mr.schema_problems(recipe) == []
+    assert mr.source_pin_problems(recipe) == []
+    assert recipe["weights"]["library"] == "colab_bundle"
+    assert recipe["preprocessing"]["kind"] == "time_series"
+    assert recipe["preprocessing"]["fold"] is None
+    assert recipe["export"]["local_tool_versions"] == {"onnx": "1.23.2"}
+    assert (recipe["graph_cleanup"] is None) == (index == 0)
+    assert (recipe["lineage"]["parent"] is None) == (index == 0)
+
+
+def test_image_recipes_have_no_import_fields():
+    recipe = mr.build_recipe(family()[2])
+    assert recipe["graph_cleanup"] is None and recipe["export"]["local_tool_versions"] is None
+    assert recipe["preprocessing"]["kind"] == "image"
+    for path, value in ((("graph_cleanup",), {"tool": "x"}),
+                        (("export", "local_tool_versions"), {"onnx": "1"})):
+        doc = json.loads(json.dumps(recipe))
+        target = doc
+        for k in path[:-1]:
+            target = target[k]
+        target[path[-1]] = value
+        assert mr.schema_problems(doc), path
+
+
+def test_imported_schema_rules():
+    recipe = mr.build_recipe(imported_family()[1])
+    for change in (lambda d: d.update(graph_cleanup=None),
+                   lambda d: d["lineage"].update(parent=None),
+                   lambda d: d["weights"].update(url="https://example.org/x"),
+                   lambda d: d["export"]["tool_versions"].update(torch="2")):
+        doc = json.loads(json.dumps(recipe))
+        change(doc)
+        assert mr.schema_problems(doc)
+
+
+IMPORTED_KEYS = sorted(set(imported_family()[2].metadata))
+
+
+@pytest.mark.parametrize("key", IMPORTED_KEYS)
+def test_a_missing_imported_metadata_key_is_an_error_naming_it(key):
+    mf = imported_family()[2]
+    meta = {k: v for k, v in mf.metadata.items() if k != key}
+    if key == "edgebench.cleanup":
+        # Without the clean-up record the INT8 file is not a valid imported recipe.
+        assert mr.schema_problems(mr.build_recipe(replace(mf, metadata=meta)))
+        return
+    with pytest.raises(reg.MetadataError, match=key.replace(".", r"\.")):
+        mr.build_recipe(replace(mf, metadata=meta))
+
+
+def test_source_pin_problems_catch_another_source():
+    recipe = mr.build_recipe(imported_family()[0])
+    for field, value in (("sha256", SHA["e"]), ("path", "models/sources/x/x_fp32_b1.onnx"),
+                         ("notebook_commit", "0" * 40)):
+        doc = json.loads(json.dumps(recipe))
+        doc["weights"][field] = value
+        assert mr.source_pin_problems(doc), field
+    doc = json.loads(json.dumps(recipe))
+    doc["identity"]["model"] = "mobilenetv2"
+    assert "not an imported model" in mr.source_pin_problems(doc)[0]
+
+
+def test_imported_lineage_is_sound():
+    files = entries(imported_family())
+    assert [f.parent_sha256 for f in files] == [None, SHA["a"], SHA["b"], SHA["b"]]
+    assert reg.lineage_problems(files) == []
+    chain = reg.lineage(files, files[2])
+    assert [f.variant for f in chain] == ["int8", "fp32", "fp32_imported"]
+
+
+@pytest.mark.parametrize("change,message", [
+    # the cleaned FP32 of an imported model must have the imported graph as parent
+    (lambda f: [f[0], replace(f[1], parent_sha256=None), *f[2:]], "needs a parent"),
+    (lambda f: [replace(f[0], parent_sha256=SHA["b"]), *f[1:]], "has a parent"),
+    (lambda f: [*f[:2], replace(f[2], parent_sha256=SHA["a"]), f[3]], "expected fp32"),
+    (lambda f: [*f, replace(f[1], variant="fp32_folded", sha256=SHA["e"],
+                            file="conv1d_autoencoder/x.onnx")], "not allowed"),
+    (lambda f: [replace(f[0], normalization="folded"), *f[1:]], "external normalization"),
+])
+def test_imported_lineage_problems_are_found(change, message):
+    problems = reg.lineage_problems(change(entries(imported_family())))
+    assert any(message in p for p in problems), problems
+
+
+def test_exported_models_cannot_have_an_imported_root():
+    f = entries(family())
+    problems = reg.lineage_problems([replace(f[0], variant="fp32_imported"), *f[1:]])
+    assert any("not allowed for model mobilenetv2" in p for p in problems), problems
+
+
+def test_committed_source_matches_its_pins():
+    from common import autoencoder_pipeline as ap
+
+    assert ap.source_problems(AE_SPEC) == []
+    assert sorted(dict(AE_SPEC.source_sha256)) == list(reg.BATCH_SIZES)
 
 
 # --- real model files (need onnx and the files) -----------------------------------

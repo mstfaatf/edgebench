@@ -1,0 +1,136 @@
+{
+  "anomaly_schema_version": "1.0.0",
+  "kind": "comparisons",
+  "timestamp_utc": "2026-11-25T02:46:09.946Z",
+  "dataset": {
+    "name": "NAB machine_temperature_system_failure",
+    "split_manifest": "datasets/nab-machine-temperature/splits.json",
+    "split_manifest_sha256": "b97ee8e2a09139a91e61820d114ca552e1443ec519024d09a31426fa01074c82",
+    "window_length": 128,
+    "window_stride": 1,
+    "window_label": "any point inside a labelled window",
+    "validation_windows": 2676,
+    "test_windows": 11230,
+    "test_anomalous_windows": 2649,
+    "anomaly_ranges": [
+      [
+        2126,
+        2693
+      ],
+      [
+        3703,
+        4270
+      ],
+      [
+        16057,
+        16624
+      ],
+      [
+        19232,
+        19799
+      ]
+    ],
+    "sampling_interval_minutes": 5
+  },
+  "test": "mcnemar_exact",
+  "correlation": "spearman_average_ranks",
+  "independence_note": "Test windows overlap (stride 1), so neighbouring windows are not independent and the p-values are optimistic.",
+  "runs": {
+    "conv1d_autoencoder_fp32_cpu": {
+      "status": "success",
+      "test_scores_sha256": "2a240deddf10b78400e7762caaa516f7b23dda56643619687666a5aa178b61a3"
+    },
+    "conv1d_autoencoder_fp32_npu_fp16": {
+      "status": "success",
+      "test_scores_sha256": "7107669bb753375ac8d900a4971333e00ff91fb8a790ed0f8423d393149fa0e4"
+    },
+    "conv1d_autoencoder_int8_cpu": {
+      "status": "success",
+      "test_scores_sha256": "bff78eb6153587fd32c5c49c1747eb59d3c2044c9264b97d7368237b013cc4c7"
+    },
+    "conv1d_autoencoder_int8_npu": {
+      "status": "success",
+      "test_scores_sha256": "f987fa39a8343731c2a38341304815fa0ad813daca65dcdfd6bd7aa3db9f00e5"
+    }
+  },
+  "comparisons": [
+    {
+      "name": "NPU INT8 vs CPU INT8",
+      "question": "Does the NPU detect the same anomalies as the CPU on the same INT8 file?",
+      "a": "conv1d_autoencoder_int8_npu",
+      "b": "conv1d_autoencoder_int8_cpu",
+      "score_spearman": 0.779310200364562,
+      "flag_agreement": 0.9991985752448798,
+      "flagged_a": 1766,
+      "flagged_b": 1757,
+      "flagged_only_a": 9,
+      "flagged_only_b": 0,
+      "counts": {
+        "both_correct": 9619,
+        "only_a_correct": 8,
+        "only_b_correct": 1,
+        "both_wrong": 1602
+      },
+      "p_value": 0.0390625,
+      "f1_a": 0.6369195922989808,
+      "f1_b": 0.6345891965501589,
+      "f1_delta": 0.0023303957488218785,
+      "roc_auc_a": 0.8050069708556161,
+      "roc_auc_b": 0.8129077431422165,
+      "events_detected_a": 4,
+      "events_detected_b": 4
+    },
+    {
+      "name": "CPU INT8 vs CPU FP32",
+      "question": "What does INT8 quantization cost the detector?",
+      "a": "conv1d_autoencoder_int8_cpu",
+      "b": "conv1d_autoencoder_fp32_cpu",
+      "score_spearman": 0.3344845224965562,
+      "flag_agreement": 0.8575244879786287,
+      "flagged_a": 1757,
+      "flagged_b": 169,
+      "flagged_only_a": 1594,
+      "flagged_only_b": 6,
+      "counts": {
+        "both_correct": 8372,
+        "only_a_correct": 1248,
+        "only_b_correct": 352,
+        "both_wrong": 1258
+      },
+      "p_value": 2.047383460977386e-117,
+      "f1_a": 0.6345891965501589,
+      "f1_b": 0.11071682044002838,
+      "f1_delta": 0.5238723761101305,
+      "roc_auc_a": 0.8129077431422165,
+      "roc_auc_b": 0.7088322594947031,
+      "events_detected_a": 4,
+      "events_detected_b": 2
+    },
+    {
+      "name": "NPU FP16 vs CPU FP32",
+      "question": "What does FP16 compute on the NPU cost against FP32 on the CPU (same FP32 file)?",
+      "a": "conv1d_autoencoder_fp32_npu_fp16",
+      "b": "conv1d_autoencoder_fp32_cpu",
+      "score_spearman": 0.9992922680928226,
+      "flag_agreement": 0.9998219056099733,
+      "flagged_a": 167,
+      "flagged_b": 169,
+      "flagged_only_a": 0,
+      "flagged_only_b": 2,
+      "counts": {
+        "both_correct": 8723,
+        "only_a_correct": 1,
+        "only_b_correct": 1,
+        "both_wrong": 2505
+      },
+      "p_value": 1.0,
+      "f1_a": 0.11008522727272728,
+      "f1_b": 0.11071682044002838,
+      "f1_delta": -0.0006315931673011033,
+      "roc_auc_a": 0.7131508861285846,
+      "roc_auc_b": 0.7088322594947031,
+      "events_detected_a": 2,
+      "events_detected_b": 2
+    }
+  ]
+}

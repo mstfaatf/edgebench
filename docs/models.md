@@ -4,8 +4,9 @@ EdgeBench benchmarks ImageNet classifiers exported from PyTorch (torchvision and
 timm) to ONNX with fixed shapes, one file per batch size, in FP32 and as static
 INT8 QDQ models. This page describes which models, where their weights come
 from, how they are exported, quantized and checked, and what input they expect.
-A time-series anomaly-detection autoencoder trained with Keras is in progress;
-see [autoencoder.md](autoencoder.md).
+It also benchmarks a time-series anomaly-detection autoencoder trained with
+Keras in Colab and imported from committed ONNX files
+([Imported models](#imported-models); details in [autoencoder.md](autoencoder.md)).
 
 ## Supported models
 
@@ -70,6 +71,28 @@ static graph, and score slightly higher, so EdgeBench uses them.
 
 The last row shows why the normalization constants are per model: using the
 wrong mean/std does not fail, it costs 5-7 points of accuracy.
+
+### Imported models
+
+| Model | Name | Source | Task |
+|---|---|---|---|
+| Conv1D autoencoder | `conv1d_autoencoder` | committed bundle [`models/sources/conv1d_autoencoder/`](../models/sources/conv1d_autoencoder/): FP32 ONNX at batch 1, 4 and 8 exported by tf2onnx 1.17.0 from Keras 3.15.1, trained by `notebooks/train_autoencoder.ipynb` (commit `8d8f5a3`); 9,505 parameters | anomaly detection on NAB `machine_temperature_system_failure` (MIT) |
+
+TensorFlow does not run on Windows on Arm, and Colab training is not
+bit-reproducible across machines, so the exported files are the source: they
+are committed and pinned by SHA256 in `IMPORTED_MODELS`
+(`scripts/common/model_registry.py`), together with the training record, the
+notebook commit and the commit it cloned. `scripts/prepare_autoencoder.py`
+makes the variants from them: `fp32_imported` (the source graph with
+`edgebench.*` metadata, kept as a reference), `fp32` (the source graph after an
+exact clean-up: bias `Add`s folded into the convolutions, per-layer
+`Squeeze`/`Unsqueeze` removed; `scripts/common/onnx_cleanup.py`), and `int8` /
+`int8_unpruned` with the default INT8 recipe, calibrated on the 200 calibration
+windows of the split manifest. Normalization is external (the series mean/std
+of the training split); there is no folded variant. `--verify` rebuilds every
+file in memory and compares it with the manifest. Everything below about
+metadata, recipes, the manifest and references applies to these files too;
+[autoencoder.md](autoencoder.md) has the clean-up, NPU and evaluation results.
 
 ## Export settings
 
@@ -160,13 +183,22 @@ models/
   efficientnet_lite0/
     efficientnet_lite0_fp32_b1.onnx
     ...
+  conv1d_autoencoder/
+    conv1d_autoencoder_fp32_imported_b1.onnx   source graph + metadata (reference)
+    conv1d_autoencoder_fp32_b1.onnx            cleaned graph
+    conv1d_autoencoder_int8_b1.onnx, ..._int8_unpruned_b1.onnx
+    ...
+  sources/
+    conv1d_autoencoder/               committed: the Colab bundle (ONNX, training record,
+                                      reference arrays, SHA256SUMS)
 ```
 
 Files are named `<model>_<variant>_b<batch>.onnx`, with variant `fp32`, `int8`
 or `int8_unpruned`, and the normalization-folded `fp32_folded`, `int8_folded`
 and `int8_folded_unpruned` ([below](#normalization-folded-models)). The `.onnx` files and
-sidecars are not committed (`models/` is gitignored except its README and
-`manifest.json`); they travel together. Two sidecars sit next to each file:
+sidecars are not committed (`models/` is gitignored except its README,
+`manifest.json` and `sources/`); they travel together. The autoencoder has the
+variants `fp32_imported`, `fp32`, `int8` and `int8_unpruned`. Two sidecars sit next to each file:
 `<name>.json` records the results of the checks the making script ran (see
 below), and `<name>.recipe.json` records how the file was made
 ([Recipes and the manifest](#recipes-and-the-manifest)). The INT8 models of the
@@ -501,7 +533,7 @@ Three things describe each model file, with one source of truth:
 
 | What | Where | Committed | Role |
 |---|---|---|---|
-| ONNX metadata (`edgebench.*`) | inside the `.onnx` file | with the file | the source: written by export, fold and quantize |
+| ONNX metadata (`edgebench.*`) | inside the `.onnx` file | with the file | the source: written by export, fold and quantize (and `prepare_autoencoder.py`) |
 | Recipe sidecar | `<name>.recipe.json` next to the file | no (travels with the file) | a structured, readable copy of the metadata |
 | Manifest | `models/manifest.json` | yes | the index: every file, its hash and what it was made from |
 
@@ -510,44 +542,58 @@ Three things describe each model file, with one source of truth:
 `<name>.recipe.json` is built from the model file alone: its metadata, its
 graph inputs and outputs, its SHA256 and size (`scripts/common/model_recipe.py`).
 So it can be regenerated from the `.onnx` file at any time, and a file without
-a sidecar loses nothing. Schema: `schemas/model-recipe.v1.0.0.schema.json`
-(recipe version `1.0.0`). Groups:
+a sidecar loses nothing. Schema: `schemas/model-recipe.v1.1.0.schema.json`
+(recipe version `1.1.0`; the `1.0.0` schema is kept for older sidecars). Groups:
 
 | Group | Fields |
 |---|---|
 | `identity` | file, model, variant, precision, normalization, batch size, SHA256, size |
-| `weights` | library (`torchvision`/`timm`), weights id, URL, weights-file SHA256; for timm also the Hugging Face repository, revision and file |
-| `export` | exporter, opset, IR version, input and output names, dtypes and shapes, torch/torchvision/onnx (and timm) versions |
-| `preprocessing` | resize, interpolation, crop, scale, layout, dtype, mean/std, where normalization is applied (by the caller, or folded into the model), what the input tensor holds, and for folded files the padding method and first convolution |
-| `quantization` | INT8 only (`null` for FP32): format, method, weight type and symmetry, per-channel, activation type and symmetry, bias type, calibration (method, dataset, calibration-manifest SHA256, image count, batch), QNN preprocessing, pruned or not, chains and nodes pruned, quantizer and ONNX Runtime versions |
-| `lineage` | the parent file and its SHA256 (`null` for an FP32 export, which is made from the weights) |
+| `weights` | library (`torchvision`/`timm`/`colab_bundle`), weights id, weights-file SHA256; URL for downloaded weights, and for timm also the Hugging Face repository, revision and file; for an imported model the committed source file's path, the notebook and its commit, the commit it cloned, and the training record's SHA256 |
+| `export` | exporter, opset, IR version, input and output names, dtypes and shapes, the versions of the tools that made the graph (torch/torchvision/onnx and timm, or tensorflow/keras/tf2onnx/onnx), and for imported models the local onnx version (`local_tool_versions`, `null` otherwise) |
+| `preprocessing` | `kind` `image`: resize, interpolation, crop, scale, layout, dtype, mean/std, where normalization is applied (by the caller, or folded into the model), what the input tensor holds, and for folded files the padding method and first convolution. `kind` `time_series`: dataset, split manifest and its SHA256, window length and stride, layout, dtype, mean/std and the split they come from, where normalization is applied, the input range, and why there is no folded variant |
+| `graph_cleanup` | imported models: what the exact clean-up rewrote (nodes before and after, bias Adds folded, Squeeze/Unsqueeze pairs removed, reshape chains collapsed), on the cleaned file and every file made from it; `null` otherwise |
+| `quantization` | INT8 only (`null` for FP32): format, method, weight type and symmetry, per-channel, activation type and symmetry, bias type, calibration (method, dataset, calibration-manifest SHA256, sample count, batch), QNN preprocessing, pruned or not, chains and nodes pruned, quantizer and ONNX Runtime versions |
+| `lineage` | the parent file and its SHA256 (`null` for a root: an FP32 export, made from the weights, or an imported source graph) |
 
 A key the recipe needs that is missing from the metadata is an error that names
 the key; no field is filled with a guess or `null`. The schema allows `null`
 only where it means "not applicable": `quantization` for FP32 files,
-`preprocessing.fold` for external normalization and `lineage.parent` for FP32
-exports.
+`preprocessing.fold` for external normalization, `graph_cleanup` and
+`export.local_tool_versions` for exported models, and `lineage.parent` for
+roots. Image files carry no `kind` in their `edgebench.input_preprocessing`
+(they predate it); their kind is `image`. For an imported model,
+`model_recipes.py --check` also compares the weights block with the registry
+pins.
 
 ### Manifest
 
-Each entry of `models/manifest.json` (manifest version `1.0.0`, schema
-`schemas/model-manifest.v1.0.0.schema.json`) records `file`, `sha256`,
-`size_bytes`, `model`, `variant`, `precision`, `normalization`, `batch_size`,
-`pruned` (INT8 only, `null` for FP32) and `parent_sha256` (`null` for FP32
-exports). Every field except the hash and size comes from the file's metadata.
-The parents form a tree per model and batch size:
+Each entry of `models/manifest.json` (manifest version `1.1.0`, schema
+`schemas/model-manifest.v1.1.0.schema.json`; 1.1.0 adds the variant
+`fp32_imported`) records `file`, `sha256`, `size_bytes`, `model`, `variant`,
+`precision`, `normalization`, `batch_size`, `pruned` (INT8 only, `null` for
+FP32) and `parent_sha256` (`null` for roots). Every field except the hash and
+size comes from the file's metadata. The parents form a tree per model and
+batch size:
 
 ```
-<model>_fp32_b<n>                      (from the weights)
+<model>_fp32_b<n>                      (exported from the weights)
   <- <model>_int8_b<n>, <model>_int8_unpruned_b<n>
   <- <model>_fp32_folded_b<n>
        <- <model>_int8_folded_b<n>, <model>_int8_folded_unpruned_b<n>
+
+conv1d_autoencoder_fp32_imported_b<n>  (imported: the pinned source file + metadata)
+  <- conv1d_autoencoder_fp32_b<n>      (cleaned graph)
+       <- conv1d_autoencoder_int8_b<n>, conv1d_autoencoder_int8_unpruned_b<n>
 ```
 
-Lineage check: every parent SHA256 is in the manifest, following parents
-always ends at an FP32 export with external normalization of the same model and
-batch size, each step goes to the expected parent variant, and there are no
-cycles or duplicate hashes (`lineage_problems` in `scripts/common/model_registry.py`).
+Lineage check: every parent SHA256 is in the manifest; following parents
+always ends at a root with FP32 precision and external normalization of the
+same model and batch size: the FP32 export of an exported model, the
+`fp32_imported` file of a model in `IMPORTED_MODELS` (an imported model's
+`fp32` file must have that parent, an exported model may have no
+`fp32_imported` file); each step goes to the expected parent variant; and there
+are no cycles or duplicate hashes (`lineage_problems` in
+`scripts/common/model_registry.py`).
 
 ### Regenerating and checking
 
@@ -601,8 +647,9 @@ that is known to compute the same outputs as the reference implementation.
 
 | Input set | Contents | Runs per file |
 |---|---|---|
+| `windows-reference-<hash>` (the autoencoder) | the 8 reference windows of the split manifest (one centred in each labelled anomaly of the test split, 4 normal ones), normalized as the manifest says; `<hash>` is the start of the split manifest's SHA256 | batch 1: 8, batch 4: 2, batch 8: 1 |
 | `images-normalized-<hash>` / `images-unit` | 8 ImageNetV2 eval-quick images, preprocessed with `scripts/common/preprocess.py` (resize 256, crop 224, scale to [0, 1]); normalized with the model's own mean/std for external-normalization files (`<hash>` identifies the mean/std), left in [0, 1] for folded files, as each file's recipe says | batch 1: 8, batch 4: 2, batch 8: 1 |
-| `splitmix64-seed0-b<batch>` | the input `edgebench run` generates and times by default (`--input random --seed 0`), reproduced in Python from the documented generator ([cli.md](cli.md#input-data)) | 1 |
+| `splitmix64-seed0-<shape>` (e.g. `splitmix64-seed0-1x3x224x224`) | the input `edgebench run` generates and times by default (`--input random --seed 0`), reproduced in Python from the documented generator ([cli.md](cli.md#input-data)) | 1 |
 
 The images are a seeded sample of distinct classes:
 `random.Random(20261124).sample` over eval-quick in (label, path) order, the
@@ -614,8 +661,8 @@ and SHA256, and the SHA256 of every input tensor.
 
 | Device | Files | Session |
 |---|---|---|
-| `cpu` | all 54 | CPU EP, 4 intra-op threads, sequential execution, all graph optimizations, `session.intra_op.allow_spinning` 1 (the engine's CPU provider settings) |
-| `npu` | the 36 INT8 files | QNN HTP, strict (`session.disable_cpu_ep_fallback` 1, so session creation fails if any node would run on the CPU), burst performance mode |
+| `cpu` | all 66 | CPU EP, 4 intra-op threads, sequential execution, all graph optimizations, `session.intra_op.allow_spinning` 1 (the engine's CPU provider settings) |
+| `npu` | the 42 INT8 files | QNN HTP, strict (`session.disable_cpu_ep_fallback` 1, so session creation fails if any node would run on the CPU), burst performance mode |
 
 Tensors are raw little-endian float32 files (the format
 `tools/ort_probe/make_reference.py` already used), listed in
@@ -625,9 +672,11 @@ input files of the run, shape and SHA256. One JSON record per file and device
 the input sets, device and execution provider, thread count or provider
 options, the ONNX Runtime version (and for the NPU the QNN execution provider
 version and the QNN backend version from `QnnHtp.dll`), and every output's
-SHA256 and top-1 classes. NPU records also say whether running the same input
-twice gave identical outputs, and the top-1 agreement with the CPU on the
-images. Like the models, the references are not committed (22 MB).
+SHA256 and top-1 classes (for the autoencoder: each window's reconstruction
+MSE). NPU records also say whether running the same input twice gave identical
+outputs, and the top-1 agreement with the CPU on the images (for the
+autoencoder: the largest difference from the CPU on the windows). Like the
+models, the references are not committed (22 MB).
 
 ```powershell
 # write all references (CPU and NPU; --no-npu for CPU only); about 2 minutes
@@ -640,8 +689,8 @@ images. Like the models, the references are not committed (22 MB).
 A reference is stale when the model SHA256 in its record is not the current
 file's: regenerating a model file (for example after a metadata change)
 requires regenerating the references. `--check` also verifies every tensor
-against the SHA256 in the index and that the image selection is still the
-documented one.
+against the SHA256 in the index and that the image selection and the reference
+windows are still the documented ones.
 
 ### What the C++ tests prove
 
@@ -653,11 +702,12 @@ preallocated buffers (the timed mode), 4 threads, and checks:
 - the input the engine generated for `--input random --seed 0` equals the
   Python reproduction byte for byte;
 - every output equals the Python output byte for byte, on the generated input
-  and on the images.
+  and on the images (the reference windows for the autoencoder).
 
 No tolerance: the engine and the Python package use the same ONNX Runtime
-version, thread count and session settings, and all 54 files (FP32 and INT8,
-external and folded, pruned and unpruned, all batch sizes) match bit for bit.
+version, thread count and session settings, and all 66 files (FP32 and INT8,
+external and folded, pruned and unpruned, imported and cleaned, all batch
+sizes) match bit for bit.
 A further test checks that the index lists exactly the files the tests cover.
 Without the model files or the references the tests are skipped with the
 reason (CI has neither).

@@ -58,9 +58,13 @@ def describe(recipe: dict, source: str) -> list[str]:
         f"  file           {i['size_bytes']:,} bytes, sha256 {i['sha256']}",
         "weights",
         f"  {w['library']:<14} {w['id']}",
-        f"  url            {w['url']}",
+        f"  url            {w['url']}" if "url" in w else f"  source file    {w['path']}",
         f"  sha256         {w['sha256']}",
     ]
+    if "notebook" in w:
+        lines += [f"  notebook       {w['notebook']} at {w['notebook_commit']}",
+                  f"  code commit    {w['code_commit']}",
+                  f"  training rec.  sha256 {w['training_record_sha256']}"]
     if "hf_revision" in w:
         lines.append(f"  hugging face   {w['hf_repo']}@{w['hf_revision']} ({w['file']})")
     versions = ", ".join(f"{k} {v}" for k, v in e["tool_versions"].items())
@@ -70,13 +74,32 @@ def describe(recipe: dict, source: str) -> list[str]:
         f"  inputs         {'; '.join(shape(t) for t in e['inputs'])}",
         f"  outputs        {'; '.join(shape(t) for t in e['outputs'])}",
         f"  tools          {versions}",
-        "preprocessing",
-        f"  image          resize shorter side {p['resize_shorter_side']} ({p['interpolation']}), "
-        f"center crop {p['center_crop']}, scale {p['scale']}, {p['layout']} {p['dtype']}",
+    ]
+    if e["local_tool_versions"]:
+        lines.append("  local tools    " + ", ".join(f"{k} {v}" for k, v in
+                                                    e["local_tool_versions"].items()))
+    lines.append("preprocessing")
+    if p["kind"] == "time_series":
+        lines += [f"  windows        {p['dataset']}, length {p['window_length']}, stride "
+                  f"{p['window_stride']}, {p['layout']}, {p['dtype']}",
+                  f"                 split manifest {p['split_manifest']} "
+                  f"(sha256 {p['split_manifest_sha256'][:12]})",
+                  f"  fold           {p['fold_not_applicable']}"]
+    else:
+        lines.append(f"  image          resize shorter side {p['resize_shorter_side']} "
+                     f"({p['interpolation']}), center crop {p['center_crop']}, scale "
+                     f"{p['scale']}, {p['layout']} {p['dtype']}")
+    lines += [
         f"  normalization  mean {p['mean']}, std {p['std']}; applied by "
         f"{p['normalization_applied_by']}",
         f"  input          {p['input_range']}",
     ]
+    g = recipe["graph_cleanup"]
+    if g:
+        lines += ["graph clean-up",
+                  f"  {g['nodes_before']} -> {g['nodes_after']} nodes: {g['bias_adds_folded']} bias "
+                  f"Adds folded, {g['squeeze_unsqueeze_pairs_removed']} Squeeze/Unsqueeze pairs "
+                  f"removed, {g['reshape_chains_collapsed']} reshape chains collapsed"]
     if p["fold"]:
         lines.append(f"  fold           padding {p['fold']['padding']}, "
                      f"first conv {p['fold']['first_conv']}")
@@ -89,7 +112,7 @@ def describe(recipe: dict, source: str) -> list[str]:
             f"{', per channel' if q['per_channel'] else ', per tensor'}; activations "
             f"{q['activation_type']} {'symmetric' if q['activation_symmetric'] else 'asymmetric'}; "
             f"bias {q['bias_type']}",
-            f"  calibration    {c['method']} on {c['image_count']} images, {c['dataset']}",
+            f"  calibration    {c['method']} on {c['sample_count']} samples, {c['dataset']}",
             f"                 manifest sha256 {c['manifest_sha256']}; batch {c['batch']}",
             f"  pruning        " + (f"pruned: {q['pruned_chains']} dead Q/DQ chains, "
                                     f"{q['pruned_nodes']} nodes removed" if q["pruned"]
@@ -102,6 +125,8 @@ def describe(recipe: dict, source: str) -> list[str]:
 def lineage_lines(recipe: dict) -> list[str]:
     parent = recipe["lineage"]["parent"]
     if parent is None:
+        if recipe["weights"]["library"] == "colab_bundle":
+            return ["lineage", "  imported from the source file above (root)"]
         return ["lineage", "  exported from the weights above (root)"]
     files, _ = read_manifest()
     entry = next((f for f in files if f.sha256 == recipe["identity"]["sha256"]), None)

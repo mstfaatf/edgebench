@@ -1,0 +1,307 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/mstfaatf/edgebench/main/schemas/model-recipe.v1.1.0.schema.json",
+  "title": "EdgeBench model recipe",
+  "description": "How one model file was made, built from the file's own edgebench.* ONNX metadata, graph inputs/outputs, SHA256 and size (scripts/common/model_recipe.py). Recipe version 1.1.0: adds imported models (weights from a committed source file, time-series preprocessing, graph_cleanup, export.local_tool_versions), the preprocessing kind, and renames calibration image_count to sample_count. See docs/models.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["recipe_version", "identity", "weights", "export", "preprocessing", "graph_cleanup", "quantization",
+               "lineage"],
+  "properties": {
+    "recipe_version": {"const": "1.1.0"},
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "model", "variant", "precision", "normalization", "batch_size", "sha256", "size_bytes"],
+      "properties": {
+        "file": {"type": "string", "description": "Path relative to models/, forward slashes.", "pattern": "^[a-z0-9_]+/[a-z0-9_]+\\.onnx$"},
+        "model": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+        "variant": {"enum": ["fp32", "fp32_imported", "fp32_folded", "int8", "int8_unpruned", "int8_folded",
+                             "int8_folded_unpruned"]},
+        "precision": {"enum": ["fp32", "int8"]},
+        "normalization": {"enum": ["external", "folded"]},
+        "batch_size": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "weights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["library", "id", "sha256"],
+      "properties": {
+        "library": {"enum": ["torchvision", "timm", "colab_bundle"], "description": "colab_bundle: an imported model; the weights are the committed source ONNX file at path."},
+        "id": {"type": "string", "minLength": 1, "description": "Weights identifier, e.g. torchvision MobileNet_V2_Weights.IMAGENET1K_V2."},
+        "url": {"type": "string", "pattern": "^https://"},
+        "sha256": {"$ref": "#/$defs/sha256", "description": "SHA256 of the downloaded weights file, or of the imported source file."},
+        "hf_repo": {"type": "string", "minLength": 1},
+        "hf_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "file": {"type": "string", "minLength": 1},
+        "path": {"type": "string", "pattern": "^models/sources/[a-z0-9_]+/[a-z0-9_]+\\.onnx$", "description": "Repository-relative path of the committed source file."},
+        "notebook": {"type": "string", "minLength": 1},
+        "notebook_commit": {"$ref": "#/$defs/commit"},
+        "code_commit": {"$ref": "#/$defs/commit", "description": "Repository commit the notebook cloned for data and shared code."},
+        "training_record_sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"library": {"const": "timm"}}},
+          "then": {"required": ["url", "hf_repo", "hf_revision", "file"]}
+        },
+        {
+          "if": {"properties": {"library": {"const": "torchvision"}}},
+          "then": {"required": ["url"], "not": {"anyOf": [{"required": ["hf_repo"]}, {"required": ["hf_revision"]}, {"required": ["file"]}]}}
+        },
+        {
+          "if": {"properties": {"library": {"const": "colab_bundle"}}},
+          "then": {"required": ["path", "notebook", "notebook_commit", "code_commit", "training_record_sha256"],
+                   "not": {"anyOf": [{"required": ["url"]}, {"required": ["hf_repo"]}, {"required": ["hf_revision"]}, {"required": ["file"]}]}},
+          "else": {"not": {"anyOf": [{"required": ["path"]}, {"required": ["notebook"]}, {"required": ["notebook_commit"]},
+                                     {"required": ["code_commit"]}, {"required": ["training_record_sha256"]}]}}
+        }
+      ]
+    },
+    "export": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exporter", "opset", "ir_version", "inputs", "outputs", "tool_versions", "local_tool_versions"],
+      "properties": {
+        "exporter": {"type": "string", "minLength": 1},
+        "opset": {"type": "integer", "minimum": 1},
+        "ir_version": {"type": "integer", "minimum": 1},
+        "inputs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/tensor"}},
+        "outputs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/tensor"}},
+        "tool_versions": {
+          "description": "Versions of the tools that produced the source graph: torch/torchvision (and timm) for exports, tensorflow/keras/tf2onnx for imported models (from the training record).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["onnx"],
+          "properties": {
+            "onnx": {"type": "string", "minLength": 1},
+            "torch": {"type": "string", "minLength": 1},
+            "torchvision": {"type": "string", "minLength": 1},
+            "timm": {"type": "string", "minLength": 1},
+            "tensorflow": {"type": "string", "minLength": 1},
+            "keras": {"type": "string", "minLength": 1},
+            "tf2onnx": {"type": "string", "minLength": 1}
+          },
+          "oneOf": [
+            {"required": ["torch", "torchvision"], "not": {"anyOf": [{"required": ["tensorflow"]}, {"required": ["keras"]}, {"required": ["tf2onnx"]}]}},
+            {"required": ["tensorflow", "keras", "tf2onnx"], "not": {"anyOf": [{"required": ["torch"]}, {"required": ["torchvision"]}, {"required": ["timm"]}]}}
+          ]
+        },
+        "local_tool_versions": {
+          "description": "Imported models: versions of the local tools that added the metadata and cleaned the graph; null for models exported locally (tool_versions already are the local tools).",
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["onnx"],
+              "properties": {"onnx": {"type": "string", "minLength": 1}}
+            }
+          ]
+        }
+      }
+    },
+    "preprocessing": {
+      "description": "How the input tensor is made: image preprocessing for the image classifiers, windows of a normalized time series for the autoencoder.",
+      "oneOf": [{"$ref": "#/$defs/imagePreprocessing"}, {"$ref": "#/$defs/seriesPreprocessing"}]
+    },
+    "graph_cleanup": {
+      "description": "Imported models: the exact graph clean-up applied to the source graph (scripts/common/onnx_cleanup.py), carried by every file made from the cleaned graph; null otherwise.",
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tool", "nodes_before", "nodes_after", "bias_adds_folded", "squeeze_unsqueeze_pairs_removed",
+                       "reshape_chains_collapsed"],
+          "properties": {
+            "tool": {"type": "string", "minLength": 1},
+            "nodes_before": {"type": "integer", "minimum": 1},
+            "nodes_after": {"type": "integer", "minimum": 1},
+            "bias_adds_folded": {"type": "integer", "minimum": 0},
+            "squeeze_unsqueeze_pairs_removed": {"type": "integer", "minimum": 0},
+            "reshape_chains_collapsed": {"type": "integer", "minimum": 0}
+          }
+        }
+      ]
+    },
+    "quantization": {
+      "description": "The quantization recipe; null for FP32 files.",
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["format", "method", "weight_type", "weight_symmetric", "per_channel", "activation_type",
+                       "activation_symmetric", "bias_type", "calibration", "qnn_preprocess", "pruned",
+                       "pruned_chains", "pruned_nodes", "quantizer", "onnxruntime_version"],
+          "properties": {
+            "format": {"enum": ["qdq", "qoperator"]},
+            "method": {"enum": ["static", "dynamic"]},
+            "weight_type": {"enum": ["int8", "uint8"]},
+            "weight_symmetric": {"type": "boolean"},
+            "per_channel": {"type": "boolean"},
+            "activation_type": {"enum": ["int8", "uint8"]},
+            "activation_symmetric": {"type": "boolean"},
+            "bias_type": {"type": "string", "minLength": 1},
+            "calibration": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["method", "dataset", "manifest_sha256", "sample_count", "batch"],
+              "properties": {
+                "method": {"type": "string", "minLength": 1},
+                "dataset": {"type": "string", "minLength": 1},
+                "manifest_sha256": {"$ref": "#/$defs/sha256", "description": "SHA256 of the calibration split manifest (calibration.tsv, or splits.json for time series)."},
+                "sample_count": {"type": "integer", "minimum": 1, "description": "Calibration images or windows."},
+                "batch": {"type": "string", "minLength": 1}
+              }
+            },
+            "qnn_preprocess": {"type": "string", "minLength": 1},
+            "pruned": {"type": "boolean"},
+            "pruned_chains": {"type": "integer", "minimum": 0, "description": "Dead QuantizeLinear/DequantizeLinear chains removed by pruning (0 if not pruned)."},
+            "pruned_nodes": {"type": "integer", "minimum": 0, "description": "Nodes removed by pruning (0 if not pruned)."},
+            "quantizer": {"type": "string", "minLength": 1},
+            "onnxruntime_version": {"type": "string", "minLength": 1}
+          },
+          "if": {"properties": {"pruned": {"const": false}}},
+          "then": {"properties": {"pruned_chains": {"const": 0}, "pruned_nodes": {"const": 0}}}
+        }
+      ]
+    },
+    "lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parent"],
+      "properties": {
+        "parent": {
+          "description": "The file this one was made from; null for a root (an FP32 export made from the weights, or an imported source graph).",
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["file", "sha256"],
+              "properties": {
+                "file": {"type": "string", "pattern": "^[a-z0-9_]+/[a-z0-9_]+\\.onnx$"},
+                "sha256": {"$ref": "#/$defs/sha256"}
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"identity": {"properties": {"precision": {"const": "fp32"}}}}},
+      "then": {"properties": {"quantization": {"type": "null"}}},
+      "else": {"properties": {"quantization": {"type": "object"}}}
+    },
+    {
+      "description": "Roots (an exported fp32 file, an fp32_imported file) have no parent; every other file has one.",
+      "if": {"anyOf": [
+        {"properties": {"identity": {"properties": {"variant": {"const": "fp32_imported"}}}}},
+        {"properties": {"identity": {"properties": {"variant": {"const": "fp32"}}}, "weights": {"properties": {"library": {"enum": ["torchvision", "timm"]}}}}}
+      ]},
+      "then": {"properties": {"lineage": {"properties": {"parent": {"type": "null"}}}}},
+      "else": {"properties": {"lineage": {"properties": {"parent": {"type": "object"}}}}}
+    },
+    {
+      "description": "Exported models have no graph clean-up and no local tool versions; imported models always have local tool versions.",
+      "if": {"properties": {"weights": {"properties": {"library": {"const": "colab_bundle"}}}}},
+      "then": {"properties": {"export": {"properties": {"local_tool_versions": {"type": "object"}}},
+                              "preprocessing": {"properties": {"kind": {"const": "time_series"}}}}},
+      "else": {"properties": {"graph_cleanup": {"type": "null"}, "export": {"properties": {"local_tool_versions": {"type": "null"}}},
+                              "preprocessing": {"properties": {"kind": {"const": "image"}}}}}
+    },
+    {
+      "description": "The imported source graph is not cleaned; the files made from the cleaned graph record the clean-up.",
+      "if": {"properties": {"identity": {"properties": {"variant": {"const": "fp32_imported"}}}}},
+      "then": {"properties": {"graph_cleanup": {"type": "null"}}},
+      "else": {"if": {"properties": {"weights": {"properties": {"library": {"const": "colab_bundle"}}}}},
+               "then": {"properties": {"graph_cleanup": {"type": "object"}}}}
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "imagePreprocessing": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "resize_shorter_side", "interpolation", "center_crop", "scale", "layout", "dtype", "mean",
+                     "std", "normalization", "normalization_applied_by", "input_range", "fold"],
+        "properties": {
+          "kind": {"const": "image"},
+          "resize_shorter_side": {"type": "integer", "minimum": 1},
+          "interpolation": {"type": "string", "minLength": 1},
+          "center_crop": {"type": "integer", "minimum": 1},
+          "scale": {"type": "string", "minLength": 1},
+          "layout": {"const": "NCHW"},
+          "dtype": {"const": "float32"},
+          "mean": {"$ref": "#/$defs/rgb"},
+          "std": {"$ref": "#/$defs/rgb"},
+          "normalization": {"enum": ["external", "folded"]},
+          "normalization_applied_by": {"type": "string", "minLength": 1},
+          "input_range": {"type": "string", "minLength": 1, "description": "What the input tensor holds."},
+          "fold": {
+            "description": "How normalization was folded into the model; null for external normalization.",
+            "oneOf": [
+              {"type": "null"},
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["padding", "first_conv"],
+                "properties": {
+                  "padding": {"enum": ["mean_pad", "none"]},
+                  "first_conv": {"type": "string", "minLength": 1}
+                }
+              }
+            ]
+          }
+        },
+        "if": {"properties": {"normalization": {"const": "external"}}},
+        "then": {"properties": {"fold": {"type": "null"}}},
+        "else": {"properties": {"fold": {"type": "object"}}}
+    },
+    "seriesPreprocessing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "dataset", "split_manifest", "split_manifest_sha256", "window_length", "window_stride", "layout",
+                   "dtype", "mean", "std", "std_ddof", "computed_on", "normalization", "normalization_applied_by",
+                   "input_range", "fold", "fold_not_applicable"],
+      "properties": {
+        "kind": {"const": "time_series"},
+        "dataset": {"type": "string", "minLength": 1},
+        "split_manifest": {"type": "string", "minLength": 1, "description": "Repository-relative path of the split manifest."},
+        "split_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "window_length": {"type": "integer", "minimum": 1},
+        "window_stride": {"type": "integer", "minimum": 1},
+        "layout": {"type": "string", "minLength": 1},
+        "dtype": {"const": "float32"},
+        "mean": {"type": "number"},
+        "std": {"type": "number", "exclusiveMinimum": 0},
+        "std_ddof": {"type": "integer", "minimum": 0},
+        "computed_on": {"type": "string", "minLength": 1, "description": "The split the mean and std were computed on."},
+        "normalization": {"const": "external"},
+        "normalization_applied_by": {"type": "string", "minLength": 1},
+        "input_range": {"type": "string", "minLength": 1},
+        "fold": {"type": "null"},
+        "fold_not_applicable": {"type": "string", "minLength": 1, "description": "Why there is no normalization-folded variant."}
+      }
+    },
+    "rgb": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number", "exclusiveMinimum": 0}},
+    "tensor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "dtype", "shape"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "dtype": {"type": "string", "minLength": 1},
+        "shape": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1}}
+      }
+    }
+  }
+}

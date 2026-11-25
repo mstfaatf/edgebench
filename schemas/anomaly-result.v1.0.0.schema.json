@@ -1,0 +1,340 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/mstfaatf/edgebench/main/schemas/anomaly-result.v1.0.0.schema.json",
+  "title": "EdgeBench anomaly-detection result",
+  "description": "Window-level anomaly detection of one model file on one device (kind 'run'), or the paired comparisons between runs (kind 'comparisons'). Anomaly schema version 1.0.0. Written by scripts/eval_anomaly.py; checked by scripts/validate_accuracy.py. See docs/accuracy.md and docs/autoencoder.md.",
+  "oneOf": [{"$ref": "#/$defs/run"}, {"$ref": "#/$defs/comparisons"}],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"},
+    "runId": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+    "unit": {"type": "number", "minimum": 0, "maximum": 1},
+    "count": {"type": "integer", "minimum": 0},
+    "fileRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "sha256"],
+      "properties": {
+        "file": {"type": "string", "minLength": 1, "description": "Path relative to the repository root (not committed)."},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "split_manifest", "split_manifest_sha256", "window_length", "window_stride", "window_label",
+                   "validation_windows", "test_windows", "test_anomalous_windows", "anomaly_ranges",
+                   "sampling_interval_minutes"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "split_manifest": {"type": "string", "minLength": 1},
+        "split_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "window_length": {"type": "integer", "minimum": 1},
+        "window_stride": {"type": "integer", "minimum": 1},
+        "window_label": {"type": "string", "description": "When a window counts as anomalous."},
+        "validation_windows": {"type": "integer", "minimum": 1},
+        "test_windows": {"type": "integer", "minimum": 1},
+        "test_anomalous_windows": {"$ref": "#/$defs/count"},
+        "anomaly_ranges": {
+          "description": "Labelled anomaly ranges [start, stop) in the test split, as series indices.",
+          "type": "array",
+          "items": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "integer", "minimum": 0}}
+        },
+        "sampling_interval_minutes": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "stop", "windows", "flagged_windows", "detected", "first_flagged_window_start",
+                   "detection_point", "delay_points", "delay_fraction_of_range", "delay_minutes"],
+      "properties": {
+        "start": {"type": "integer", "minimum": 0},
+        "stop": {"type": "integer", "minimum": 1},
+        "windows": {"type": "integer", "minimum": 1, "description": "Test windows overlapping the range."},
+        "flagged_windows": {"$ref": "#/$defs/count"},
+        "detected": {"type": "boolean", "description": "At least one overlapping window is flagged."},
+        "first_flagged_window_start": {"type": ["integer", "null"]},
+        "detection_point": {"type": ["integer", "null"], "description": "Last point of the first flagged window: when the flag can be raised."},
+        "delay_points": {"type": ["integer", "null"], "description": "detection_point - start."},
+        "delay_fraction_of_range": {"type": ["number", "null"]},
+        "delay_minutes": {"type": ["number", "null"]}
+      },
+      "if": {"properties": {"detected": {"const": true}}},
+      "then": {"properties": {"first_flagged_window_start": {"type": "integer"}, "detection_point": {"type": "integer"},
+                              "delay_points": {"type": "integer"}, "delay_fraction_of_range": {"type": "number"},
+                              "delay_minutes": {"type": "number"}}},
+      "else": {"properties": {"first_flagged_window_start": {"type": "null"}, "detection_point": {"type": "null"},
+                              "delay_points": {"type": "null"}, "delay_fraction_of_range": {"type": "null"},
+                              "delay_minutes": {"type": "null"}}}
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["anomaly_schema_version", "kind", "run_id", "timestamp_utc", "status", "error", "model", "execution",
+                   "dataset", "input", "score", "threshold", "metrics", "scores", "environment"],
+      "properties": {
+        "anomaly_schema_version": {"const": "1.0.0"},
+        "kind": {"const": "run"},
+        "run_id": {"$ref": "#/$defs/runId"},
+        "timestamp_utc": {"$ref": "#/$defs/timestamp"},
+        "status": {"enum": ["success", "refused"]},
+        "error": {
+          "description": "Why the run produced no result (e.g. the strict session was refused); null on success.",
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["stage", "message"],
+              "properties": {"stage": {"enum": ["session_creation", "inference"]}, "message": {"type": "string"}}
+            }
+          ]
+        },
+        "model": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["file", "sha256", "model", "variant", "stored_precision", "normalization", "batch_size"],
+          "properties": {
+            "file": {"type": "string", "pattern": "^[a-z0-9_]+/[a-z0-9_]+\\.onnx$"},
+            "sha256": {"$ref": "#/$defs/sha256", "description": "Ties the result to models/manifest.json and the recipe sidecar."},
+            "model": {"type": "string"},
+            "variant": {"enum": ["fp32", "int8"]},
+            "stored_precision": {"enum": ["fp32", "int8"]},
+            "normalization": {"const": "external"},
+            "batch_size": {"type": "integer", "minimum": 1}
+          }
+        },
+        "execution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["device", "execution_provider", "strict", "compute_precision", "intra_op_threads", "provider_options",
+                       "session_config", "batch_equivalence"],
+          "properties": {
+            "device": {"enum": ["cpu", "npu"]},
+            "execution_provider": {"enum": ["CPUExecutionProvider", "QNNExecutionProvider"]},
+            "strict": {"type": "boolean", "description": "CPU fallback disabled (NPU runs)."},
+            "compute_precision": {"enum": ["fp32", "int8", "fp16"]},
+            "intra_op_threads": {"type": ["integer", "null"]},
+            "provider_options": {"type": "object", "additionalProperties": {"type": "string"}},
+            "session_config": {"type": "object", "additionalProperties": {"type": "string"}},
+            "batch_equivalence": {
+              "description": "Proof that the batch size used reconstructs every validation window bit for bit as batch 1 does on this device; null if no session could be created.",
+              "oneOf": [
+                {"type": "null"},
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["split", "reference_batch", "criterion", "identical", "windows", "candidates"],
+                  "properties": {
+                    "split": {"const": "validation"},
+                    "reference_batch": {"const": 1},
+                    "criterion": {"const": "reconstructions bit-identical"},
+                    "identical": {"const": true},
+                    "windows": {"type": "integer", "minimum": 1},
+                    "candidates": {"type": "object", "additionalProperties": {"enum": ["identical", "differs", "session_refused"]}}
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "dataset": {"$ref": "#/$defs/dataset"},
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["normalization", "mean", "std", "input_range"],
+          "properties": {
+            "normalization": {"const": "external"},
+            "mean": {"type": "number"},
+            "std": {"type": "number", "exclusiveMinimum": 0},
+            "input_range": {"type": "string"}
+          }
+        },
+        "score": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["definition", "higher_is_more_anomalous"],
+          "properties": {"definition": {"type": "string"}, "higher_is_more_anomalous": {"const": true}}
+        },
+        "threshold": {
+          "description": "Chosen on the validation split only; null when the run has no result.",
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["rule", "flag_rule", "split", "value", "validation_windows", "validation_flagged"],
+              "properties": {
+                "rule": {"const": "max_validation_score"},
+                "flag_rule": {"const": "score > threshold"},
+                "split": {"const": "validation"},
+                "value": {"type": "number", "minimum": 0},
+                "validation_windows": {"type": "integer", "minimum": 1},
+                "validation_flagged": {"const": 0, "description": "By the rule, no validation window exceeds the threshold."}
+              }
+            }
+          ]
+        },
+        "metrics": {
+          "description": "Test-split metrics; null when the run has no result.",
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["test_windows", "positives", "roc_auc", "roc_auc_method", "pr_auc", "pr_auc_method",
+                           "at_threshold", "events"],
+              "properties": {
+                "test_windows": {"type": "integer", "minimum": 1},
+                "positives": {"$ref": "#/$defs/count"},
+                "roc_auc": {"$ref": "#/$defs/unit"},
+                "roc_auc_method": {"const": "mann_whitney_average_ranks"},
+                "pr_auc": {"$ref": "#/$defs/unit"},
+                "pr_auc_method": {"const": "average_precision_step"},
+                "at_threshold": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["tp", "fp", "fn", "tn", "precision", "recall", "f1", "false_positive_rate"],
+                  "properties": {
+                    "tp": {"$ref": "#/$defs/count"},
+                    "fp": {"$ref": "#/$defs/count"},
+                    "fn": {"$ref": "#/$defs/count"},
+                    "tn": {"$ref": "#/$defs/count"},
+                    "precision": {"$ref": "#/$defs/unit"},
+                    "recall": {"$ref": "#/$defs/unit"},
+                    "f1": {"$ref": "#/$defs/unit"},
+                    "false_positive_rate": {"$ref": "#/$defs/unit"}
+                  }
+                },
+                "events": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["total", "detected", "ranges"],
+                  "properties": {
+                    "total": {"$ref": "#/$defs/count"},
+                    "detected": {"$ref": "#/$defs/count"},
+                    "ranges": {"type": "array", "items": {"$ref": "#/$defs/event"}}
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "scores": {
+          "description": "Per-window scores (float64 .npy, in window order) of the validation and test splits.",
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["validation", "test"],
+              "properties": {"validation": {"$ref": "#/$defs/fileRef"}, "test": {"$ref": "#/$defs/fileRef"}}
+            }
+          ]
+        },
+        "environment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["python", "numpy", "onnxruntime", "onnxruntime_qnn", "qnn_backend", "os", "machine"],
+          "properties": {
+            "python": {"type": "string"},
+            "numpy": {"type": "string"},
+            "onnxruntime": {"type": "string"},
+            "onnxruntime_qnn": {"type": ["string", "null"]},
+            "qnn_backend": {"type": ["string", "null"]},
+            "os": {"type": "string"},
+            "machine": {"type": "string"}
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "success"}}},
+          "then": {"properties": {"error": {"type": "null"}, "threshold": {"type": "object"}, "metrics": {"type": "object"},
+                                  "scores": {"type": "object"}, "execution": {"properties": {"batch_equivalence": {"type": "object"}}}}},
+          "else": {"properties": {"error": {"type": "object"}, "threshold": {"type": "null"}, "metrics": {"type": "null"},
+                                  "scores": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"execution": {"properties": {"device": {"const": "npu"}}}}},
+          "then": {"properties": {"execution": {"properties": {"strict": {"const": true},
+                                                               "execution_provider": {"const": "QNNExecutionProvider"},
+                                                               "intra_op_threads": {"type": "null"}}}}},
+          "else": {"properties": {"execution": {"properties": {"execution_provider": {"const": "CPUExecutionProvider"},
+                                                               "intra_op_threads": {"type": "integer"}}}}}
+        }
+      ]
+    },
+    "comparisons": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["anomaly_schema_version", "kind", "timestamp_utc", "dataset", "test", "correlation", "independence_note",
+                   "runs", "comparisons"],
+      "properties": {
+        "anomaly_schema_version": {"const": "1.0.0"},
+        "kind": {"const": "comparisons"},
+        "timestamp_utc": {"$ref": "#/$defs/timestamp"},
+        "dataset": {"$ref": "#/$defs/dataset"},
+        "test": {"const": "mcnemar_exact"},
+        "correlation": {"const": "spearman_average_ranks"},
+        "independence_note": {"type": "string"},
+        "runs": {
+          "description": "Every run result in the directory, by run_id, with the SHA256 of its test scores.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status", "test_scores_sha256"],
+            "properties": {
+              "status": {"enum": ["success", "refused"]},
+              "test_scores_sha256": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]}
+            }
+          }
+        },
+        "comparisons": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "question", "a", "b", "score_spearman", "flag_agreement", "flagged_a", "flagged_b",
+                         "flagged_only_a", "flagged_only_b", "counts", "p_value", "f1_a", "f1_b", "f1_delta",
+                         "roc_auc_a", "roc_auc_b", "events_detected_a", "events_detected_b"],
+            "properties": {
+              "name": {"type": "string"},
+              "question": {"type": "string"},
+              "a": {"$ref": "#/$defs/runId"},
+              "b": {"$ref": "#/$defs/runId"},
+              "score_spearman": {"type": "number", "minimum": -1, "maximum": 1},
+              "flag_agreement": {"$ref": "#/$defs/unit", "description": "Fraction of test windows flagged by both or by neither."},
+              "flagged_a": {"$ref": "#/$defs/count"},
+              "flagged_b": {"$ref": "#/$defs/count"},
+              "flagged_only_a": {"$ref": "#/$defs/count"},
+              "flagged_only_b": {"$ref": "#/$defs/count"},
+              "counts": {
+                "description": "Windows whose flag is correct (flag == label) for both runs, only one, or neither.",
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["both_correct", "only_a_correct", "only_b_correct", "both_wrong"],
+                "properties": {
+                  "both_correct": {"$ref": "#/$defs/count"},
+                  "only_a_correct": {"$ref": "#/$defs/count"},
+                  "only_b_correct": {"$ref": "#/$defs/count"},
+                  "both_wrong": {"$ref": "#/$defs/count"}
+                }
+              },
+              "p_value": {"$ref": "#/$defs/unit", "description": "Two-sided exact McNemar test on the discordant windows."},
+              "f1_a": {"$ref": "#/$defs/unit"},
+              "f1_b": {"$ref": "#/$defs/unit"},
+              "f1_delta": {"type": "number", "description": "f1_a - f1_b"},
+              "roc_auc_a": {"$ref": "#/$defs/unit"},
+              "roc_auc_b": {"$ref": "#/$defs/unit"},
+              "events_detected_a": {"$ref": "#/$defs/count"},
+              "events_detected_b": {"$ref": "#/$defs/count"}
+            }
+          }
+        }
+      }
+    }
+  }
+}

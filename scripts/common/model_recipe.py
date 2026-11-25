@@ -12,6 +12,13 @@ it.
 A key the recipe needs that is missing from the metadata is an error naming the
 key (``MetadataError``); no field is ever filled with a guess or null.
 
+Two kinds of model share the format: exported image classifiers (weights from
+torchvision or timm, image preprocessing) and imported models (weights = a
+committed source file from ``models/sources/``, time-series preprocessing,
+possibly an exact graph clean-up). Image files written before the
+preprocessing ``kind`` key existed have no ``kind`` in their
+``edgebench.input_preprocessing``; their kind is ``image``.
+
 The builder and the checks use the standard library only; reading a model file
 (``read_model_file``) imports onnx.
 """
@@ -25,16 +32,17 @@ from pathlib import Path
 from typing import Any
 
 from common.model_registry import (
+    IMPORTED_MODELS,
     META_PREFIX,
     REPO_ROOT,
-    ROOT_VARIANT,
     ManifestFile,
     MetadataError,
     manifest_entry,
     meta_value,
+    root_variant,
 )
 
-RECIPE_VERSION = "1.0.0"
+RECIPE_VERSION = "1.1.0"
 RECIPE_SCHEMA = REPO_ROOT / "schemas" / f"model-recipe.v{RECIPE_VERSION}.schema.json"
 RECIPE_SUFFIX = ".recipe.json"
 
@@ -97,32 +105,75 @@ def _required(d: dict, key: str, what: str, where: str) -> Any:
     return d[key]
 
 
+# edgebench.cleanup (JSON): what the exact graph clean-up of an imported model rewrote.
+CLEANUP_KEYS = ("tool", "nodes_before", "nodes_after", "bias_adds_folded",
+                "squeeze_unsqueeze_pairs_removed", "reshape_chains_collapsed")
+
+
+def _series_preprocessing(meta: dict[str, str], pre: dict, entry: ManifestFile, what: str,
+                          where: str) -> dict[str, Any]:
+    if entry.normalization != "external":
+        raise MetadataError(f"{where}: time-series input supports external normalization only")
+    keys = ("dataset", "split_manifest", "split_manifest_sha256", "window_length",
+            "window_stride", "layout", "dtype", "mean", "std", "std_ddof", "computed_on")
+    out: dict[str, Any] = {"kind": "time_series"}
+    out.update({k: _required(pre, k, what, where) for k in keys})
+    out.update({
+        "normalization": entry.normalization,
+        "normalization_applied_by": NORMALIZATION_APPLIED_BY[entry.normalization],
+        "input_range": meta_value(meta, "input_range", where),
+        "fold": None,
+        "fold_not_applicable": meta_value(meta, "fold_not_applicable", where),
+    })
+    return out
+
+
 def build_recipe(mf: ModelFile) -> dict[str, Any]:
     """The recipe sidecar document of a model file."""
     meta, where = mf.metadata, mf.file
     entry = manifest_entry(mf.file, mf.sha256, mf.size_bytes, meta)
 
     library = meta_value(meta, "weights_source", where)
-    weights: dict[str, Any] = {
-        "library": library,
-        "id": meta_value(meta, "weights", where),
-        "url": meta_value(meta, "weights_url", where),
-        "sha256": meta_value(meta, "weights_sha256", where),
-    }
-    tool_versions = {"onnx": meta_value(meta, "onnx_version", where),
-                     "torch": meta_value(meta, "torch_version", where),
-                     "torchvision": meta_value(meta, "torchvision_version", where)}
+    weights: dict[str, Any] = {"library": library, "id": meta_value(meta, "weights", where)}
+    local_tool_versions = None
+    if library in ("torchvision", "timm"):
+        weights.update(url=meta_value(meta, "weights_url", where),
+                       sha256=meta_value(meta, "weights_sha256", where))
+        tool_versions = {"onnx": meta_value(meta, "onnx_version", where),
+                         "torch": meta_value(meta, "torch_version", where),
+                         "torchvision": meta_value(meta, "torchvision_version", where)}
+    elif library == "colab_bundle":
+        weights.update(sha256=meta_value(meta, "weights_sha256", where),
+                       path=meta_value(meta, "weights_path", where),
+                       notebook=meta_value(meta, "weights_notebook", where),
+                       notebook_commit=meta_value(meta, "weights_notebook_commit", where),
+                       code_commit=meta_value(meta, "weights_code_commit", where),
+                       training_record_sha256=meta_value(meta, "training_record_sha256", where))
+        tool_versions = {"tensorflow": meta_value(meta, "tensorflow_version", where),
+                         "keras": meta_value(meta, "keras_version", where),
+                         "tf2onnx": meta_value(meta, "tf2onnx_version", where),
+                         "onnx": meta_value(meta, "onnx_version", where)}
+        local_tool_versions = {"onnx": meta_value(meta, "local_onnx_version", where)}
+    else:
+        raise MetadataError(f"{where}: '{META_PREFIX}weights_source' is {library!r}")
     if library == "timm":
         weights.update(hf_repo=meta_value(meta, "weights_hf_repo", where),
                        hf_revision=meta_value(meta, "weights_hf_revision", where),
                        file=meta_value(meta, "weights_file", where))
         tool_versions["timm"] = meta_value(meta, "timm_version", where)
-    elif library != "torchvision":
-        raise MetadataError(f"{where}: '{META_PREFIX}weights_source' is {library!r}")
 
     pre = _json(meta, "input_preprocessing", where)
     what = f"'{META_PREFIX}input_preprocessing'"
-    if entry.normalization == "external":
+    kind = pre.get("kind", "image")
+    if kind == "time_series":
+        preprocessing = _series_preprocessing(meta, pre, entry, what, where)
+        shape = _json(meta, "input_shape", where)
+        if len(mf.inputs) != 1 or shape != mf.inputs[0].shape:
+            raise MetadataError(f"{where}: '{META_PREFIX}input_shape' {shape} is not the "
+                                "graph input's shape")
+    elif kind != "image":
+        raise MetadataError(f"{where}: {what} has kind {kind!r}")
+    elif entry.normalization == "external":
         mean, std = _required(pre, "mean", what, where), _required(pre, "std", what, where)
         fold = None
     elif entry.normalization == "folded":
@@ -131,20 +182,27 @@ def build_recipe(mf: ModelFile) -> dict[str, Any]:
                 "first_conv": meta_value(meta, "fold_first_conv", where)}
     else:
         raise MetadataError(f"{where}: normalization {entry.normalization!r} is not supported")
-    preprocessing = {
-        "resize_shorter_side": _required(pre, "resize_shorter_side", what, where),
-        "interpolation": _required(pre, "interpolation", what, where),
-        "center_crop": _required(pre, "center_crop", what, where),
-        "scale": _required(pre, "scale", what, where),
-        "layout": _required(pre, "layout", what, where),
-        "dtype": _required(pre, "dtype", what, where),
-        "mean": mean,
-        "std": std,
-        "normalization": entry.normalization,
-        "normalization_applied_by": NORMALIZATION_APPLIED_BY[entry.normalization],
-        "input_range": meta_value(meta, "input_range", where),
-        "fold": fold,
-    }
+    if kind == "image":
+        preprocessing = {
+            "kind": "image",
+            "resize_shorter_side": _required(pre, "resize_shorter_side", what, where),
+            "interpolation": _required(pre, "interpolation", what, where),
+            "center_crop": _required(pre, "center_crop", what, where),
+            "scale": _required(pre, "scale", what, where),
+            "layout": _required(pre, "layout", what, where),
+            "dtype": _required(pre, "dtype", what, where),
+            "mean": mean,
+            "std": std,
+            "normalization": entry.normalization,
+            "normalization_applied_by": NORMALIZATION_APPLIED_BY[entry.normalization],
+            "input_range": meta_value(meta, "input_range", where),
+            "fold": fold,
+        }
+
+    cleanup = None
+    if META_PREFIX + "cleanup" in meta:
+        c = _json(meta, "cleanup", where)
+        cleanup = {k: _required(c, k, f"'{META_PREFIX}cleanup'", where) for k in CLEANUP_KEYS}
 
     quantization = None
     if entry.precision == "int8":
@@ -162,7 +220,7 @@ def build_recipe(mf: ModelFile) -> dict[str, Any]:
                 "method": meta_value(meta, q + "calibration_method", where),
                 "dataset": meta_value(meta, q + "calibration_dataset", where),
                 "manifest_sha256": meta_value(meta, q + "calibration_manifest_sha256", where),
-                "image_count": _int(meta, q + "calibration_count", where),
+                "sample_count": _int(meta, q + "calibration_count", where),
                 "batch": meta_value(meta, q + "calibration_batch", where),
             },
             "qnn_preprocess": meta_value(meta, q + "qnn_preprocess", where),
@@ -176,7 +234,7 @@ def build_recipe(mf: ModelFile) -> dict[str, Any]:
         raise MetadataError(f"{where}: precision {entry.precision!r} is not supported")
 
     parent = None
-    if entry.variant != ROOT_VARIANT:
+    if entry.variant != root_variant(entry.model):
         parent = {"file": meta_value(meta, "source_model", where),
                   "sha256": meta_value(meta, "source_sha256", where)}
 
@@ -200,8 +258,10 @@ def build_recipe(mf: ModelFile) -> dict[str, Any]:
             "inputs": [vars(t) for t in mf.inputs],
             "outputs": [vars(t) for t in mf.outputs],
             "tool_versions": tool_versions,
+            "local_tool_versions": local_tool_versions,
         },
         "preprocessing": preprocessing,
+        "graph_cleanup": cleanup,
         "quantization": quantization,
         "lineage": {"parent": parent},
     }
@@ -233,12 +293,38 @@ def consistency_problems(recipe: dict[str, Any], entry: ManifestFile | None,
         diff = [k for k in expected if recipe.get(k) != expected[k]]
         diff += [k for k in recipe if k not in expected]
         problems.append(f"{mf.file}: sidecar differs from the model file in {', '.join(diff)}")
+    problems += source_pin_problems(expected)
     if entry is None:
         problems.append(f"{mf.file}: not in the manifest")
     elif entry != from_meta:
         fields = [k for k in vars(from_meta) if getattr(entry, k) != getattr(from_meta, k)]
         problems.append(f"{mf.file}: manifest entry differs from the model file in "
                         f"{', '.join(fields)}")
+    return problems
+
+
+def source_pin_problems(recipe: dict[str, Any]) -> list[str]:
+    """An imported model's weights must be the source file the registry pins, by SHA256."""
+    identity, weights = recipe["identity"], recipe["weights"]
+    if weights["library"] != "colab_bundle":
+        return []
+    where = identity["file"]
+    spec = IMPORTED_MODELS.get(identity["model"])
+    if spec is None:
+        return [f"{where}: weights from a source file, but {identity['model']} is not an "
+                "imported model"]
+    batch = identity["batch_size"]
+    problems = []
+    if weights["path"] != spec.source_file(batch):
+        problems.append(f"{where}: weights path {weights['path']}, expected {spec.source_file(batch)}")
+    if weights["sha256"] != spec.source_sha256_of(batch):
+        problems.append(f"{where}: weights SHA256 {weights['sha256'][:12]} is not the pinned "
+                        f"source {spec.source_sha256_of(batch)[:12]}")
+    if (weights["notebook_commit"], weights["code_commit"],
+            weights["training_record_sha256"]) != (spec.notebook_commit, spec.code_commit,
+                                                   spec.training_record_sha256):
+        problems.append(f"{where}: notebook commit, code commit or training record SHA256 "
+                        "differ from the registry")
     return problems
 
 

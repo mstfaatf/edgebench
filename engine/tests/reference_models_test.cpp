@@ -4,8 +4,9 @@
 // models/references/ (scripts/make_references.py) holds, for each file in
 // models/manifest.json, the outputs of Python onnxruntime (CPU EP, 4 intra-op
 // threads, the CPU provider's session settings) on two fixed input sets: 8
-// preprocessed ImageNetV2 images and the SplitMix64 input `edgebench run`
-// generates by default. Each test creates the session through the same
+// preprocessed ImageNetV2 images (8 normalized reference windows for the
+// time-series autoencoder) and the SplitMix64 input `edgebench run` generates
+// by default. Each test creates the session through the same
 // Provider / BenchSession path `edgebench run` uses, in the timed mode
 // (IoBinding with preallocated buffers), and requires:
 //
@@ -45,10 +46,14 @@ const fs::path kReferences = kModels / "references";
 constexpr int kThreads = 4;  // as recorded in every CPU reference (intra_op_threads)
 
 // The files of models/manifest.json: models x variants x batch sizes
-// (scripts/common/model_registry.py). IndexListsExactlyTheseFiles keeps the two in step.
+// (scripts/common/model_registry.py), for the exported image models and the
+// imported autoencoder. IndexListsExactlyTheseFiles keeps the two in step.
 const std::vector<std::string> kModelNames = {"efficientnet_lite0", "mobilenetv2", "resnet18"};
 const std::vector<std::string> kVariants = {"fp32",          "fp32_folded", "int8",
                                             "int8_unpruned", "int8_folded", "int8_folded_unpruned"};
+const std::vector<std::string> kImportedModelNames = {"conv1d_autoencoder"};
+const std::vector<std::string> kImportedVariants = {"fp32_imported", "fp32", "int8",
+                                                    "int8_unpruned"};
 const std::vector<int> kBatches = {1, 4, 8};
 
 std::string relative_model(const std::string& model, const std::string& variant, int batch) {
@@ -207,14 +212,26 @@ TEST_P(ReferenceModels, EngineMatchesPythonBitForBit) {
     RecordProperty("bit_identical_runs", identical);
 }
 
+namespace {
+
+std::string param_name(const ::testing::TestParamInfo<Param>& info) {
+    return std::get<0>(info.param) + "_" + std::get<1>(info.param) + "_b" +
+           std::to_string(std::get<2>(info.param));
+}
+
+}  // namespace
+
 INSTANTIATE_TEST_SUITE_P(AllFiles, ReferenceModels,
                          ::testing::Combine(::testing::ValuesIn(kModelNames),
                                             ::testing::ValuesIn(kVariants),
                                             ::testing::ValuesIn(kBatches)),
-                         [](const ::testing::TestParamInfo<Param>& info) {
-                             return std::get<0>(info.param) + "_" + std::get<1>(info.param) + "_b" +
-                                    std::to_string(std::get<2>(info.param));
-                         });
+                         param_name);
+
+INSTANTIATE_TEST_SUITE_P(ImportedFiles, ReferenceModels,
+                         ::testing::Combine(::testing::ValuesIn(kImportedModelNames),
+                                            ::testing::ValuesIn(kImportedVariants),
+                                            ::testing::ValuesIn(kBatches)),
+                         param_name);
 
 TEST(ReferenceModels, IndexListsExactlyTheseFiles) {
     if (!fs::is_regular_file(kReferences / "index.tsv"))
@@ -225,6 +242,10 @@ TEST(ReferenceModels, IndexListsExactlyTheseFiles) {
             indexed.insert(r.model);
     for (const std::string& m : kModelNames)
         for (const std::string& v : kVariants)
+            for (int b : kBatches)
+                expected.insert(relative_model(m, v, b));
+    for (const std::string& m : kImportedModelNames)
+        for (const std::string& v : kImportedVariants)
             for (int b : kBatches)
                 expected.insert(relative_model(m, v, b));
     EXPECT_EQ(indexed, expected);

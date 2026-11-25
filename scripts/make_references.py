@@ -2,7 +2,8 @@
 
 For every file in ``models/manifest.json`` this runs Python's ONNX Runtime on
 the two fixed input sets of ``common/reference_outputs.py`` (8 ImageNetV2
-eval-quick images, and the SplitMix64 input ``edgebench run`` generates) and
+eval-quick images, or for the time-series autoencoder the 8 reference windows
+of its split manifest; and the SplitMix64 input ``edgebench run`` generates) and
 stores inputs, outputs, an index and one JSON record per file and device in
 ``models/references/``:
 
@@ -34,7 +35,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common import reference_outputs as ro  # noqa: E402
-from common.model_registry import MODELS_DIR, read_manifest  # noqa: E402
+from common.model_registry import IMPORTED_MODELS, MODELS_DIR, read_manifest  # noqa: E402
 
 
 def cpu_session(path: Path):
@@ -91,11 +92,32 @@ def generate(npu: bool) -> int:
                   file=sys.stderr)
             return 1
 
+    split_windows = None
+    split_sha = ""
+    if any(f.model in IMPORTED_MODELS for f in present):
+        from common.timeseries import SPLIT_MANIFEST, load_split_windows
+
+        split_windows = load_split_windows()
+        split_sha = ro.sha256_file(SPLIT_MANIFEST)
+
     tmp = ro.REFERENCE_DIR.with_name(ro.REFERENCE_DIR.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)
     w = Writer(tmp)
     unit = np.concatenate([load_image(IMAGENETV2_ROOT / e.path, normalized=False) for e in images])
     input_sets: dict[str, dict] = {}
+
+    def window_files() -> tuple[str, list[str]]:
+        set_id = ro.window_input_set(split_sha)
+        if set_id not in input_sets:
+            x = split_windows.reference[:, :, None]
+            names = [w.tensor(f"inputs/{set_id}/{i:02d}.f32", x[i:i + 1], "input", set_id)
+                     for i in range(len(x))]
+            input_sets[set_id] = {
+                "kind": "windows", "split_manifest_sha256": split_sha,
+                "window_starts": split_windows.manifest["reference_windows"]["window_starts"],
+                "files": [{"file": n, "sha256": w.rows[-len(names) + k].sha256}
+                          for k, n in enumerate(names)]}
+        return set_id, [f["file"] for f in input_sets[set_id]["files"]]
 
     def image_files(recipe: dict) -> tuple[str, list[str]]:
         p = recipe["preprocessing"]
@@ -114,7 +136,7 @@ def generate(npu: bool) -> int:
         return set_id, [f["file"] for f in input_sets[set_id]["files"]]
 
     def splitmix_file(shape: list[int]) -> tuple[str, str]:
-        set_id = ro.splitmix_input_set(shape[0])
+        set_id = ro.splitmix_input_set(shape)
         if set_id not in input_sets:
             x = ro.splitmix64_floats(ro.SPLITMIX_SEED, int(np.prod(shape))).reshape(shape)
             name = w.tensor(f"inputs/{set_id}/00.f32", x, "input", set_id)
@@ -127,8 +149,9 @@ def generate(npu: bool) -> int:
         shape = recipe["export"]["inputs"][0]["shape"]
         name = recipe["export"]["inputs"][0]["name"]
         batch = shape[0]
-        set_id, files_ = image_files(recipe)
-        runs = [(set_id, k, files_[k * batch:(k + 1) * batch]) for k in range(len(images) // batch)]
+        series = recipe["preprocessing"]["kind"] == "time_series"
+        set_id, files_ = window_files() if series else image_files(recipe)
+        runs = [(set_id, k, files_[k * batch:(k + 1) * batch]) for k in range(len(files_) // batch)]
         splitmix_set, splitmix_input = splitmix_file(shape)
         runs.append((splitmix_set, 0, [splitmix_input]))
         outputs, identical = [], True
@@ -139,9 +162,11 @@ def generate(npu: bool) -> int:
                 identical &= bool(np.array_equal(y, session.run(None, {name: x})[0]))
             rel = (ro.output_dir(entry.file, Path("")) / device / f"{input_set}-{k}.f32").as_posix()
             w.tensor(rel, y, "output", input_set, entry.file, device, k, tuple(inputs))
+            summary = ({"window_mse": [float(v) for v in
+                                       ((y.astype(np.float64) - x) ** 2).reshape(batch, -1).mean(1)]}
+                       if series else {"top1": [int(v) for v in y.argmax(axis=1)]})
             outputs.append({"input_set": input_set, "run": k, "inputs": inputs, "file": rel,
-                            "shape": list(y.shape), "sha256": w.rows[-1].sha256,
-                            "top1": [int(v) for v in y.argmax(axis=1)]})
+                            "shape": list(y.shape), "sha256": w.rows[-1].sha256, **summary})
         return outputs, identical
 
     qnn = {}
@@ -180,22 +205,31 @@ def generate(npu: bool) -> int:
                 continue
             outputs_npu, identical = run_all(session, entry, recipe, "npu", repeat=True)
             del session
-            # Top-1 agreement on the images only: on the random input it says little.
-            cpu_top1 = [t for o in outputs if o["input_set"].startswith(ro.IMAGES)
-                        for t in o["top1"]]
-            npu_top1 = [t for o in outputs_npu if o["input_set"].startswith(ro.IMAGES)
-                        for t in o["top1"]]
-            agree = sum(a == b for a, b in zip(cpu_top1, npu_top1))
+            if recipe["preprocessing"]["kind"] == "time_series":
+                # Reconstructions: the largest difference from the CPU on the windows.
+                worst = max(float(np.abs(np.fromfile(tmp / a["file"], dtype="<f4")
+                                         - np.fromfile(tmp / b["file"], dtype="<f4")).max())
+                            for a, b in zip(outputs, outputs_npu)
+                            if a["input_set"].startswith(ro.WINDOWS))
+                agreement = {"windows_max_abs_diff_vs_cpu": worst}
+                said = f"window outputs vs cpu max |diff| {worst:.3g}"
+            else:
+                # Top-1 agreement on the images only: on the random input it says little.
+                cpu_top1 = [t for o in outputs if o["input_set"].startswith(ro.IMAGES)
+                            for t in o["top1"]]
+                npu_top1 = [t for o in outputs_npu if o["input_set"].startswith(ro.IMAGES)
+                            for t in o["top1"]]
+                agree = sum(a == b for a, b in zip(cpu_top1, npu_top1))
+                agreement = {"images_top1_agreement_with_cpu": f"{agree}/{len(cpu_top1)}"}
+                said = f"image top-1 vs cpu {agree}/{len(cpu_top1)}"
             ro.write_json(ro.record_path(entry.file, "npu", tmp), {
                 **common, "device": "npu", "execution_provider": "QNNExecutionProvider",
                 "strict": True, "session": {"session.disable_cpu_ep_fallback": "1"},
                 "provider_options": {"backend_path": "<onnxruntime_qnn>/QnnHtp.dll",
                                      "htp_performance_mode": "burst"},
-                **qnn, "repeat_identical": identical,
-                "images_top1_agreement_with_cpu": f"{agree}/{len(cpu_top1)}",
+                **qnn, "repeat_identical": identical, **agreement,
                 "outputs": outputs_npu})
-            line += f"; npu strict ok, image top-1 vs cpu {agree}/{len(cpu_top1)}, " \
-                    f"repeat identical {identical}"
+            line += f"; npu strict ok, {said}, repeat identical {identical}"
         print(line)
 
     selection = [{"path": e.path, "label": e.label, "sha256": e.sha256} for e in images]
@@ -207,6 +241,14 @@ def generate(npu: bool) -> int:
                            f"(label, path) order, first {ro.IMAGE_COUNT} distinct classes",
                    "seed": ro.IMAGE_SEED, "selection": selection,
                    "preprocessing": preprocess_description()},
+        **({"windows": {
+            "source": "reference_windows of datasets/nab-machine-temperature/splits.json",
+            "rule": "one window centred in each labelled anomaly of the test split, plus "
+                    "evenly spaced normal test windows (common/timeseries.py)",
+            "split_manifest_sha256": split_sha,
+            "window_starts": split_windows.manifest["reference_windows"]["window_starts"],
+            "normalization": "(x - mean) / std with the split manifest's mean and std"}}
+           if split_windows is not None else {}),
         "splitmix64": {"seed": ro.SPLITMIX_SEED, "algorithm": "docs/cli.md, Input data"},
         "input_sets": dict(sorted(input_sets.items()))})
     (tmp / "index.tsv").write_text(ro.format_index(w.rows), encoding="utf-8", newline="\n")

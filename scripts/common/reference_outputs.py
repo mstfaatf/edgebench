@@ -5,12 +5,17 @@ Runtime computes on two fixed input sets, so that other implementations (the
 C++ engine's CPU provider now, its NPU provider later) can be checked against
 the same file and the same input:
 
-- ``images``: 8 ImageNetV2 eval-quick images (``select_images``: a seeded
-  sample of distinct classes), preprocessed with ``common/preprocess.py``. A
-  file gets the input its recipe expects: normalized with the model's own
-  mean/std for external normalization, the [0, 1] tensor for folded files.
-  Batch-1 files run the 8 images one at a time, batch-4 files in 2 runs,
-  batch-8 files in one run.
+- ``images`` (image classifiers): 8 ImageNetV2 eval-quick images
+  (``select_images``: a seeded sample of distinct classes), preprocessed with
+  ``common/preprocess.py``. A file gets the input its recipe expects:
+  normalized with the model's own mean/std for external normalization, the
+  [0, 1] tensor for folded files.
+- ``windows`` (time-series models): the 8 reference windows of the split
+  manifest (``reference_windows``: one centred in each labelled anomaly of the
+  test split, four normal test windows), normalized with the manifest's mean/std.
+
+  Batch-1 files run the 8 images or windows one at a time, batch-4 files in 2
+  runs, batch-8 files in one run.
 - ``splitmix64``: the input ``edgebench run`` generates and times by default
   (``--input random --seed 0``): one SplitMix64 stream filling the input
   tensor in row-major order (docs/cli.md, "Input data"), one run per file.
@@ -58,6 +63,7 @@ CPU_THREADS = 4  # the engine's default; the C++ match tests use the same
 INDEX_HEADER = ("kind", "input_set", "model", "device", "run", "inputs", "file", "dtype",
                 "shape", "sha256")
 IMAGES = "images"
+WINDOWS = "windows"
 SPLITMIX = "splitmix64"
 
 
@@ -91,8 +97,14 @@ def image_input_set(normalization: str, mean, std) -> str:
     return f"{IMAGES}-normalized-{digest}"
 
 
-def splitmix_input_set(batch: int) -> str:
-    return f"{SPLITMIX}-seed{SPLITMIX_SEED}-b{batch}"
+def window_input_set(split_manifest_sha256: str) -> str:
+    """Input set id of the split manifest's reference windows (normalized as it says)."""
+    return f"{WINDOWS}-reference-{split_manifest_sha256[:8]}"
+
+
+def splitmix_input_set(shape: list[int] | tuple[int, ...]) -> str:
+    """Input set id of the engine's random input for an input tensor of ``shape``."""
+    return f"{SPLITMIX}-seed{SPLITMIX_SEED}-{'x'.join(str(d) for d in shape)}"
 
 
 def splitmix64_floats(seed: int, count: int):
@@ -189,6 +201,14 @@ def check_problems(manifest: list[ManifestFile], root: Path = REFERENCE_DIR,
     expected = [e.path for e in select_images(read_manifest(EVAL_QUICK_MANIFEST))]
     if [i["path"] for i in inputs["images"]["selection"]] != expected:
         problems.append("inputs.json: the image selection is not the documented one")
+    windows = inputs.get("windows")
+    if windows is not None:
+        from common.timeseries import SPLIT_MANIFEST, read_split_manifest
+
+        split = read_split_manifest(SPLIT_MANIFEST)
+        if windows["window_starts"] != split["reference_windows"]["window_starts"] or \
+                windows["split_manifest_sha256"] != sha256_file(SPLIT_MANIFEST):
+            problems.append("inputs.json: the reference windows are not the split manifest's")
     rows = parse_index(index_path.read_text(encoding="utf-8"))
     tensors = {r.file: r for r in rows}
     for r in rows:
@@ -224,7 +244,7 @@ def check_problems(manifest: list[ManifestFile], root: Path = REFERENCE_DIR,
                 problems.append(f"{entry.file}: {device} record and index.tsv list different "
                                 "outputs")
             if not any(k[0].startswith(SPLITMIX) for k in outputs) or \
-                    not any(k[0].startswith(IMAGES) for k in outputs):
+                    not any(k[0].startswith((IMAGES, WINDOWS)) for k in outputs):
                 problems.append(f"{entry.file}: {device} reference lacks an input set")
     return problems
 

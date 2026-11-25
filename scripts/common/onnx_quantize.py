@@ -62,7 +62,13 @@ CARRIED_KEYS = ("model", "batch_size", "weights", "weights_source", "weights_url
                 # timm models only
                 "timm_version", "weights_hf_repo", "weights_hf_revision", "weights_file",
                 # normalization-folded sources only (see common/onnx_fold.py)
-                "folded_mean", "folded_std", "fold_padding", "fold_first_conv")
+                "folded_mean", "folded_std", "fold_padding", "fold_first_conv",
+                # imported models only (see common/autoencoder_pipeline.py)
+                "weights_path", "weights_notebook", "weights_notebook_commit",
+                "weights_code_commit", "training_record_sha256", "tensorflow_version",
+                "keras_version", "tf2onnx_version", "local_onnx_version", "input_shape",
+                "fold_not_applicable", "cleanup")
+IMAGENETTE_CALIBRATION = "Imagenette calibration split (datasets/imagenette/calibration.tsv)"
 
 
 def calibration_entries() -> list:
@@ -94,12 +100,20 @@ def _reader(spec: ModelSpec, entries: list, normalized: bool) -> Any:
     return ManifestReader()
 
 
-def quant_metadata(spec: ModelSpec, source_meta: dict[str, str], variant: str, proto: Any,
-                   source_rel: str, source_sha256: str, preprocess_changed: bool,
-                   calibration_count: int, prune_report: Any = None) -> dict[str, str]:
-    """INT8 metadata; ``prune_report`` is the pruning of this file (None: not pruned)."""
+def quant_metadata(spec: ModelSpec | None, source_meta: dict[str, str], variant: str,
+                   proto: Any, source_rel: str, source_sha256: str, preprocess_changed: bool,
+                   calibration_count: int, prune_report: Any = None, *,
+                   calibration_dataset: str = IMAGENETTE_CALIBRATION,
+                   calibration_manifest_sha256: str | None = None) -> dict[str, str]:
+    """INT8 metadata; ``prune_report`` is the pruning of this file (None: not pruned).
+
+    The calibration set defaults to the Imagenette calibration split (its manifest
+    SHA256 is read from datasets/imagenette/calibration.tsv).
+    """
     import onnxruntime as ort
 
+    if calibration_manifest_sha256 is None:
+        calibration_manifest_sha256 = sha256_of(CALIBRATION_MANIFEST)
     meta = {META_PREFIX + k: source_meta[META_PREFIX + k] for k in CARRIED_KEYS
             if META_PREFIX + k in source_meta}
     opset = next(o.version for o in proto.opset_import if o.domain in ("", "ai.onnx"))
@@ -120,9 +134,8 @@ def quant_metadata(spec: ModelSpec, source_meta: dict[str, str], variant: str, p
         QUANT_PREFIX + "activation_symmetric": "false",
         QUANT_PREFIX + "bias_type": "int32",
         QUANT_PREFIX + "calibration_method": "MinMax",
-        QUANT_PREFIX + "calibration_dataset": "Imagenette calibration split "
-                                               "(datasets/imagenette/calibration.tsv)",
-        QUANT_PREFIX + "calibration_manifest_sha256": sha256_of(CALIBRATION_MANIFEST),
+        QUANT_PREFIX + "calibration_dataset": calibration_dataset,
+        QUANT_PREFIX + "calibration_manifest_sha256": calibration_manifest_sha256,
         QUANT_PREFIX + "calibration_count": str(calibration_count),
         QUANT_PREFIX + "calibration_batch": "1 (ranges shared by all batch sizes)",
         QUANT_PREFIX + "tool": f"onnxruntime.quantization {ort.__version__} "

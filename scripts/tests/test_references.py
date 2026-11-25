@@ -48,7 +48,8 @@ def test_input_set_ids():
     a = ro.image_input_set("external", reg.IMAGENET_MEAN, reg.IMAGENET_STD)
     assert a.startswith("images-normalized-") and len(a) == len("images-normalized-") + 8
     assert ro.image_input_set("external", (0.5,) * 3, (0.5,) * 3) != a
-    assert ro.splitmix_input_set(4) == "splitmix64-seed0-b4"
+    assert ro.splitmix_input_set([4, 3, 224, 224]) == "splitmix64-seed0-4x3x224x224"
+    assert ro.splitmix_input_set((1, 128, 1)) == "splitmix64-seed0-1x128x1"
 
 
 def test_index_round_trip():
@@ -132,6 +133,25 @@ def test_changed_selection_is_found(tree):
     assert any("selection" in p for p in ro.check_problems([entry], root, models))
 
 
+def test_changed_reference_windows_are_found(tree):
+    from common import timeseries as ts
+
+    models, root, entry = tree
+    inputs = json.loads((root / "inputs.json").read_text(encoding="utf-8"))
+    starts = ts.read_split_manifest()["reference_windows"]["window_starts"]
+    inputs["windows"] = {"window_starts": starts,
+                         "split_manifest_sha256": ts.sha256_file(ts.SPLIT_MANIFEST)}
+    ro.write_json(root / "inputs.json", inputs)
+    assert ro.check_problems([entry], root, models) == []
+    inputs["windows"]["window_starts"] = starts[::-1]
+    ro.write_json(root / "inputs.json", inputs)
+    assert any("reference windows" in p for p in ro.check_problems([entry], root, models))
+
+
+def test_window_input_set_names_the_split_manifest():
+    assert ro.window_input_set("b97ee8e2" + "0" * 56) == "windows-reference-b97ee8e2"
+
+
 # --- SplitMix64 reproduction (needs NumPy) --------------------------------------
 
 
@@ -181,8 +201,8 @@ def test_every_file_has_cpu_and_int8_files_npu_references(references):
         for device in ro.expected_devices(f):
             rec = json.loads(ro.record_path(f.file, device).read_text(encoding="utf-8"))
             assert rec["model_sha256"] == f.sha256
-            assert {o["input_set"].split("-")[0] for o in rec["outputs"]} == {"images",
-                                                                               "splitmix64"}
+            data = "windows" if f.model in reg.IMPORTED_MODELS else "images"
+            assert {o["input_set"].split("-")[0] for o in rec["outputs"]} == {data, "splitmix64"}
             if device == "npu":
                 assert rec["strict"] is True and rec["repeat_identical"] is True
             else:

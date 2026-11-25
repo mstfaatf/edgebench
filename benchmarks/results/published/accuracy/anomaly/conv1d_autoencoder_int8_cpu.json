@@ -1,0 +1,177 @@
+{
+  "anomaly_schema_version": "1.0.0",
+  "kind": "run",
+  "run_id": "conv1d_autoencoder_int8_cpu",
+  "timestamp_utc": "2026-11-25T02:45:50.769Z",
+  "status": "success",
+  "error": null,
+  "model": {
+    "file": "conv1d_autoencoder/conv1d_autoencoder_int8_b8.onnx",
+    "sha256": "edfe6c1edaa3683649a6e0c48aafec31396fe3b4b345209b40f9d081aa574c36",
+    "model": "conv1d_autoencoder",
+    "variant": "int8",
+    "stored_precision": "int8",
+    "normalization": "external",
+    "batch_size": 8
+  },
+  "execution": {
+    "device": "cpu",
+    "execution_provider": "CPUExecutionProvider",
+    "strict": false,
+    "compute_precision": "int8",
+    "intra_op_threads": 4,
+    "provider_options": {},
+    "session_config": {},
+    "batch_equivalence": {
+      "split": "validation",
+      "reference_batch": 1,
+      "criterion": "reconstructions bit-identical",
+      "identical": true,
+      "windows": 2676,
+      "candidates": {
+        "b1": "identical",
+        "b4": "identical",
+        "b8": "identical"
+      }
+    }
+  },
+  "dataset": {
+    "name": "NAB machine_temperature_system_failure",
+    "split_manifest": "datasets/nab-machine-temperature/splits.json",
+    "split_manifest_sha256": "b97ee8e2a09139a91e61820d114ca552e1443ec519024d09a31426fa01074c82",
+    "window_length": 128,
+    "window_stride": 1,
+    "window_label": "any point inside a labelled window",
+    "validation_windows": 2676,
+    "test_windows": 11230,
+    "test_anomalous_windows": 2649,
+    "anomaly_ranges": [
+      [
+        2126,
+        2693
+      ],
+      [
+        3703,
+        4270
+      ],
+      [
+        16057,
+        16624
+      ],
+      [
+        19232,
+        19799
+      ]
+    ],
+    "sampling_interval_minutes": 5
+  },
+  "input": {
+    "normalization": "external",
+    "mean": 89.97448888370599,
+    "std": 8.061133940337553,
+    "input_range": "(x - mean) / std for x in the raw series, with the mean and std of the training split"
+  },
+  "score": {
+    "definition": "mean squared reconstruction error over the window's points, in float64 from the model's float32 output",
+    "higher_is_more_anomalous": true
+  },
+  "threshold": {
+    "rule": "max_validation_score",
+    "flag_rule": "score > threshold",
+    "split": "validation",
+    "value": 0.0012994894810363557,
+    "validation_windows": 2676,
+    "validation_flagged": 0
+  },
+  "metrics": {
+    "test_windows": 11230,
+    "positives": 2649,
+    "roc_auc": 0.8129077431422165,
+    "roc_auc_method": "mann_whitney_average_ranks",
+    "pr_auc": 0.7142032226765427,
+    "pr_auc_method": "average_precision_step",
+    "at_threshold": {
+      "tp": 1398,
+      "fp": 359,
+      "fn": 1251,
+      "tn": 8222,
+      "precision": 0.7956744450768355,
+      "recall": 0.5277463193657984,
+      "f1": 0.6345891965501589,
+      "false_positive_rate": 0.04183661577904673
+    },
+    "events": {
+      "total": 4,
+      "detected": 4,
+      "ranges": [
+        {
+          "start": 2126,
+          "stop": 2693,
+          "windows": 694,
+          "flagged_windows": 227,
+          "detected": true,
+          "first_flagged_window_start": 2018,
+          "detection_point": 2145,
+          "delay_points": 19,
+          "delay_fraction_of_range": 0.03350970017636684,
+          "delay_minutes": 95
+        },
+        {
+          "start": 3703,
+          "stop": 4270,
+          "windows": 567,
+          "flagged_windows": 271,
+          "detected": true,
+          "first_flagged_window_start": 3731,
+          "detection_point": 3858,
+          "delay_points": 155,
+          "delay_fraction_of_range": 0.27336860670194,
+          "delay_minutes": 775
+        },
+        {
+          "start": 16057,
+          "stop": 16624,
+          "windows": 694,
+          "flagged_windows": 278,
+          "detected": true,
+          "first_flagged_window_start": 16211,
+          "detection_point": 16338,
+          "delay_points": 281,
+          "delay_fraction_of_range": 0.49559082892416223,
+          "delay_minutes": 1405
+        },
+        {
+          "start": 19232,
+          "stop": 19799,
+          "windows": 694,
+          "flagged_windows": 622,
+          "detected": true,
+          "first_flagged_window_start": 19150,
+          "detection_point": 19277,
+          "delay_points": 45,
+          "delay_fraction_of_range": 0.07936507936507936,
+          "delay_minutes": 225
+        }
+      ]
+    }
+  },
+  "scores": {
+    "validation": {
+      "file": "benchmarks/results/local/accuracy/anomaly_scores/conv1d_autoencoder_int8_cpu.validation_scores.npy",
+      "sha256": "454c4b2ff6d87dad62893c9f811e0aae3e1c0c06ad4262d127071a4ea66023ea"
+    },
+    "test": {
+      "file": "benchmarks/results/local/accuracy/anomaly_scores/conv1d_autoencoder_int8_cpu.test_scores.npy",
+      "sha256": "bff78eb6153587fd32c5c49c1747eb59d3c2044c9264b97d7368237b013cc4c7"
+    }
+  },
+  "environment": {
+    "python": "3.12.8",
+    "numpy": "2.5.5",
+    "onnxruntime": "1.32.0",
+    "onnxruntime_qnn": "2.8.0",
+    "qnn_backend": "2.52.0.261104115025",
+    "os": "Windows-11-10.0.26200-SP0",
+    "machine": "ARM64"
+  }
+}

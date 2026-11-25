@@ -16,6 +16,12 @@ and compares against it.
 To add a model: add a ``ModelSpec`` to ``MODELS``, run
 ``scripts/export_models.py --model <name>``, and commit the updated manifest.
 
+Models that cannot be exported here (the Keras autoencoder, trained in Colab
+because TensorFlow does not run on Windows on Arm) are *imported*: an
+``ImportedModelSpec`` in ``IMPORTED_MODELS`` pins the committed source files in
+``models/sources/<model>/`` by SHA256, and ``scripts/prepare_autoencoder.py``
+makes the model files from them.
+
 This module does not import torch or onnx, so its tests run anywhere.
 """
 
@@ -145,6 +151,58 @@ MODELS: dict[str, ModelSpec] = {
 }
 
 
+@dataclass(frozen=True)
+class ImportedModelSpec:
+    """A model trained elsewhere, imported from committed ONNX files pinned by SHA256."""
+    name: str
+    display_name: str
+    task: str                 # "anomaly_detection"
+    source_dir: str           # repository-relative directory of the committed source files
+    # Batch size -> SHA256 of the source file <name>_fp32_b<batch>.onnx in source_dir.
+    source_sha256: tuple[tuple[int, str], ...]
+    training_record_sha256: str  # SHA256 of training_record.json in source_dir
+    sha256sums_sha256: str    # SHA256 of the SHA256SUMS file in source_dir
+    notebook: str             # repository-relative path of the training notebook
+    notebook_commit: str      # commit the notebook was run from (full SHA)
+    code_commit: str          # repository commit the notebook cloned (data and shared code)
+    exporter: str
+    notes: str = ""
+
+    def source_file(self, batch: int) -> str:
+        """Repository-relative path of the source ONNX file for ``batch``."""
+        return f"{self.source_dir}/{self.name}_fp32_b{batch}.onnx"
+
+    def source_sha256_of(self, batch: int) -> str:
+        return dict(self.source_sha256)[batch]
+
+
+IMPORTED_MODELS: dict[str, ImportedModelSpec] = {
+    spec.name: spec
+    for spec in (
+        ImportedModelSpec(
+            name="conv1d_autoencoder",
+            display_name="Conv1D autoencoder",
+            task="anomaly_detection",
+            source_dir="models/sources/conv1d_autoencoder",
+            source_sha256=(
+                (1, "a73173e6dde62947c0760abc81b217f9fa03c51e5025e678afcd5aee9c2ff37c"),
+                (4, "4aab58418262429e5ffa0029f849a23b26f316090ee631a91dba3e6e2d037379"),
+                (8, "04b3cfd01b4ec3081d734dc9e15fc88f029cf4db7823a9fdb93ffc364d55f8a1"),
+            ),
+            training_record_sha256="bfc46660813db311e074beeea3674004b30887880a9bda402e0dd1077c1fe05c",
+            sha256sums_sha256="d2e3748a4ca1cd26c08cb7961b21c010c214428e7ca0cc0501629b2a3ccfac9e",
+            notebook="notebooks/train_autoencoder.ipynb",
+            notebook_commit="8d8f5a39175a3d4c13ca2dd114ebc2ac0b4a93c0",
+            code_commit="1e9eb1bea81f286a8b00574b55f1dfe874ffd80e",
+            exporter="tf2onnx 1.17.0 (tf2onnx.convert.from_function, fixed input signature)",
+            notes="Keras Conv1D autoencoder (design conv1d in common/autoencoder.py, 9,505 "
+                  "parameters) trained in Colab on the NAB machine_temperature training "
+                  "windows; see docs/autoencoder.md.",
+        ),
+    )
+}
+
+
 def file_name(model: str, variant: str, batch: int) -> str:
     return f"{model}_{variant}_b{batch}.onnx"
 
@@ -165,10 +223,21 @@ def expected_files(models: list[str] | None = None, variant: str = "fp32",
 # normalization folded into the first convolution (input in [0, 1]).
 VARIANTS = ("fp32", "int8", "int8_unpruned",
             "fp32_folded", "int8_folded", "int8_folded_unpruned")
+# Imported models: the source graph with edgebench.* metadata added (kept as a
+# reference), the cleaned FP32 graph, and the INT8 QDQ models made from it.
+# Normalization folding does not apply to them (see docs/autoencoder.md).
+IMPORTED_ROOT_VARIANT = "fp32_imported"
+IMPORTED_VARIANTS = (IMPORTED_ROOT_VARIANT, "fp32", "int8", "int8_unpruned")
+
+
+def imported_files(models: list[str] | None = None,
+                   variants: tuple[str, ...] = IMPORTED_VARIANTS) -> list[str]:
+    names = sorted(IMPORTED_MODELS) if models is None else models
+    return sorted(relative_path(m, v, b) for m in names for v in variants for b in BATCH_SIZES)
 
 
 def all_expected_files() -> list[str]:
-    return sorted(f for v in VARIANTS for f in expected_files(variant=v))
+    return sorted([f for v in VARIANTS for f in expected_files(variant=v)] + imported_files())
 
 
 # --- manifest ------------------------------------------------------------------
@@ -176,14 +245,27 @@ def all_expected_files() -> list[str]:
 # models/manifest.json is the committed index of every model file: its hash and
 # size, what it is (from the file's edgebench.* metadata, which stays the source
 # of truth) and the SHA256 of the file it was derived from. Following parents
-# always ends at an FP32 export with external normalization (a "root").
+# always ends at a "root" with FP32 precision and external normalization: the
+# FP32 export of an exported model, or the imported source graph (variant
+# fp32_imported) of an imported model.
 
-MANIFEST_VERSION = "1.0.0"
+MANIFEST_VERSION = "1.1.0"
 MANIFEST_SCHEMA = REPO_ROOT / "schemas" / f"model-manifest.v{MANIFEST_VERSION}.schema.json"
 ROOT_VARIANT = "fp32"
 # Variant -> the variant of the file it is made from (roots have none).
 PARENT_VARIANT = {"fp32_folded": "fp32", "int8": "fp32", "int8_unpruned": "fp32",
                   "int8_folded": "fp32_folded", "int8_folded_unpruned": "fp32_folded"}
+IMPORTED_PARENT_VARIANT = {"fp32": IMPORTED_ROOT_VARIANT, "int8": "fp32", "int8_unpruned": "fp32"}
+
+
+def root_variant(model: str) -> str:
+    """The variant every lineage of ``model`` starts from."""
+    return IMPORTED_ROOT_VARIANT if model in IMPORTED_MODELS else ROOT_VARIANT
+
+
+def parent_variants(model: str) -> dict[str, str]:
+    """Variant -> parent variant, for ``model`` (imported models have their own chain)."""
+    return IMPORTED_PARENT_VARIANT if model in IMPORTED_MODELS else PARENT_VARIANT
 
 
 class MetadataError(ValueError):
@@ -226,8 +308,9 @@ def manifest_entry(rel: str, sha256: str, size_bytes: int, meta: dict[str, str])
         if flag not in ("true", "false"):
             raise MetadataError(f"{rel}: '{META_PREFIX}quant.pruned' is {flag!r}")
         pruned = flag == "true"
-    parent = None if variant == ROOT_VARIANT else meta_value(meta, "source_sha256", rel)
-    return ManifestFile(rel, sha256, size_bytes, meta_value(meta, "model", rel), variant,
+    model = meta_value(meta, "model", rel)
+    parent = None if variant == root_variant(model) else meta_value(meta, "source_sha256", rel)
+    return ManifestFile(rel, sha256, size_bytes, model, variant,
                         precision, meta_value(meta, "normalization", rel),
                         int(meta_value(meta, "batch_size", rel)), pruned, parent)
 
@@ -236,9 +319,10 @@ def format_manifest(files: list[ManifestFile], tools: dict[str, str]) -> str:
     doc = {
         "manifest_version": MANIFEST_VERSION,
         "description": "Every model file produced by scripts/export_models.py, fold_models.py "
-                       "and quantize_models.py with the export tool versions below: SHA256, "
-                       "size, what it is (from the file's edgebench.* metadata) and the SHA256 "
-                       "of the file it was made from. Paths are relative to models/.",
+                       "and quantize_models.py (with the export tool versions below) and by "
+                       "scripts/prepare_autoencoder.py: SHA256, size, what it is (from the "
+                       "file's edgebench.* metadata) and the SHA256 of the file it was made "
+                       "from. Paths are relative to models/.",
         "tools": dict(sorted(tools.items())),
         "files": [{k: getattr(f, k) for k in ENTRY_KEYS}
                   for f in sorted(files, key=lambda f: f.file)],
@@ -293,22 +377,29 @@ def lineage_problems(files: list[ManifestFile]) -> list[str]:
     """Everything wrong with the manifest's parent links (empty list: all fine).
 
     Every file must lead, through parents present in the manifest and without
-    cycles, to a root: an FP32 export with external normalization. Each step
-    must go to the expected parent variant of the same model and batch size.
+    cycles, to a root with FP32 precision and external normalization: the FP32
+    export (variant fp32) of an exported model, or the imported source graph
+    (variant fp32_imported) of a model in IMPORTED_MODELS. Each step must go to
+    the expected parent variant of the same model and batch size.
     """
     problems = []
     shas = [f.sha256 for f in files]
     if len(set(shas)) != len(shas):
         problems.append("two manifest entries have the same SHA256")
     for f in files:
-        if f.variant == ROOT_VARIANT:
+        root, parents = root_variant(f.model), parent_variants(f.model)
+        if f.variant == root:
             if f.parent_sha256 is not None:
-                problems.append(f"{f.file}: a root (variant {ROOT_VARIANT}) has a parent")
+                problems.append(f"{f.file}: a root (variant {root}) has a parent")
             if f.normalization != "external" or f.precision != "fp32":
                 problems.append(f"{f.file}: a root must be FP32 with external normalization")
             continue
-        if f.variant not in PARENT_VARIANT:
-            problems.append(f"{f.file}: unknown variant {f.variant!r}")
+        if f.variant not in parents:
+            problems.append(f"{f.file}: variant {f.variant!r} is not allowed for model {f.model}")
+            continue
+        if f.parent_sha256 is None:
+            problems.append(f"{f.file}: variant {f.variant} needs a parent (the root of "
+                            f"{f.model} is variant {root})")
             continue
         try:
             chain = lineage(files, f)
@@ -316,9 +407,9 @@ def lineage_problems(files: list[ManifestFile]) -> list[str]:
             problems.append(str(exc))
             continue
         parent = chain[1]
-        if parent.variant != PARENT_VARIANT[f.variant]:
+        if parent.variant != parents[f.variant]:
             problems.append(f"{f.file}: parent {parent.file} is {parent.variant}, "
-                            f"expected {PARENT_VARIANT[f.variant]}")
+                            f"expected {parents[f.variant]}")
         if (parent.model, parent.batch_size) != (f.model, f.batch_size):
             problems.append(f"{f.file}: parent {parent.file} is another model or batch size")
     return problems
