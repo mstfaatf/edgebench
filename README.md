@@ -121,6 +121,9 @@ hygiene tests on Linux. See [Test labels](docs/setup.md#test-labels) and
   and checks; the models expect normalized input
 - [docs/accuracy.md](docs/accuracy.md): accuracy of every variant on ImageNetV2,
   CPU and NPU, and the CPU vs NPU comparison
+- [docs/autoencoder.md](docs/autoencoder.md): time-series anomaly-detection
+  autoencoder (in progress): NAB data, windows and splits, the NPU op-support
+  check, and the Colab training notebook
 - [docs/cli.md](docs/cli.md): `edgebench` commands, options, output and exit
   codes
 - [docs/results-schema.md](docs/results-schema.md): result file format (JSON
@@ -139,7 +142,8 @@ hygiene tests on Linux. See [Test labels](docs/setup.md#test-labels) and
 | `tools/` | Diagnostics: `ort_probe` (C++ CPU/NPU runner), QNN rejection check |
 | `scripts/` | Dependency fetch, data and model preparation, NPU checks, result validation |
 | `schemas/` | JSON Schema for result files, one file per version |
-| `datasets/` | Manifests of the evaluation and calibration images (path, label, SHA256); the images are downloaded, not committed |
+| `datasets/` | Manifests of the evaluation and calibration data (images: path, label, SHA256; the NAB time series: windows and splits); the data is downloaded, not committed |
+| `notebooks/` | Colab notebook that trains the Keras autoencoder and exports it to ONNX |
 | `benchmarks/` | Configurations and results (`results/published/` is committed, `results/local/` is not) |
 | `ml/`, `dashboard/` | Model training/export pipelines and the static dashboard (planned) |
 | `docs/` | Documentation |

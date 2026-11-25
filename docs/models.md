@@ -4,6 +4,8 @@ EdgeBench benchmarks ImageNet classifiers exported from PyTorch (torchvision and
 timm) to ONNX with fixed shapes, one file per batch size, in FP32 and as static
 INT8 QDQ models. This page describes which models, where their weights come
 from, how they are exported, quantized and checked, and what input they expect.
+A time-series anomaly-detection autoencoder trained with Keras is in progress;
+see [autoencoder.md](autoencoder.md).
 
 ## Supported models
 

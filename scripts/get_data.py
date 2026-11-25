@@ -1,6 +1,6 @@
 """Download the evaluation and calibration datasets and check them against their manifests.
 
-Two datasets, chosen with ``--dataset``:
+Three datasets, chosen with ``--dataset``:
 
 ``imagenette`` (default)
     Imagenette (https://github.com/fastai/imagenette), a 10-class subset of
@@ -30,10 +30,20 @@ Two datasets, chosen with ``--dataset``:
     skip the download and only compare the file list with the manifest;
     ``--verify`` hashes the archive (if present) and every image again.
 
-``all`` does both. ``data/`` is not committed; the manifests are.
+``nab``
+    One series of the Numenta Anomaly Benchmark (https://github.com/numenta/NAB,
+    MIT license) for the anomaly-detection autoencoder:
+    ``data/realKnownCause/machine_temperature_system_failure.csv`` and the
+    labelled anomaly windows ``labels/combined_windows.json``, downloaded from
+    a pinned NAB commit into ``data/nab/`` and checked by SHA256 on every run.
+    The windows and splits built from them (``common/timeseries.py``) are then
+    checked against the committed manifest
+    ``datasets/nab-machine-temperature/splits.json``.
+
+``all`` does all three. ``data/`` is not committed; the manifests are.
 
 Usage:
-    python scripts/get_data.py [--dataset imagenette|imagenetv2|all]
+    python scripts/get_data.py [--dataset imagenette|imagenetv2|nab|all]
                                [--verify] [--force-extract] [--write-manifests]
 """
 
@@ -67,6 +77,7 @@ from common.manifests import (  # noqa: E402
     write_manifest,
 )
 from common.preprocess import DATA_DIR, IMAGENETTE_ROOT, SPLITS_DIR, load_imagenette_classes  # noqa: E402
+from common import timeseries as ts  # noqa: E402
 
 DOWNLOADS_DIR = DATA_DIR / "downloads"
 
@@ -272,9 +283,34 @@ def get_imagenetv2(verify: bool, force_extract: bool, write_manifests: bool) -> 
           f"(seed {EVAL_QUICK_SEED}); no content overlap with the calibration images")
 
 
+# --- NAB ------------------------------------------------------------------------
+
+
+def get_nab(write_manifests: bool) -> None:
+    for path, expected in ((ts.SERIES_PATH, ts.SERIES_SHA256), (ts.LABELS_PATH, ts.LABELS_SHA256)):
+        ensure_verified_archive(ts.nab_url(path), ts.local_path(path), expected)
+    series, labels, series_sha, labels_sha = ts.load_nab()
+    manifest = ts.build_manifest(series, labels, series_sha, labels_sha)
+    rel = ts.SPLIT_MANIFEST.relative_to(ts.REPO_ROOT).as_posix()
+    if write_manifests:
+        ts.write_split_manifest(manifest)
+        print(f"wrote {rel}")
+    else:
+        problems = ts.manifest_differences(ts.read_split_manifest(), manifest)
+        if problems:
+            raise RuntimeError(f"the NAB windows and splits differ from {rel}: "
+                               f"{', '.join(problems[:8])}")
+        print(f"windows and splits match {rel}")
+    splits = manifest["splits"]
+    print(f"{manifest['series']['points']} points, window {manifest['windowing']['length']} "
+          f"stride {manifest['windowing']['stride']}: "
+          + ", ".join(f"{k} {v['windows']} windows ({v['anomalous_windows']} anomalous)"
+                      for k, v in splits.items()))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--dataset", choices=["imagenette", "imagenetv2", "all"],
+    parser.add_argument("--dataset", choices=["imagenette", "imagenetv2", "nab", "all"],
                         default="imagenette", help="which dataset to fetch (default: imagenette)")
     parser.add_argument("--verify", action="store_true",
                         help="ImageNetV2: hash the archive (if present) and every image again")
@@ -288,6 +324,8 @@ def main() -> int:
         get_imagenette(args.force_extract, args.write_manifests)
     if args.dataset in ("imagenetv2", "all"):
         get_imagenetv2(args.verify, args.force_extract, args.write_manifests)
+    if args.dataset in ("nab", "all"):
+        get_nab(args.write_manifests)
     return 0
 
 

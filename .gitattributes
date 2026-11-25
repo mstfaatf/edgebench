@@ -20,6 +20,7 @@ CMakeLists.txt  text eol=lf
 *.css           text eol=lf
 *.html          text eol=lf
 *.json          text eol=lf
+*.ipynb         text eol=lf
 *.yml           text eol=lf
 *.yaml          text eol=lf
 *.toml          text eol=lf

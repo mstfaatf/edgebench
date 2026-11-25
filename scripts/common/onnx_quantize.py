@@ -146,6 +146,73 @@ def _set_metadata(proto: Any, metadata: dict[str, str]) -> None:
     onnx.helper.set_model_props(proto, metadata)
 
 
+def array_reader(input_name: str, samples: Any) -> Any:
+    """A CalibrationDataReader over ``samples`` (arrays), one per call, under one input name."""
+    from onnxruntime.quantization import CalibrationDataReader
+
+    class SampleReader(CalibrationDataReader):
+        def __init__(self) -> None:
+            self._it = iter(samples)
+
+        def get_next(self):
+            sample = next(self._it, None)
+            return None if sample is None else {input_name: sample}
+
+    return SampleReader()
+
+
+def strip_metadata(source: Path, dest: Path) -> None:
+    """Copy of ``source`` without metadata_props (qnn_preprocess_model in ONNX Runtime 1.32
+    fails on a model that has them: it passes the repeated proto field to dict.update)."""
+    import onnx
+
+    proto = onnx.load(str(source))
+    del proto.metadata_props[:]
+    onnx.save(proto, str(dest))
+
+
+def quantize_qdq(source: Path, out: Path, reader: Any, calibration_cache: Path,
+                 work_dir: Path) -> tuple[bool, Any]:
+    """The INT8 recipe on one FP32 file (without metadata_props) -> QDQ model at ``out``.
+
+    ``reader`` is a CalibrationDataReader, or None to reuse the ranges an
+    earlier call wrote to ``calibration_cache`` (same tensor names, e.g. the
+    same model at another batch size). Returns (whether qnn_preprocess_model
+    changed the model, the QNN quantization config).
+    """
+    from onnxruntime.quantization import QuantType, quantize_static
+    from onnxruntime.quantization.execution_providers.qnn import (
+        get_qnn_qdq_config,
+        qnn_preprocess_model,
+    )
+
+    preprocessed = work_dir / f"{out.stem}.preprocessed.onnx"
+    changed = bool(qnn_preprocess_model(str(source), str(preprocessed)))
+    model = preprocessed if changed else source
+    config = get_qnn_qdq_config(str(model), reader, per_channel=True,
+                                weight_type=QuantType.QInt8)
+    # The arguments onnxruntime.quantization.quantize() passes for a
+    # StaticQuantConfig, plus the calibration cache: written by the first
+    # (calibrating) call, read without calibrating again by the others.
+    quantize_static(
+        str(model), str(out), config.calibration_data_reader,
+        calibrate_method=config.calibrate_method,
+        quant_format=config.quant_format,
+        activation_type=config.activation_type,
+        weight_type=config.weight_type,
+        op_types_to_quantize=config.op_types_to_quantize,
+        nodes_to_quantize=config.nodes_to_quantize,
+        nodes_to_exclude=config.nodes_to_exclude,
+        per_channel=config.per_channel,
+        reduce_range=config.reduce_range,
+        use_external_data_format=config.use_external_data_format,
+        calibration_providers=config.calibration_providers,
+        extra_options=config.extra_options,
+        calibration_cache_path=str(calibration_cache),
+    )
+    return changed, config
+
+
 def quantize(spec: ModelSpec, batches: list[int], calibration_count: int | None = None,
              source_variant: str = "fp32") -> dict[int, dict[str, Any]]:
     """Quantize the model's FP32 files; returns per batch the unpruned and pruned bytes.
@@ -159,11 +226,6 @@ def quantize(spec: ModelSpec, batches: list[int], calibration_count: int | None 
     pruned_variant, unpruned_variant = INT8_VARIANTS[source_variant]
     normalized_input = source_variant == "fp32"
     import onnx
-    from onnxruntime.quantization import QuantType, quantize_static
-    from onnxruntime.quantization.execution_providers.qnn import (
-        get_qnn_qdq_config,
-        qnn_preprocess_model,
-    )
 
     from common.onnx_prune import prune
 
@@ -180,43 +242,14 @@ def quantize(spec: ModelSpec, batches: list[int], calibration_count: int | None 
             if not fp32.is_file():
                 raise FileNotFoundError(f"{fp32} not found; run scripts/export_models.py "
                                         "(and scripts/fold_models.py for folded models) first")
-            # The quantizer gets the FP32 graph without metadata_props: the INT8
-            # metadata is written from the source file afterwards, and
-            # qnn_preprocess_model (ONNX Runtime 1.32) fails on a model that has
-            # metadata_props (it passes the repeated proto field to dict.update).
+            # The quantizer gets the FP32 graph without metadata_props; the INT8
+            # metadata is written from the source file afterwards.
             stripped = tmp / f"fp32_b{batch}.onnx"
-            fp32_proto = onnx.load(str(fp32))
-            del fp32_proto.metadata_props[:]
-            onnx.save(fp32_proto, str(stripped))
-            preprocessed = tmp / f"preprocessed_b{batch}.onnx"
-            changed = bool(qnn_preprocess_model(str(stripped), str(preprocessed)))
-            source = preprocessed if changed else stripped
-            config = get_qnn_qdq_config(
-                str(source),
-                _reader(spec, entries, normalized_input) if batch == 1 else None,
-                per_channel=True,
-                weight_type=QuantType.QInt8,
-            )
+            strip_metadata(fp32, stripped)
             out = tmp / f"quantized_b{batch}.onnx"
-            # The arguments onnxruntime.quantization.quantize() passes for a
-            # StaticQuantConfig, plus the calibration cache: written by the
-            # batch-1 run, read (without calibrating again) by the others.
-            quantize_static(
-                str(source), str(out), config.calibration_data_reader,
-                calibrate_method=config.calibrate_method,
-                quant_format=config.quant_format,
-                activation_type=config.activation_type,
-                weight_type=config.weight_type,
-                op_types_to_quantize=config.op_types_to_quantize,
-                nodes_to_quantize=config.nodes_to_quantize,
-                nodes_to_exclude=config.nodes_to_exclude,
-                per_channel=config.per_channel,
-                reduce_range=config.reduce_range,
-                use_external_data_format=config.use_external_data_format,
-                calibration_providers=config.calibration_providers,
-                extra_options=config.extra_options,
-                calibration_cache_path=str(cache),
-            )
+            changed, config = quantize_qdq(
+                stripped, out, _reader(spec, entries, normalized_input) if batch == 1 else None,
+                cache, tmp)
             if batch not in batches:
                 continue
             source_proto = onnx.load(str(fp32))

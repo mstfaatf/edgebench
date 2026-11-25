@@ -70,6 +70,7 @@ Exported and quantized models are written to `models/`, which is not committed.
 |---|---|---|---|
 | ImageNetV2 matched-frequency (`imagenetv2-matched-frequency.tar.gz`, Hugging Face revision `d626240b`) | `scripts/get_data.py`, accuracy evaluation | Code repository and Hugging Face dataset card: MIT; the images were collected from Flickr for use under the same terms as ImageNet (non-commercial research and educational use): see upstream | <https://github.com/modestyachts/ImageNetV2>, <https://huggingface.co/datasets/vaishaal/ImageNetV2>, <https://www.image-net.org/download.php> |
 | Imagenette (`imagenette2-320`) | `scripts/get_data.py`, calibration and the feasibility accuracy scripts | Repository: Apache-2.0; the images are a subset of ImageNet: see upstream for their terms | <https://github.com/fastai/imagenette> |
+| Numenta Anomaly Benchmark: `data/realKnownCause/machine_temperature_system_failure.csv` and `labels/combined_windows.json` (commit `ea702d75`) | `scripts/get_data.py`, the time-series autoencoder | MIT (Copyright 2014-2024 Numenta Inc.; repository license covering data and labels) | <https://github.com/numenta/NAB> |
 
 The archives, the extracted images and the split lists derived from them are
 kept under `data/`, which is not committed. The committed manifests in
