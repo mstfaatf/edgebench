@@ -4,8 +4,9 @@
 //   1. Verify that onnxruntime.dll was loaded from the executable's directory
 //      (not the unrelated copy in C:\Windows\System32) and list the loaded
 //      ONNX Runtime / QNN DLLs.
-//   2. Register the QNN plugin EP library, list all EP devices, and select the
-//      single QNN device whose hardware type is NPU.
+//   2. Register the QNN plugin EP library (edgebench::EpLibrary, by absolute path),
+//      check the loaded modules again, list all EP devices, and select the single
+//      QNN device whose hardware type is NPU (edgebench::select_qnn_npu()).
 //   3. Create the session (timed, --init-reps times): CPU EP with a fixed
 //      intra-op thread count, or the NPU with CPU fallback disabled (strict),
 //      optionally generating and then loading an EP context model.
@@ -19,10 +20,10 @@
 // the executable by full path and verify it; see edgebench::load_onnxruntime().
 //
 // Run with --help for the options. Exit codes are edgebench's (edgebench/exit_codes.hpp,
-// docs/cli.md): 0 ok, 1 a check failed (output comparison, device selection) or an
-// unexpected error, 2 usage error, 3 ONNX Runtime error, 4 ONNX Runtime could not be
-// loaded or a loaded ORT/QNN DLL is not the bundled one, 6 the --json file already
-// exists or could not be written (it is never overwritten).
+// docs/cli.md): 0 ok, 1 an output comparison failed or an unexpected error, 2 usage
+// error, 3 ONNX Runtime error or no single QNN NPU device, 4 ONNX Runtime or the QNN
+// EP could not be loaded or a loaded ORT/QNN DLL is not the bundled one, 6 the --json
+// file already exists or could not be written (it is never overwritten).
 
 #include <onnxruntime_cxx_api.h>
 
@@ -33,15 +34,21 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "edgebench/bundle_modules.hpp"
 #include "edgebench/crash_handler.hpp"
 #include "edgebench/diagnostics.hpp"
+#include "edgebench/ep_devices.hpp"
+#include "edgebench/ep_library.hpp"
 #include "edgebench/exit_codes.hpp"
 #include "edgebench/interrupt.hpp"
+#include "edgebench/npu_selection.hpp"
 #include "edgebench/ort_loader.hpp"
+#include "edgebench/qnn_ep.hpp"
 #include "edgebench/result_files.hpp"
 #include "ort_support.hpp"
 #include "probe_util.hpp"
@@ -253,11 +260,25 @@ int RunProbe(const Options& o) {
     Section("EP devices");
     // The QNN execution provider is bundled with ARM64 builds only; without it the
     // probe can still check the CPU EP.
-    const fs::path qnn_lib = exe_dir / kQnnEpLibrary;
-    const bool qnn_registered = fs::is_regular_file(qnn_lib);
-    if (qnn_registered) {
-        env.RegisterExecutionProviderLibrary(kQnnEpName, qnn_lib.native());
-        std::printf("  registered %s from %s\n", kQnnEpName, qnn_lib.string().c_str());
+    // Registered through edgebench_core (by absolute path; unregistered when `qnn` is
+    // released, after every session below), then the loaded modules are checked again.
+    const fs::path qnn_lib = edgebench::qnn_ep_library_path(exe_dir);
+    std::unique_ptr<edgebench::EpLibrary> qnn;
+    if (fs::is_regular_file(qnn_lib)) {
+        edgebench::Result<std::unique_ptr<edgebench::EpLibrary>> registered =
+            edgebench::EpLibrary::register_library(env, std::string(edgebench::kQnnEpName),
+                                                   qnn_lib);
+        edgebench::Result<void> modules = registered
+                                              ? edgebench::check_bundle_modules(exe_dir).result()
+                                              : edgebench::Result<void>(registered.error());
+        if (!modules) {
+            j.EndObject().EndObject();
+            edgebench::print_error(modules.error(), edgebench::qnn_ep_hint(modules.error().kind));
+            return edgebench::to_int(modules.error().exit_code);
+        }
+        qnn = std::move(registered).value();
+        std::printf("  registered %s from %s\n", qnn->registration_name().c_str(),
+                    qnn_lib.string().c_str());
     } else if (o.target == Target::kNpu) {
         j.EndObject().EndObject();
         edgebench::print_error(
@@ -268,19 +289,26 @@ int RunProbe(const Options& o) {
             "build with an arm64 preset.");
         return kExitOrtLoadFailure;
     } else {
-        std::printf("  %s not bundled (CPU-only build): CPU devices only\n", kQnnEpLibrary);
+        std::printf("  %s not bundled (CPU-only build): CPU devices only\n",
+                    edgebench::path_to_utf8(qnn_lib.filename()).c_str());
     }
     const std::vector<Ort::ConstEpDevice> devices = env.GetEpDevices();
     PrintDevices(devices);
     std::optional<Ort::ConstEpDevice> npu;
     if (o.target == Target::kNpu) {
-        try {
-            npu = SelectQnnNpu(devices);
-        } catch (const DeviceSelectionError& e) {
-            edgebench::print_error("device_selection_failed", e.what());
+        // The same selection rule as edgebench (edgebench/npu_selection.hpp).
+        const std::vector<edgebench::EpDeviceInfo> infos = edgebench::list_ep_devices(env);
+        const edgebench::NpuSelection selection = edgebench::select_qnn_npu(infos);
+        edgebench::Result<Ort::ConstEpDevice> handle =
+            selection.ok()
+                ? edgebench::ep_device_handle(env, *selection.index, infos[*selection.index])
+                : edgebench::Result<Ort::ConstEpDevice>(selection.error());
+        if (!handle) {
+            edgebench::print_error(handle.error(), edgebench::qnn_ep_hint(handle.error().kind));
             j.EndObject().EndObject();
-            return kExitCheckFailed;
+            return edgebench::to_int(handle.error().exit_code);
         }
+        npu = handle.value();
         std::printf("  selected: %s / NPU (device_id=0x%x)\n", npu->EpName(),
                     npu->Device().DeviceId());
     }
@@ -545,8 +573,10 @@ int RunProbe(const Options& o) {
     }
 
     runner.reset();  // release sessions before unregistering the EP library
-    if (qnn_registered)
-        env.UnregisterExecutionProviderLibrary(kQnnEpName);
+    if (qnn) {
+        if (const edgebench::Result<void> r = qnn->unregister(); !r)
+            edgebench::print_warning(r.error().kind, r.error().message);
+    }
 
     j.Key("result").String(report.failed ? "failed" : "ok").EndObject();
     const bool json_written = o.json.empty() || WriteJsonFile(o.json, j.str());

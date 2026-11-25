@@ -2,7 +2,8 @@
 # locally, is described in docs/setup.md ("Continuous integration").
 #
 # Models, reference data and the NPU are not available on hosted runners: CI runs
-# only the `unit` and `ort` test labels, never `models` or `npu`.
+# the `unit` and `ort` test labels, never `models`; the ARM64 job also runs the
+# `npu` label and requires every one of those tests to report itself skipped.
 
 name: CI
 
@@ -133,6 +134,25 @@ jobs:
 
       - name: Test (unit, ort)
         run: ctest --preset ${{ matrix.preset }} -L "unit|ort" --output-on-failure --parallel 4
+
+      # The hosted ARM64 runners have no Qualcomm hardware. Every `npu` test must
+      # report itself as skipped there, with its reason in the log; one that passes
+      # or fails on such a runner is a bug in the test's skip condition.
+      - name: Test (npu, must skip without an NPU)
+        if: matrix.arch == 'arm64'
+        shell: pwsh
+        run: |
+          $lines = ctest --preset ${{ matrix.preset }} -L npu --no-tests=error --verbose 2>&1
+          $code = $LASTEXITCODE
+          $lines | Write-Output
+          if ($code -ne 0) { exit $code }
+          $total = @($lines | Select-String -Pattern '^\s*\d+/\d+ Test\s+#\d+: ').Count
+          $skipped = @($lines | Select-String -Pattern '^\s*\d+/\d+ Test\s+#\d+: .*\*\*\*Skipped').Count
+          "npu tests: $skipped of $total skipped (no NPU on this runner)" >> $env:GITHUB_STEP_SUMMARY
+          if ($total -eq 0 -or $skipped -ne $total) {
+            Write-Error "expected every npu test to be skipped on a runner without an NPU: $skipped of $total skipped"
+            exit 1
+          }
 
       - name: Upload test log
         if: failure()

@@ -39,7 +39,7 @@ Result<std::unique_ptr<CpuProvider>> CpuProvider::create(Runtime& runtime) {
             matches.push_back(d);
     }
     if (matches.size() != 1) {
-        return Error{ExitCode::internal_error, "device_selection_failed",
+        return Error{ExitCode::ort_runtime_error, "device_selection_failed",
                      "expected exactly one " + std::string(kExecutionProvider) +
                          " device of type CPU, found " + std::to_string(matches.size())};
     }

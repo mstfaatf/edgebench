@@ -7,6 +7,7 @@
 #include <sstream>
 #include <thread>
 
+#include "edgebench/bundle_modules.hpp"
 #include "edgebench/interrupt.hpp"
 #include "edgebench/run_identity.hpp"
 #include "edgebench/runtime.hpp"
@@ -83,17 +84,11 @@ bool should_stop(const StopHook& hook, StopPoint point, int trial, int iteration
 Result<void> check_loaded_modules(BenchmarkResult& result) {
     const std::filesystem::path& dll = result.runtime.onnxruntime.dll_path;
     const std::filesystem::path bundle = dll.empty() ? executable_dir() : dll.parent_path();
-    std::vector<LoadedModule> modules = list_ort_modules();
-    const std::vector<LoadedModule> outside = find_modules_outside(modules, bundle);
-    if (outside.empty())
+    BundleModuleCheck check = check_bundle_modules(bundle);
+    if (check.ok())
         return {};
-    std::string names;
-    for (const LoadedModule& m : outside)
-        names += (names.empty() ? "" : ", ") + m.name + " (" + path_to_utf8(m.path) + ")";
-    result.runtime.loaded_modules = std::move(modules);
-    return Error{ExitCode::ort_load_failure, "module_outside_bundle",
-                 "ONNX Runtime/QNN module loaded from outside the bundle directory " +
-                     path_to_utf8(bundle) + ": " + names};
+    result.runtime.loaded_modules = std::move(check.modules);
+    return check.result();
 }
 
 // One trial: fresh session, warm-up, measured iterations. Stop requests are

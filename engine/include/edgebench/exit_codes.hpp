@@ -12,7 +12,8 @@ enum class ExitCode : int {
     internal_error = 1,
     /// Bad arguments, invalid values, or a model file that does not exist.
     usage_error = 2,
-    /// ONNX Runtime failed at run time: session creation or inference.
+    /// ONNX Runtime failed at run time: no usable EP device (none, or more than one,
+    /// matches the requested device), session creation, or inference.
     ort_runtime_error = 3,
     /// ONNX Runtime could not be loaded, or a loaded ORT/QNN DLL is not the bundled one.
     ort_load_failure = 4,

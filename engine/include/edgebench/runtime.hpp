@@ -2,16 +2,25 @@
 //
 // Create it only after load_onnxruntime() succeeded. Every session, provider and
 // Ort object created from it must be released before the Runtime.
+//
+// The Runtime also owns the execution-provider plugin libraries registered with
+// its environment (register_ep_library()). They are unregistered before the
+// environment is released, and never while a session still holds a lease on
+// one (EpLibrary::Lease), so the library outlives every session using it, on
+// error paths and after an interrupt as well.
 #pragma once
 
 #include <onnxruntime_cxx_api.h>
 
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "edgebench/ep_devices.hpp"
+#include "edgebench/ep_library.hpp"
 #include "edgebench/ort_loader.hpp"
 #include "edgebench/result.hpp"
 
@@ -29,8 +38,25 @@ public:
     Ort::Env& env() { return env_; }
     const OrtLoadResult& load_result() const { return load_; }
 
+    /// Directory of the loaded onnxruntime.dll: every ONNX Runtime / QNN module the
+    /// process loads must come from here.
+    std::filesystem::path bundle_dir() const { return load_.dll_path.parent_path(); }
+
     /// Every EP device ONNX Runtime enumerates for the EPs registered so far.
     std::vector<EpDeviceInfo> ep_devices();
+
+    /// Registers an EP plugin library by absolute path (EpLibrary::register_library()).
+    /// Registering the same name and path again returns the existing registration;
+    /// the same name with another path is an error (ep_library_conflict, exit 1).
+    Result<EpLibrary*> register_ep_library(std::string registration_name,
+                                           const std::filesystem::path& path);
+
+    /// The registered library with this name, or nullptr.
+    EpLibrary* ep_library(std::string_view registration_name);
+
+    /// Unregisters and forgets the library (EpLibrary::unregister()); unknown names
+    /// are a no-op. On error the registration is kept.
+    Result<void> unregister_ep_library(std::string_view registration_name);
 
     /// Collects every ONNX Runtime log message delivered while it is alive (only
     /// one capture at a time). Messages from sessions with verbose log severity are
@@ -57,7 +83,9 @@ private:
     OrtLoadResult load_;
     std::mutex log_mutex_;
     std::vector<std::string>* capture_ = nullptr;  // guarded by log_mutex_
-    Ort::Env env_;                                 // last: its logger uses the members above
+    Ort::Env env_;                                 // after the members its logger uses
+    // After env_, so the libraries are unregistered before the environment is released.
+    std::vector<std::unique_ptr<EpLibrary>> ep_libraries_;
 };
 
 }  // namespace edgebench

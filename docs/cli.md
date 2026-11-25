@@ -510,8 +510,19 @@ Checks everything a benchmark depends on and reports it:
 - **Loaded modules**: every ONNX Runtime and QNN DLL in the process, with its
   path, and whether it is inside the bundle directory (the executable's
   directory).
-- **EP devices**: the devices ONNX Runtime enumerates without any plugin EP
-  registered (the CPU EP).
+- **QNN execution provider**: the plugin library's path
+  (`onnxruntime_providers_qnn.dll` next to the executable), the result of
+  registering it with ONNX Runtime (by that absolute path, never through the DLL
+  search path), the EP version from its device metadata, and the device NPU runs
+  would use: the single device of the `QNNExecutionProvider` with hardware type
+  `NPU`, or why there is none (`no_qnn_ep_devices`, `no_npu_device`,
+  `multiple_npu_devices`). x64 builds are CPU-only and show `not bundled`.
+  Registration loads the plugin DLL, so the module check above runs after it.
+- **EP devices**: every device ONNX Runtime enumerates once the QNN EP is
+  registered (on this machine: the CPU, the Hexagon NPU and the Adreno GPU), with
+  EP name and vendor, hardware type, vendor, vendor and device IDs, and the
+  device and EP metadata as reported. The device selected for NPU runs is
+  marked.
 
 | Option | Meaning |
 |---|---|
@@ -519,12 +530,16 @@ Checks everything a benchmark depends on and reports it:
 | `--json` | Print the report as JSON instead of text. `tool`, `system` and `runtime` use the [results schema](results-schema.md)'s field names where they overlap; `onnxruntime_load`, `problems`, `warnings`, `result` and `exit_code` summarize the checks |
 
 Exit code 0 when every check passes. Exit code 4 when ONNX Runtime cannot be
-loaded (the report still contains every section that does not need it) or when
-an ONNX Runtime/QNN module is loaded from outside the bundle directory (the
-module is named). Each problem is also printed to stderr as
+loaded (the report still contains every section that does not need it), when an
+ONNX Runtime/QNN module is loaded from outside the bundle directory (the module
+is named), or, in ARM64 builds, when the QNN execution provider is missing from
+the bundle (`qnn_ep_not_bundled`) or ONNX Runtime refuses to register it
+(`ep_registration_failed`). No selectable NPU is a warning coded with the
+selection failure (for example `warning: [no_qnn_ep_devices] ...` on an ARM64
+machine without Qualcomm hardware): CPU runs still work, so the exit code is 0. Each problem is also printed to stderr as
 `error: [<kind>] <message>`, with a `hint:` line when there is a fix to suggest.
 Warnings (battery power, battery saver, background load over 10%, an unknown
-power mode, emulation) appear once, in the report (text or JSON), as
+power mode, emulation, no NPU for NPU runs) appear once, in the report (text or JSON), as
 `warning: [<code>] <message>`; they are not repeated on stderr and do not
 change the exit code.
 
@@ -562,13 +577,27 @@ ONNX Runtime
   version            1.32.0 (C API 32)
   load check         full_path_verified
 
+QNN execution provider
+  library            C:\dev\edgebench\build\arm64-release\bin\Release\onnxruntime_providers_qnn.dll
+  registration       ok (as QNNExecutionProvider)
+  version            2.8.0
+  NPU for runs       QNNExecutionProvider NPU (ep vendor Qualcomm, vendor (unset), vendor_id 0x4d4f4351, device_id 0x41304430), 1 candidate
+
 Loaded ONNX Runtime / QNN modules (bundle: C:\dev\edgebench\build\arm64-release\bin\Release)
   C:\dev\edgebench\build\arm64-release\bin\Release\onnxruntime.dll
+  C:\dev\edgebench\build\arm64-release\bin\Release\onnxruntime_providers_qnn.dll
+  C:\dev\edgebench\build\arm64-release\bin\Release\onnxruntime_providers_shared.dll
 
-EP devices (no plugin EP registered)
+EP devices (CPU EP and QNN EP)
   CPUExecutionProvider  type CPU  ep vendor Microsoft  vendor Qualcomm  vendor_id 0x4d4f4351  device_id 0x7
       device metadata: {Description=Snapdragon(R) X 10-core X1P64100 @ 3.42 GHz}
       ep metadata:     {version=1.32.0}
+  QNNExecutionProvider  type NPU  ep vendor Qualcomm  vendor (unset)  vendor_id 0x4d4f4351  device_id 0x41304430   <-- selected for NPU runs
+      device metadata: {LUID=78645}
+      ep metadata:     {library_path=C:\dev\edgebench\build\arm64-release\bin\Release\onnxruntime_providers_qnn.dll, version=2.8.0}
+  QNNExecutionProvider  type GPU  ep vendor Qualcomm  vendor (unset)  vendor_id 0x4d4f4351  device_id 0x36334330
+      device metadata: {Description=Qualcomm(R) Adreno(TM) X1-85 GPU, Discrete=0, DxgiAdapterNumber=0, DxgiHighPerformanceIndex=0, DxgiVideoMemory=128 MB, LUID=77477}
+      ep metadata:     {library_path=C:\dev\edgebench\build\arm64-release\bin\Release\onnxruntime_providers_qnn.dll, version=2.8.0}
 
 Result: OK
 ```
@@ -587,9 +616,9 @@ Shared by `edgebench` and `tools/ort_probe` (defined in
 | Code | Name | Meaning |
 |---|---|---|
 | 0 | `success` | Success |
-| 1 | `internal_error` | Internal or unexpected error. `ort_probe` also uses it when one of its checks fails (output comparison, device selection) |
+| 1 | `internal_error` | Internal or unexpected error. `ort_probe` also uses it when its output comparison fails |
 | 2 | `usage_error` | Bad arguments, invalid values, or model file not found |
-| 3 | `ort_runtime_error` | ONNX Runtime error: session creation or inference failed |
+| 3 | `ort_runtime_error` | ONNX Runtime error: no usable EP device (none, or more than one, matches the requested device), or session creation or inference failed |
 | 4 | `ort_load_failure` | ONNX Runtime could not be loaded (any loader error kind), or a loaded ONNX Runtime/QNN DLL is not the bundled one |
 | 5 | `strict_mode_refusal` | Strict mode refused the session: not every node can run on the requested device. Reserved for the NPU provider |
 | 6 | `output_error` | Results could not be written (`edgebench run`: after the summary was printed, or before measuring if `--output-dir` is an existing file; `ort_probe`: the `--json` file exists or could not be written) |
@@ -623,8 +652,8 @@ no dump is written and no Windows error dialog appears.
 Every way `edgebench` and `ort_probe` can end with an error. "Result" says
 whether a result document is written. Tests are in
 `engine/tests/exit_paths_test.cpp`, `failure_paths_test.cpp`,
-`edgebench_exe_test.cpp`, `benchmark_test.cpp`, `run_config_test.cpp` and
-`cli_test.cpp`; "not triggerable" marks paths that need ONNX Runtime or Windows
+`edgebench_exe_test.cpp`, `benchmark_test.cpp`, `qnn_ep_test.cpp`,
+`npu_selection_test.cpp`, `run_config_test.cpp` and `cli_test.cpp`; "not triggerable" marks paths that need ONNX Runtime or Windows
 to fail internally and that a test cannot provoke.
 
 `edgebench run`:
@@ -639,7 +668,7 @@ to fail internally and that a test cannot provoke.
 | ONNX Runtime cannot be loaded | loader kind (`dll_not_found`, `version_mismatch`, ...) | 4 | yes, stage `environment` (dry run: no) | `Cli.RunLoadFailureWritesAFailedResult`, `Cli.RunDryRunNeedsOnnxRuntime` |
 | ONNX Runtime environment cannot be created | `environment_creation_failed` | 3 | yes, `environment` | not triggerable |
 | EP devices cannot be enumerated | `ep_enumeration_failed` | 3 | yes, `environment` / `ep_registration` | not triggerable |
-| No CPU EP device | `device_selection_failed` | 1 | yes, `ep_registration` | not triggerable |
+| No CPU EP device, or more than one | `device_selection_failed` | 3 | yes, `ep_registration` | not triggerable |
 | Session options rejected | `session_options_failed` | 3 | yes, `session_creation` | not triggerable |
 | Model is not a valid ONNX file | `session_creation_failed` (code e.g. `ORT_INVALID_PROTOBUF`) | 3 | yes, `session_creation` | `ExitPaths.InvalidModelExits3AndWritesAFailedResult`, `Cli.RunDryRunInvalidModelExits3WithOrtCode` |
 | Session creation fails on a later trial | as reported by ONNX Runtime | 3 | yes, `session_creation`, earlier trials kept | `FailurePaths.SessionCreationFailsOnTheSecondTrial` |
@@ -677,6 +706,10 @@ Warnings that do not end the run: `nondeterministic_outputs`
 | ONNX Runtime cannot be loaded | loader kind | 4 | `Doctor.MissingDllIsReported`, `Doctor.WrongDllVersionIsReported`, `Doctor.CorruptDllIsReported`, ... |
 | An ONNX Runtime/QNN module is loaded from outside the bundle | `module_outside_bundle` | 4 | not triggerable (the loader refuses a foreign `onnxruntime.dll` first) |
 | EP devices cannot be enumerated | `ep_enumeration_failed` | 3 | not triggerable |
+| ARM64 build without `onnxruntime_providers_qnn.dll` next to the executable (x64 builds: reported as `not bundled`, exit 0) | `qnn_ep_not_bundled` | 4 | `Doctor.MissingQnnEpFailsOnlyBuildsThatBundleIt` |
+| ONNX Runtime refuses to register the QNN EP library (not an EP library, wrong architecture, damaged) | `ep_registration_failed` | 4 | `Doctor.QnnEpThatIsNotAnEpLibraryIsReported`, `EpLibraryRegistration.ADllThatIsNotAnEpLibraryIsALoadFailure` |
+| After registering the QNN EP, an ONNX Runtime/QNN module is loaded from outside the bundle (the registration is undone) | `module_outside_bundle` | 4 | `QnnEpRegistration.AForeignQnnModuleFailsTheRegistration` |
+| No QNN EP device, no QNN device of type NPU, more than one QNN NPU | warning `no_qnn_ep_devices`, `no_npu_device`, `multiple_npu_devices` (the report names the reason, the device list shows what was enumerated) | 0 | `Doctor.ReportsTheQnnExecutionProviderAndTheNpuChoice`, `NpuSelection.*` |
 | Battery, battery saver, load over 10%, unknown power mode, emulation | warning only, printed once in the report (not on stderr) | 0 | `DoctorWarnings.*`, `Doctor.HappyPathReportsBundledOnnxRuntime` |
 | Ctrl+C or Ctrl+Break | none | 130 | same handler mode as the `ort_probe` test |
 
@@ -691,7 +724,12 @@ Warnings that do not end the run: `nondeterministic_outputs`
 | ONNX Runtime cannot be loaded | loader kind | 4 | `OrtProbe.LoadFailureExits4` |
 | `onnxruntime.dll` not from the exe directory; an ORT/QNN module loaded from elsewhere | `foreign_module_loaded`; `module_outside_bundle` | 4 | not triggerable for the probe (the loader check is tested with `PreloadHelper.*`) |
 | `--target npu` in a build without the QNN execution provider (x64) | `qnn_ep_not_bundled` | 4 | `OrtProbe.WithoutTheQnnEpOnlyTheCpuTargetWorks` |
-| Output comparison or device selection fails | `device_selection_failed`, check output | 1 | manual (NPU) |
+| ONNX Runtime refuses to register the bundled QNN EP library | `ep_registration_failed` | 4 | `OrtProbe.QnnEpThatIsNotAnEpLibraryExits4` |
+| After registering the QNN EP, an ONNX Runtime/QNN module is loaded from outside the bundle | `module_outside_bundle` | 4 | `QnnEpRegistration.AForeignQnnModuleFailsTheRegistration` (same check, in process) |
+| `--target npu`: the QNN EP reports no device | `no_qnn_ep_devices` | 3 | `OrtProbe.NpuTargetWithoutASingleNpuExits3` (runs only on a machine without a QNN NPU, e.g. the ARM64 CI runner), `NpuSelection.NoDevicesAtAll`, `NpuSelection.CpuOnlyMeansNoQnnDevices` |
+| `--target npu`: the QNN EP reports devices, none of type NPU | `no_npu_device` | 3 | `NpuSelection.GpuOnlyMeansNoNpu`, `NpuSelection.NpuOfAnotherEpIsNotSelected` (and the probe test above where it applies) |
+| `--target npu`: the QNN EP reports more than one NPU | `multiple_npu_devices` | 3 | `NpuSelection.TwoNpusAreRefused` |
+| Output comparison fails | check output | 1 | manual (NPU) |
 | ONNX Runtime error, e.g. strict mode refusing a session | `ort_runtime_error` with the ORT code | 3 | manual (`tools/qnn_rejection_check.py`, NPU) |
 | Ctrl+C or Ctrl+Break | none | 130 | `ExitPaths.OrtProbeCtrlBreakExits130WithoutWriting` |
 | A crash | `internal_error` | 1 | same handler as `ExitPaths.UnhandledExceptionIsReportedAndExits1` |

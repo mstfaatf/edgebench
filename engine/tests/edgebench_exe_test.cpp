@@ -13,11 +13,14 @@
 
 #include "edgebench/cli.hpp"
 #include "edgebench/exit_codes.hpp"
+#include "edgebench/npu_selection.hpp"
 #include "edgebench/ort_loader.hpp"
+#include "edgebench/qnn_ep.hpp"
 #include "edgebench/sha256.hpp"
 #include "edgebench/system_info.hpp"
 #include "edgebench/version.hpp"
 #include "process_util.hpp"
+#include "test_runtime.hpp"
 #include "validator.hpp"
 
 namespace fs = std::filesystem;
@@ -232,6 +235,114 @@ TEST(Doctor, CorruptDllIsReported) {
         run_process(iso.exe, {L"doctor", L"--load-sample-ms", L"0"}, iso.dir.path());
     expect_doctor_load_failure(r, "load_failed");
     EXPECT_TRUE(contains(r.err, "LoadLibraryExW(")) << describe(r);
+}
+
+// --------------------------------------------------------------------------- doctor: QNN EP
+
+namespace {
+
+// A copy of an executable with the ONNX Runtime DLLs but without the QNN EP, in a
+// fresh temporary directory; add_qnn_ep_file() puts something in the plugin's place.
+struct CpuOnlyBundle {
+    TempDir dir;
+    fs::path exe;
+    explicit CpuOnlyBundle(const fs::path& built) {
+        for (const fs::path name : {built.filename(), fs::path(L"onnxruntime.dll"),
+                                    fs::path(L"onnxruntime_providers_shared.dll")})
+            fs::copy_file(built.parent_path() / name, dir.path() / name);
+        exe = dir.path() / built.filename();
+    }
+    void add_qnn_ep_file(const fs::path& source) const {
+        fs::copy_file(source, dir.path() / "onnxruntime_providers_qnn.dll");
+    }
+};
+
+}  // namespace
+
+TEST(Doctor, ReportsTheQnnExecutionProviderAndTheNpuChoice) {
+    const ProcessResult r =
+        run_process(kEdgebenchExe, {L"doctor", L"--json", L"--load-sample-ms", L"0"},
+                    kEdgebenchExe.parent_path());
+    expect_no_crash(r);
+    ASSERT_EQ(r.exit_code, 0u) << describe(r);
+    const json j = json::parse(r.out);
+    const json& q = j.at("qnn_ep");
+    EXPECT_EQ(q.at("library_path").get<std::string>(),
+              eb::path_to_utf8(kEdgebenchExe.parent_path() / "onnxruntime_providers_qnn.dll"));
+    EXPECT_EQ(q.at("in_build"), eb::qnn_ep_in_build());
+    if (!eb::qnn_ep_in_build()) {
+        EXPECT_EQ(q.at("registration"), "not_bundled");
+        EXPECT_TRUE(q.at("npu_selection").is_null());
+        return;
+    }
+    EXPECT_EQ(q.at("bundled"), true);
+    ASSERT_EQ(q.at("registration"), "ok") << q.dump(2);
+    EXPECT_TRUE(q.at("error_kind").is_null());
+    // The plugin is listed among the loaded modules, inside the bundle.
+    bool plugin_listed = false;
+    for (const json& m : j.at("runtime").at("loaded_modules")) {
+        EXPECT_TRUE(m.at("inside_bundle").get<bool>()) << m.dump();
+        plugin_listed |= m.at("name") == "onnxruntime_providers_qnn.dll";
+    }
+    EXPECT_TRUE(plugin_listed) << j.at("runtime").at("loaded_modules").dump();
+    // Either an NPU is chosen, or the reason is a warning (not a problem).
+    const json& npu = q.at("npu_selection");
+    ASSERT_TRUE(npu.is_object()) << q.dump(2);
+    if (npu.at("status") == "selected") {
+        EXPECT_EQ(npu.at("candidate_count"), 1);
+        EXPECT_EQ(npu.at("device").at("ep_name"), "QNNExecutionProvider");
+        EXPECT_EQ(npu.at("device").at("device_type"), "NPU");
+        const json& listed = j.at("runtime").at("ep_devices").at(npu.at("device_index").get<int>());
+        EXPECT_EQ(listed, npu.at("device"));
+    } else {
+        bool warned = false;
+        for (const json& w : j.at("warnings"))
+            warned |= w.at("code") == npu.at("failure");
+        EXPECT_TRUE(warned) << j.at("warnings").dump();
+        EXPECT_TRUE(j.at("problems").empty()) << j.at("problems").dump();
+    }
+
+    const ProcessResult text = run_process(kEdgebenchExe, {L"doctor", L"--load-sample-ms", L"0"},
+                                           kEdgebenchExe.parent_path());
+    EXPECT_TRUE(contains(text.out, "\nQNN execution provider\n")) << text.out;
+    EXPECT_TRUE(contains(text.out, "registration       ok (as QNNExecutionProvider)")) << text.out;
+    EXPECT_TRUE(contains(text.out, "NPU for runs")) << text.out;
+    EXPECT_TRUE(contains(text.out, "EP devices (CPU EP and QNN EP)")) << text.out;
+}
+
+TEST(Doctor, MissingQnnEpFailsOnlyBuildsThatBundleIt) {
+    const CpuOnlyBundle bundle(kEdgebenchExe);
+    const ProcessResult r =
+        run_process(bundle.exe, {L"doctor", L"--load-sample-ms", L"0"}, bundle.dir.path());
+    expect_no_crash(r);
+    if (!eb::qnn_ep_in_build()) {
+        EXPECT_EQ(r.exit_code, 0u) << describe(r);
+        EXPECT_TRUE(contains(r.out, "not bundled (CPU-only build)")) << describe(r);
+        return;
+    }
+    EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
+    EXPECT_TRUE(contains(r.err, "error: [qnn_ep_not_bundled] the QNN execution provider "))
+        << describe(r);
+    EXPECT_TRUE(contains(r.err, "hint: ")) << describe(r);
+    EXPECT_TRUE(contains(r.out, "registration       FAILED (qnn_ep_not_bundled)")) << describe(r);
+    EXPECT_TRUE(contains(r.out, "Result: FAILED (exit 4, ort_load_failure)")) << describe(r);
+    // The CPU EP is still enumerated.
+    EXPECT_TRUE(contains(r.out, "CPUExecutionProvider")) << describe(r);
+}
+
+TEST(Doctor, QnnEpThatIsNotAnEpLibraryIsReported) {
+    const CpuOnlyBundle bundle(kEdgebenchExe);
+    bundle.add_qnn_ep_file(kSystemNonOrtDll);
+    const ProcessResult r =
+        run_process(bundle.exe, {L"doctor", L"--load-sample-ms", L"0"}, bundle.dir.path());
+    expect_no_crash(r);
+    EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
+    EXPECT_TRUE(contains(r.err,
+                         "error: [ep_registration_failed] registering the execution "
+                         "provider library "))
+        << describe(r);
+    EXPECT_TRUE(contains(r.out, "registration       FAILED (ep_registration_failed)"))
+        << describe(r);
 }
 
 // --------------------------------------------------------------------------- CLI
@@ -550,7 +661,69 @@ TEST(OrtProbe, WithoutTheQnnEpOnlyTheCpuTargetWorks) {
     EXPECT_TRUE(contains(npu.err, "hint: The QNN execution provider is bundled with ARM64 builds"))
         << describe(npu);
 }
+
+TEST(OrtProbe, QnnEpThatIsNotAnEpLibraryExits4) {
+    const CpuOnlyBundle bundle(fs::path(EDGEBENCH_ORT_PROBE_PATH).make_preferred());
+    bundle.add_qnn_ep_file(kSystemNonOrtDll);
+    const ProcessResult r = run_process(
+        bundle.exe,
+        {L"--model", (kFixtureDir / "fixed_float32.onnx").native(), L"--target", L"cpu"},
+        bundle.dir.path());
+    expect_no_crash(r);
+    EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
+    EXPECT_TRUE(contains(r.err, "error: [ep_registration_failed] ")) << describe(r);
+}
+
+// Device selection failures exit with 3 and list the devices. Only reachable on a
+// machine whose QNN EP offers no single NPU (e.g. an ARM64 CI runner); elsewhere
+// the selection rule is covered by NpuSelection.* on synthetic device lists.
+TEST(OrtProbe, NpuTargetWithoutASingleNpuExits3) {
+    if (!eb::qnn_ep_in_build())
+        GTEST_SKIP() << "this build does not include the QNN execution provider";
+    const eb::test::QnnNpuProbe probe = eb::test::probe_qnn_npu();
+    ASSERT_FALSE(probe.registration_error) << probe.registration_error->message;
+    ASSERT_TRUE(probe.selection);
+    if (probe.selection->ok()) {
+        GTEST_SKIP() << "this machine has exactly one QNN NPU ("
+                     << eb::describe_device(probe.devices[*probe.selection->index]) << ")";
+    }
+    const std::string kind(eb::to_string(*probe.selection->failure));
+    const ProcessResult r = run_process(
+        fs::path(EDGEBENCH_ORT_PROBE_PATH).make_preferred(),
+        {L"--model", (kFixtureDir / "fixed_float32.onnx").native(), L"--target", L"npu"},
+        kEdgebenchExe.parent_path());
+    expect_no_crash(r);
+    EXPECT_EQ(r.exit_code, code(ExitCode::ort_runtime_error)) << describe(r);
+    EXPECT_TRUE(contains(r.err, "error: [" + kind + "] ")) << describe(r);
+    EXPECT_TRUE(contains(r.err, "enumerated devices: ")) << describe(r);
+    EXPECT_TRUE(contains(r.err, "hint: ")) << describe(r);
+}
 #endif
+
+// --------------------------------------------------------------------------- doctor on the NPU
+
+TEST(DoctorNpu, SelectsTheQnnNpu) {
+    const eb::test::QnnNpuProbe probe = eb::test::probe_qnn_npu();
+    if (const std::optional<std::string> reason = eb::test::npu_skip_reason(probe))
+        GTEST_SKIP() << *reason;
+    const ProcessResult r =
+        run_process(kEdgebenchExe, {L"doctor", L"--json", L"--load-sample-ms", L"0"},
+                    kEdgebenchExe.parent_path());
+    expect_no_crash(r);
+    ASSERT_EQ(r.exit_code, 0u) << describe(r);
+    const json j = json::parse(r.out);
+    const json& npu = j.at("qnn_ep").at("npu_selection");
+    ASSERT_TRUE(npu.is_object()) << j.at("qnn_ep").dump(2);
+    ASSERT_EQ(npu.at("status"), "selected") << npu.dump(2);
+    EXPECT_EQ(npu.at("device").at("device_type"), "NPU");
+    EXPECT_EQ(npu.at("device").at("ep_name"), "QNNExecutionProvider");
+    EXPECT_EQ(npu.at("device").at("device_id").get<std::uint32_t>(),
+              probe.devices[*probe.selection->index].device_id);
+    for (const json& w : j.at("warnings")) {
+        for (const char* kind : {"no_qnn_ep_devices", "no_npu_device", "multiple_npu_devices"})
+            EXPECT_NE(w.at("code"), kind) << w.dump();
+    }
+}
 
 // --------------------------------------------------------------------------- preload
 

@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <cstring>
 
 namespace fs = std::filesystem;
 
@@ -83,21 +82,6 @@ void WriteDevices(JsonWriter& json, const std::vector<Ort::ConstEpDevice>& devic
         json.EndObject();
     }
     json.EndArray();
-}
-
-Ort::ConstEpDevice SelectQnnNpu(const std::vector<Ort::ConstEpDevice>& devices) {
-    std::vector<Ort::ConstEpDevice> npus;
-    for (const Ort::ConstEpDevice& d : devices) {
-        if (std::strcmp(d.EpName(), kQnnEpName) == 0 &&
-            d.Device().Type() == OrtHardwareDeviceType_NPU) {
-            npus.push_back(d);
-        }
-    }
-    if (npus.size() != 1) {
-        throw DeviceSelectionError("expected exactly one " + std::string(kQnnEpName) +
-                                   " device of type NPU, found " + std::to_string(npus.size()));
-    }
-    return npus.front();
 }
 
 // --------------------------------------------------------------------------- sessions

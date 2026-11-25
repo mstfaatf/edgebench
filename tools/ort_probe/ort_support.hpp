@@ -1,6 +1,8 @@
-// ONNX Runtime + QNN plugin EP plumbing for ort_probe: EP device selection,
-// session options, and a runner for plain Run / IoBinding. Loading ONNX Runtime
-// and checking the loaded DLLs is done by edgebench_core (edgebench/ort_loader.hpp).
+// ONNX Runtime + QNN plugin EP plumbing for ort_probe: device listing, session
+// options, and a runner for plain Run / IoBinding. Loading ONNX Runtime, registering
+// the QNN EP library, checking the loaded DLLs and selecting the NPU device are done
+// by edgebench_core (ort_loader.hpp, ep_library.hpp, bundle_modules.hpp,
+// npu_selection.hpp).
 #pragma once
 
 #include <onnxruntime_cxx_api.h>
@@ -16,22 +18,13 @@
 
 namespace probe {
 
-inline constexpr const char* kQnnEpName = "QNNExecutionProvider";
-inline constexpr const char* kQnnEpLibrary = "onnxruntime_providers_qnn.dll";
 inline constexpr const char* kQnnHtpBackend = "QnnHtp.dll";
-
-// Thrown when the device list does not contain exactly one QNN NPU device.
-struct DeviceSelectionError : std::runtime_error {
-    using std::runtime_error::runtime_error;
-};
 
 // --------------------------------------------------------------------------- devices
 
 const char* DeviceTypeName(OrtHardwareDeviceType type);
 void PrintDevices(const std::vector<Ort::ConstEpDevice>& devices);
 void WriteDevices(JsonWriter& json, const std::vector<Ort::ConstEpDevice>& devices);
-// The single QNN EP device whose hardware type is NPU; throws DeviceSelectionError.
-Ort::ConstEpDevice SelectQnnNpu(const std::vector<Ort::ConstEpDevice>& devices);
 
 // --------------------------------------------------------------------------- sessions
 

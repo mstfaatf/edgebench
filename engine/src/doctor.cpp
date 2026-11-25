@@ -6,8 +6,11 @@
 #include <cstdio>
 #include <exception>
 #include <sstream>
+#include <system_error>
 
+#include "edgebench/bundle_modules.hpp"
 #include "edgebench/diagnostics.hpp"
+#include "edgebench/qnn_ep.hpp"
 #include "edgebench/runtime.hpp"
 
 namespace edgebench {
@@ -49,7 +52,80 @@ void row(std::ostringstream& out, const char* label, const std::string& value) {
     out << buf << value << "\n";
 }
 
+void list_modules(DoctorReport& r) {
+    const BundleModuleCheck check = check_bundle_modules(r.bundle_dir);
+    for (const LoadedModule& m : check.modules) {
+        bool inside = true;
+        for (const LoadedModule& o : check.outside)
+            inside &= o.path != m.path;
+        r.modules.push_back({m, inside});
+        if (!inside) {
+            r.problems.push_back(
+                {"module_outside_bundle",
+                 m.name + " is loaded from " + path_to_utf8(m.path) +
+                     ", outside the bundle directory " + path_to_utf8(r.bundle_dir),
+                 std::string(load_error_hint(OrtLoadError::foreign_module_loaded))});
+        }
+    }
+}
+
+// Registers the bundled QNN EP (when the build has one), enumerates every EP
+// device, and selects the NPU the way NPU runs do.
+void check_qnn_and_devices(DoctorReport& r, Runtime& runtime) {
+    QnnEpCheck& q = r.qnn;
+    if (!q.bundled && !qnn_ep_in_build()) {
+        q.registration = QnnEpCheck::Registration::not_bundled;
+    } else if (Result<EpLibrary*> registered = register_qnn_ep(runtime); registered) {
+        q.registration = QnnEpCheck::Registration::ok;
+    } else {
+        const Error& e = registered.error();
+        q.registration = QnnEpCheck::Registration::failed;
+        q.error_kind = e.kind;
+        q.error_message = e.message;
+        r.problems.push_back({e.kind, e.message, std::string(qnn_ep_hint(e.kind)), e.exit_code});
+    }
+
+    try {
+        r.ep_devices = runtime.ep_devices();
+    } catch (const Ort::Exception& e) {
+        r.problems.push_back({"ep_enumeration_failed", e.what(), "", ExitCode::ort_runtime_error});
+        return;
+    }
+    if (q.registration != QnnEpCheck::Registration::ok)
+        return;
+    for (const EpDeviceInfo& d : *r.ep_devices) {
+        if (d.ep_name == kQnnEpName && d.ep_metadata.contains("version")) {
+            q.ep_version = d.ep_metadata.at("version");
+            break;
+        }
+    }
+    q.npu = select_qnn_npu(*r.ep_devices);
+    if (q.npu->ok()) {
+        q.npu_device = (*r.ep_devices)[*q.npu->index];
+    } else {
+        // CPU runs still work, so this is not a failed check.
+        const NpuSelectionFailure f = *q.npu->failure;
+        r.warnings.push_back({std::string(to_string(f)),
+                              "no device would be selected for NPU runs: " + q.npu->reason,
+                              std::string(hint(f))});
+    }
+}
+
 }  // namespace
+
+std::string_view to_string(QnnEpCheck::Registration registration) {
+    switch (registration) {
+        case QnnEpCheck::Registration::not_attempted:
+            return "not_attempted";
+        case QnnEpCheck::Registration::not_bundled:
+            return "not_bundled";
+        case QnnEpCheck::Registration::ok:
+            return "ok";
+        case QnnEpCheck::Registration::failed:
+            return "failed";
+    }
+    return "unknown";
+}
 
 std::vector<DoctorWarning> system_state_warnings(const SystemInfo& system) {
     std::vector<DoctorWarning> warnings;
@@ -100,48 +176,32 @@ DoctorReport run_doctor(std::chrono::milliseconds load_sample) {
     r.bundle_dir = executable_dir();
 
     r.onnxruntime = load_onnxruntime(r.bundle_dir);
+    r.qnn.library_path = qnn_ep_library_path(r.bundle_dir);
+    std::error_code ec;
+    r.qnn.bundled = std::filesystem::is_regular_file(r.qnn.library_path, ec);
     if (!r.onnxruntime.ok()) {
         r.problems.push_back({std::string(to_string(r.onnxruntime.error_kind)),
                               r.onnxruntime.message,
                               std::string(load_error_hint(r.onnxruntime.error_kind))});
+        list_modules(r);
     } else {
-        try {
-            Result<std::unique_ptr<Runtime>> runtime = Runtime::create(r.onnxruntime);
-            if (!runtime)
-                throw std::runtime_error(runtime.error().message);
-            r.ep_devices = runtime.value()->ep_devices();
-        } catch (const Ort::Exception& e) {
-            r.problems.push_back({"ep_enumeration_failed", e.what(), ""});
-        } catch (const std::exception& e) {
-            r.problems.push_back({"ep_enumeration_failed", e.what(), ""});
+        Result<std::unique_ptr<Runtime>> runtime = Runtime::create(r.onnxruntime);
+        if (!runtime) {
+            const Error& e = runtime.error();
+            r.problems.push_back({e.kind, e.message, "", e.exit_code});
+        } else {
+            check_qnn_and_devices(r, *runtime.value());
         }
+        // While the runtime (and any EP library it registered) is alive, so every
+        // module ONNX Runtime pulled in is listed.
+        list_modules(r);
     }
 
-    // After EP enumeration, so everything ONNX Runtime pulled in is listed.
-    const std::vector<LoadedModule> modules = list_ort_modules();
-    const std::vector<LoadedModule> outside = find_modules_outside(modules, r.bundle_dir);
-    for (const LoadedModule& m : modules) {
-        bool inside = true;
-        for (const LoadedModule& o : outside)
-            inside &= o.path != m.path;
-        r.modules.push_back({m, inside});
-        if (!inside) {
-            r.problems.push_back(
-                {"module_outside_bundle",
-                 m.name + " is loaded from " + path_to_utf8(m.path) +
-                     ", outside the bundle directory " + path_to_utf8(r.bundle_dir),
-                 std::string(load_error_hint(OrtLoadError::foreign_module_loaded))});
-        }
-    }
-
+    // Load failures (exit code 4) take precedence over runtime errors (3).
     r.exit_code = ExitCode::success;
     for (const DoctorProblem& p : r.problems) {
-        if (p.code == "ep_enumeration_failed") {
-            if (r.exit_code == ExitCode::success)
-                r.exit_code = ExitCode::ort_runtime_error;
-        } else {
-            r.exit_code = ExitCode::ort_load_failure;  // loader errors and foreign modules
-        }
+        if (p.exit_code == ExitCode::ort_load_failure || r.exit_code == ExitCode::success)
+            r.exit_code = p.exit_code;
     }
     return r;
 }
@@ -217,6 +277,37 @@ std::string format_text(const DoctorReport& r) {
             row(out, "found version", ort.ort_version);
     }
 
+    out << "\nQNN execution provider\n";
+    const QnnEpCheck& q = r.qnn;
+    row(out, "library",
+        path_to_utf8(q.library_path) + (q.bundled ? std::string() : std::string("  (missing)")));
+    switch (q.registration) {
+        case QnnEpCheck::Registration::not_attempted:
+            row(out, "registration", "(not attempted: ONNX Runtime is not loaded)");
+            break;
+        case QnnEpCheck::Registration::not_bundled:
+            row(out, "registration", "not bundled (CPU-only build)");
+            break;
+        case QnnEpCheck::Registration::ok:
+            row(out, "registration", "ok (as " + std::string(kQnnEpName) + ")");
+            break;
+        case QnnEpCheck::Registration::failed:
+            row(out, "registration", "FAILED (" + q.error_kind.value_or("unknown") + ")");
+            break;
+    }
+    if (q.ep_version)
+        row(out, "version", *q.ep_version);
+    if (q.npu_device) {
+        row(out, "NPU for runs",
+            describe_device(*q.npu_device) + ", " + std::to_string(q.npu->candidate_count) +
+                " candidate");
+    } else if (q.npu) {
+        row(out, "NPU for runs",
+            "none (" + std::string(to_string(*q.npu->failure)) + "): " + q.npu->reason);
+    } else {
+        row(out, "NPU for runs", "none (the QNN execution provider is not registered)");
+    }
+
     out << "\nLoaded ONNX Runtime / QNN modules (bundle: " << path_to_utf8(r.bundle_dir) << ")\n";
     if (r.modules.empty())
         out << "  (none)\n";
@@ -225,17 +316,23 @@ std::string format_text(const DoctorReport& r) {
             << (m.inside_bundle ? "" : "   <-- OUTSIDE the bundle directory") << "\n";
     }
 
-    out << "\nEP devices (no plugin EP registered)\n";
+    out << "\nEP devices ("
+        << (q.registration == QnnEpCheck::Registration::ok ? "CPU EP and QNN EP"
+                                                           : "no plugin EP registered")
+        << ")\n";
     if (!r.ep_devices) {
         out << "  (not available: ONNX Runtime is not loaded)\n";
     } else if (r.ep_devices->empty()) {
         out << "  (none)\n";
     } else {
-        for (const EpDeviceInfo& d : *r.ep_devices) {
+        for (std::size_t i = 0; i < r.ep_devices->size(); ++i) {
+            const EpDeviceInfo& d = (*r.ep_devices)[i];
+            const bool selected = q.npu && q.npu->index == i;
             out << "  " << d.ep_name << "  type " << d.device_type << "  ep vendor "
                 << (d.ep_vendor.empty() ? "(unset)" : d.ep_vendor) << "  vendor "
                 << (d.vendor.empty() ? "(unset)" : d.vendor) << "  vendor_id " << hex(d.vendor_id)
-                << "  device_id " << hex(d.device_id) << "\n";
+                << "  device_id " << hex(d.device_id)
+                << (selected ? "   <-- selected for NPU runs" : "") << "\n";
             out << "      device metadata: {" << join(d.metadata) << "}\n";
             out << "      ep metadata:     {" << join(d.ep_metadata) << "}\n";
         }
@@ -274,6 +371,28 @@ nlohmann::ordered_json to_json(const DoctorReport& r) {
     for (const DoctorProblem& p : r.problems)
         problems.push_back({{"code", p.code}, {"message", p.message}, {"hint", p.hint}});
 
+    const QnnEpCheck& q = r.qnn;
+    json npu = nullptr;
+    if (q.npu) {
+        npu = {{"status", q.npu->ok() ? "selected" : "none"},
+               {"selection", "by_device_type"},
+               {"candidate_count", q.npu->candidate_count},
+               {"device_index", q.npu->index ? json(*q.npu->index) : json(nullptr)},
+               {"device", q.npu_device ? to_json(*q.npu_device) : json(nullptr)},
+               {"failure", q.npu->failure ? json(to_string(*q.npu->failure)) : json(nullptr)},
+               {"message", q.npu->ok() ? json(nullptr) : json(q.npu->message)}};
+    }
+    const json qnn_ep = {
+        {"library_path", path_to_utf8(q.library_path)},
+        {"in_build", qnn_ep_in_build()},
+        {"bundled", q.bundled},
+        {"registration", to_string(q.registration)},
+        {"error_kind", q.error_kind ? json(*q.error_kind) : json(nullptr)},
+        {"message", q.error_kind ? json(q.error_message) : json(nullptr)},
+        {"ep_version", q.ep_version ? json(*q.ep_version) : json(nullptr)},
+        {"npu_selection", npu},
+    };
+
     return {
         {"tool",
          {{"name", "edgebench"},
@@ -302,6 +421,7 @@ nlohmann::ordered_json to_json(const DoctorReport& r) {
                                    : json(nullptr)},
           {"loaded_modules", modules},
           {"ep_devices", devices}}},
+        {"qnn_ep", qnn_ep},
         {"warnings",
          [&r] {
              json warnings = json::array();

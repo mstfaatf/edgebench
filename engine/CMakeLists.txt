@@ -21,6 +21,7 @@ add_custom_target(edgebench_build_info
 
 add_library(edgebench_core STATIC
   src/benchmark.cpp
+  src/bundle_modules.cpp
   src/cli.cpp
   src/cpu_provider.cpp
   src/crash_handler.cpp
@@ -28,15 +29,18 @@ add_library(edgebench_core STATIC
   src/doctor.cpp
   src/dry_run.cpp
   src/ep_devices.cpp
+  src/ep_library.cpp
   src/exit_codes.cpp
   src/input_fill.cpp
   src/interrupt.cpp
   src/model_info.cpp
   src/module_paths.cpp
+  src/npu_selection.cpp
   src/onnx_inspect.cpp
   src/ort_bench_session.cpp
   src/ort_loader.cpp
   src/placement.cpp
+  src/qnn_ep.cpp
   src/result.cpp
   src/result_files.cpp
   src/result_json.cpp
@@ -102,6 +106,7 @@ if(EDGEBENCH_BUILD_TESTS)
     tests/exit_codes_test.cpp
     tests/interrupt_test.cpp
     tests/module_paths_test.cpp
+    tests/npu_selection_test.cpp
     tests/result_files_test.cpp
     tests/run_config_test.cpp
     tests/system_state_test.cpp
@@ -135,6 +140,7 @@ if(EDGEBENCH_BUILD_TESTS)
     tests/ort_loader_test.cpp
     tests/edgebench_exe_test.cpp
     tests/provider_test.cpp
+    tests/qnn_ep_test.cpp
     tests/reference_models_test.cpp
     tests/test_runtime.cpp
     tests/process_util.cpp

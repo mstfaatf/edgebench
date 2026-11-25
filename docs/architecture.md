@@ -25,6 +25,45 @@ The Runtime installs a logging callback: warnings and errors go to stderr, and a
 `Runtime::LogCapture` collects every message (including verbose ones) while it
 is alive. Node placement uses this to read ONNX Runtime's "Node placements" log.
 
+The Runtime also owns the execution-provider plugin libraries registered with
+its environment (`Runtime::register_ep_library()`, `ep_library.hpp`). A plugin
+library is registered by absolute path only and is unregistered before the
+environment is released. Every session on one of its devices is meant to hold
+an `EpLibrary::Lease`; unregistering refuses while a lease is held, so a library
+is never pulled from under a live session, on error paths and after an
+interrupt included (the Runtime is released last, after every session).
+
+### The QNN execution provider and the NPU device
+
+`register_qnn_ep()` (`qnn_ep.hpp`) registers the bundled
+`onnxruntime_providers_qnn.dll` (next to `onnxruntime.dll`) under
+`QNNExecutionProvider` and then repeats the bundle-module check
+(`bundle_modules.hpp`): registering loads the plugin DLL, and a module from
+outside the bundle undoes the registration and fails with
+`module_outside_bundle` (exit code 4). A missing plugin is `qnn_ep_not_bundled`
+and a refused one `ep_registration_failed`, both exit code 4. The QNN backend
+DLLs (`QnnHtp.dll` and the rest) are loaded only by NPU sessions, so the module
+check runs again after each of those.
+
+The devices are read into plain `EpDeviceInfo` structs (`ep_devices.hpp`: EP
+name and vendor, hardware type, vendor, vendor and device IDs, hardware and EP
+metadata as reported). `select_qnn_npu()` (`npu_selection.hpp`) is a pure
+function over that list: the single device whose EP is `QNNExecutionProvider`
+and whose hardware type is `NPU`. It returns the device's index, or one of
+`no_qnn_ep_devices`, `no_npu_device` and `multiple_npu_devices` with a message
+that lists every enumerated device; nothing in it is specific to one machine.
+`ep_device_handle()` turns the index back into the `Ort::ConstEpDevice` a
+session is attached to, after checking that the device list has not changed.
+
+The QNN EP enumerates its NPU and GPU devices from the hardware, not from its
+backend libraries: the devices are listed even when `QnnHtp.dll` is missing. A
+selected NPU therefore says nothing about whether the HTP backend can be loaded;
+that is only known when a session is created.
+
+Device-selection failures are exit code 3 (`ort_runtime_error`), like the CPU
+provider's: ONNX Runtime and the plugin loaded correctly (that would be 4), but
+the runtime offers no single usable device for the request.
+
 ## Provider
 
 `Provider` (`provider.hpp`) is one execution-provider configuration:

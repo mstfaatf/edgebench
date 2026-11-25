@@ -23,10 +23,51 @@ Result<std::unique_ptr<Runtime>> Runtime::create(const OrtLoadResult& load) {
 Runtime::Runtime(const OrtLoadResult& load)
     : load_(load), env_(ORT_LOGGING_LEVEL_WARNING, "edgebench", &Runtime::log_callback, this) {}
 
-Runtime::~Runtime() = default;
+Runtime::~Runtime() {
+    // Most recently registered first; each EpLibrary unregisters itself.
+    while (!ep_libraries_.empty())
+        ep_libraries_.pop_back();
+}
 
 std::vector<EpDeviceInfo> Runtime::ep_devices() {
     return list_ep_devices(env_);
+}
+
+Result<EpLibrary*> Runtime::register_ep_library(std::string registration_name,
+                                                const std::filesystem::path& path) {
+    if (EpLibrary* existing = ep_library(registration_name)) {
+        if (is_same_path(existing->path().native(), path.native()))
+            return existing;
+        return Error{ExitCode::internal_error, "ep_library_conflict",
+                     registration_name + " is already registered from " +
+                         path_to_utf8(existing->path()) + ", not " + path_to_utf8(path)};
+    }
+    Result<std::unique_ptr<EpLibrary>> library =
+        EpLibrary::register_library(env_, std::move(registration_name), path);
+    if (!library)
+        return library.error();
+    ep_libraries_.push_back(std::move(library).value());
+    return ep_libraries_.back().get();
+}
+
+EpLibrary* Runtime::ep_library(std::string_view registration_name) {
+    for (const std::unique_ptr<EpLibrary>& library : ep_libraries_) {
+        if (library->registration_name() == registration_name)
+            return library.get();
+    }
+    return nullptr;
+}
+
+Result<void> Runtime::unregister_ep_library(std::string_view registration_name) {
+    for (auto it = ep_libraries_.begin(); it != ep_libraries_.end(); ++it) {
+        if ((*it)->registration_name() != registration_name)
+            continue;
+        if (Result<void> r = (*it)->unregister(); !r)
+            return r;
+        ep_libraries_.erase(it);
+        return {};
+    }
+    return {};
 }
 
 void ORT_API_CALL Runtime::log_callback(void* param, OrtLoggingLevel severity, const char*,

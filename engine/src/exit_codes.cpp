@@ -33,7 +33,8 @@ std::string_view describe(ExitCode code) noexcept {
         case ExitCode::usage_error:
             return "Usage error: bad arguments, invalid values, or model file not found";
         case ExitCode::ort_runtime_error:
-            return "ONNX Runtime error: session creation or inference failed";
+            return "ONNX Runtime error: no usable EP device, or session creation or inference "
+                   "failed";
         case ExitCode::ort_load_failure:
             return "ONNX Runtime could not be loaded, or a loaded ONNX Runtime/QNN DLL is not the "
                    "bundled one";

@@ -495,9 +495,9 @@ select the tests it can run:
 | Label | Needs | Tests |
 |---|---|---|
 | `unit` | nothing beyond the build: no ONNX Runtime DLL | `edgebench_tests`, `ort_probe_tests` |
-| `ort` | the bundled ONNX Runtime for the build's architecture (x64 or ARM64) and the committed fixture models in `engine/tests/fixtures/models/` | `edgebench_bundle_tests` (loader, `doctor`, `run`, `ort_probe.exe`, exit paths, missing/wrong/damaged `onnxruntime.dll`) |
+| `ort` | the bundled ONNX Runtime for the build's architecture (x64 or ARM64) and the committed fixture models in `engine/tests/fixtures/models/` | `edgebench_bundle_tests` (loader, `doctor`, `run`, `ort_probe.exe`, exit paths, missing/wrong/damaged `onnxruntime.dll`, registering the QNN EP library without using a device) |
 | `models` | additionally the exported models (`models/`) or reference data (`data/ort_probe_reference/`); see [Preparing data and models](#preparing-data-and-models) | `edgebench_bundle_tests` suites ending in `Models`; they skip when the files are missing |
-| `npu` | the QNN execution provider, its backend and an NPU (ARM64 Snapdragon only) | `edgebench_bundle_tests` suites ending in `Npu` (none yet) |
+| `npu` | the QNN execution provider, its backend and an NPU (ARM64 Snapdragon only) | `edgebench_bundle_tests` suites ending in `Npu` (`QnnEpNpu`, `DoctorNpu`). They skip, with the reason, in x64 builds and on machines without any Qualcomm hardware; on a Snapdragon machine whose NPU cannot be selected they fail |
 | `schema` | the Python environment (`EDGEBENCH_PYTHON`, default `.venv`) | `results_schema_tests` (the validator suite through pytest) |
 
 In the ONNX Runtime test program the label follows the test suite name (see
@@ -628,10 +628,13 @@ To compare C++ with Python on identical inputs, write reference tensors first
 ```
 
 The probe uses edgebench's [exit codes](cli.md#exit-codes): 0 if everything
-passed, 1 if a check failed (output comparison, device selection), 2 on a usage
-error, 3 on an ONNX Runtime error (the error code and message are printed), and
-4 if ONNX Runtime could not be loaded or a loaded ONNX Runtime/QNN DLL is not the
-bundled one, and 6 if the `--json` file could not be written. `--json` never
+passed, 1 if the output comparison failed, 2 on a usage error, 3 on an ONNX
+Runtime error (the error code and message are printed) or when `--target npu`
+finds no single QNN NPU device (`no_qnn_ep_devices`, `no_npu_device`,
+`multiple_npu_devices`, with the device list), 4 if ONNX Runtime or the QNN
+execution provider could not be loaded or a loaded ONNX Runtime/QNN DLL is not
+the bundled one, and 6 if the `--json` file could not be written. It registers
+the QNN EP and selects the NPU with the same code as `edgebench`. `--json` never
 overwrites: if the path already exists, the probe exits with 6 before doing
 anything. It loads ONNX Runtime the same way as
 `edgebench.exe` (see [How the executables find ONNX Runtime](#how-the-executables-find-onnx-runtime))
@@ -656,7 +659,7 @@ the `unit` and `ort` labels only, never `models` or `npu`.
 |---|---|---|
 | `python (validator, hygiene)` | `ubuntu-latest`, Python 3.12 | Installs `requirements-ci.txt` (jsonschema and pytest, pinned); runs the validator, hygiene-check, coverage-summary, dataset-manifest, model-registry, model-manifest/recipe, reference-output, accuracy, time-series, autoencoder (source bundle, recipes, lineage), anomaly-detection and documented-numbers tests; checks the numbers quoted in the docs against the published results (`scripts/check_doc_numbers.py`); validates `benchmarks/results/published/accuracy/` (classification and anomaly-detection results) with `scripts/validate_accuracy.py`; validates `docs/examples/` and `benchmarks/results/published/` with `--strict`; runs the hygiene check |
 | `windows-x64` | `windows-latest` | MSVC x64 environment (`scripts/msvc_dev_env.ps1`: `vcvarsall.bat` of the newest Visual Studio, exported to the following steps); fetches the x64 ONNX Runtime; `x64` preset, Release, `/W4 /WX`; `ctest -L "unit\|ort"`; uploads the CTest log on failure |
-| `windows-arm64` | `windows-11-arm` | The same for ARM64 (`arm64-ninja` preset); the QNN files are bundled, but there is no NPU, so no `npu` tests run |
+| `windows-arm64` | `windows-11-arm` | The same for ARM64 (`arm64-ninja` preset). The QNN files are bundled and the QNN EP is registered by the `ort` tests, but the runner has no Qualcomm hardware: the job also runs `ctest -L npu` and fails unless every `npu` test reports itself skipped (the reasons are in the log, the count in the job summary) |
 | `coverage (x64)` | `windows-latest` | x64 Debug build; the `unit` and `ort` tests under [OpenCppCoverage](https://github.com/OpenCppCoverage/OpenCppCoverage) 0.9.9.0 (installer pinned by SHA256), including child processes, filtered to `engine/src`; uploads the HTML and Cobertura report (`coverage-x64` artifact) and prints per-file line coverage in the job summary. Report only, no threshold |
 
 `third_party/` is cached per architecture, keyed by the hash of
