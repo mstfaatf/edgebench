@@ -9,6 +9,7 @@ Tiny ONNX models for the C++ tests (a few hundred bytes each):
 | `int64_input.onnx` | `ids` int64 [1, 4] | `y` float32 [1, 4] | Rejection of non-float32 inputs |
 | `nan_output.onnx` | `x` float32 [1, 4] | `y` float32 [1, 4] | Detection of non-finite outputs (`sqrt(x - 2)` is NaN for inputs in [0, 1)) |
 | `runtime_error.onnx` | `x` float32 [1, 4] | `y` float32 [1, 1] | A failing `Run()`: Gather with an out-of-range index (the session is created) |
+| `npu_unsupported_op.onnx` | `x` float32 [1, 4, 4] | `y` float32 [1] | NPU strict-mode refusal and CPU fallback: Relu -> Det -> Relu, and the QNN execution provider has no Det |
 
 `fixed_float32` and `dynamic_batch` compute `relu(x W + b)` with fixed constants;
 `int64_input` casts its input to float32. Regenerate them (deterministically)

@@ -22,8 +22,9 @@
 // Run with --help for the options. Exit codes are edgebench's (edgebench/exit_codes.hpp,
 // docs/cli.md): 0 ok, 1 an output comparison failed or an unexpected error, 2 usage
 // error, 3 ONNX Runtime error or no single QNN NPU device, 4 ONNX Runtime or the QNN
-// EP could not be loaded or a loaded ORT/QNN DLL is not the bundled one, 6 the --json
-// file already exists or could not be written (it is never overwritten).
+// EP or its HTP backend could not be loaded or a loaded ORT/QNN DLL is not the bundled
+// one, 5 strict mode refused the NPU session, 6 the --json file already exists or could
+// not be written (it is never overwritten).
 
 #include <onnxruntime_cxx_api.h>
 
@@ -49,6 +50,7 @@
 #include "edgebench/npu_selection.hpp"
 #include "edgebench/ort_loader.hpp"
 #include "edgebench/qnn_ep.hpp"
+#include "edgebench/qnn_log.hpp"
 #include "edgebench/result_files.hpp"
 #include "ort_support.hpp"
 #include "probe_util.hpp"
@@ -311,6 +313,14 @@ int RunProbe(const Options& o) {
         npu = handle.value();
         std::printf("  selected: %s / NPU (device_id=0x%x)\n", npu->EpName(),
                     npu->Device().DeviceId());
+        // The QNN EP lists the NPU even without its backend; without QnnHtp.dll a
+        // strict session would be refused as if the model were unsupported.
+        if (edgebench::Result<fs::path> backend = edgebench::check_qnn_htp_backend(exe_dir);
+            !backend) {
+            edgebench::print_error(backend.error(), edgebench::qnn_ep_hint(backend.error().kind));
+            j.EndObject().EndObject();
+            return edgebench::to_int(backend.error().exit_code);
+        }
     }
 
     auto make_session = [&](const fs::path& path, bool generate_context) {
@@ -653,12 +663,22 @@ int main(int argc, char** argv) {
         return RunProbe(o);
     } catch (const Ort::Exception& e) {
         const OrtErrorCode code = e.GetOrtErrorCode();
-        edgebench::print_error("ort_runtime_error",
-                               "ONNX Runtime error " + std::string(OrtErrorCodeName(code)) +
-                                   " (code " + std::to_string(static_cast<int>(code)) +
-                                   "): " + e.what());
+        // The same classification as edgebench's NPU sessions (edgebench/qnn_log.hpp);
+        // the backend files were checked before any session was created.
+        const edgebench::Error error = edgebench::classify_qnn_session_failure(
+            edgebench::ort_error("ort_runtime_error", "creating or running a session", code,
+                                 e.what()),
+            o.target == Target::kNpu && o.strict, {});
+        edgebench::print_error(
+            error.kind,
+            "ONNX Runtime error " + std::string(OrtErrorCodeName(code)) + " (code " +
+                std::to_string(static_cast<int>(code)) + "): " + e.what(),
+            error.kind == "strict_mode_refusal"
+                ? "Strict mode refuses sessions in which any node would run on the CPU; "
+                  "--strict off lets them run there."
+                : "");
         WriteErrorJson(o, OrtErrorCodeName(code), static_cast<int>(code), e.what());
-        return kExitOrtError;
+        return edgebench::to_int(error.exit_code);
     } catch (const std::exception& e) {
         edgebench::print_error("internal_error", e.what());
         WriteErrorJson(o, "std::exception", -1, e.what());

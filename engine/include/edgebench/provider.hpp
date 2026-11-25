@@ -32,6 +32,14 @@ struct SelectedEpDevice {
     int candidate_count = 0;                    // devices that matched; exactly 1 is valid
 };
 
+/// The QNN backend a provider uses (results schema: runtime.qnn).
+struct QnnBackendInfo {
+    std::string backend;                     // "htp"
+    std::string backend_path;                // absolute, as passed in backend_path
+    std::optional<std::string> sdk_version;  // null: not read from the backend
+    std::optional<std::string> backend_build;
+};
+
 /// Everything the results schema records about the provider configuration.
 struct ProviderDescription {
     std::string execution_provider;              // runtime.execution_provider.name
@@ -40,6 +48,7 @@ struct ProviderDescription {
     std::optional<SelectedEpDevice> ep_device;
     std::map<std::string, std::string> ep_options;      // config.ep_options
     std::map<std::string, std::string> session_config;  // config.session_config
+    std::optional<QnnBackendInfo> qnn;                  // null unless the QNN EP is used
 };
 
 class Provider {

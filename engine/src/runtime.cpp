@@ -70,12 +70,33 @@ Result<void> Runtime::unregister_ep_library(std::string_view registration_name) 
     return {};
 }
 
+std::uint64_t Runtime::log_position() {
+    const std::lock_guard<std::mutex> lock(log_mutex_);
+    return logged_warnings_;
+}
+
+std::vector<std::string> Runtime::warnings_since(std::uint64_t position) {
+    const std::lock_guard<std::mutex> lock(log_mutex_);
+    const std::uint64_t kept = warning_history_.size();
+    const std::uint64_t first_kept = logged_warnings_ - kept;
+    const std::uint64_t from = position > first_kept ? position - first_kept : 0;
+    if (from >= kept)
+        return {};
+    return {warning_history_.begin() + static_cast<std::ptrdiff_t>(from), warning_history_.end()};
+}
+
 void ORT_API_CALL Runtime::log_callback(void* param, OrtLoggingLevel severity, const char*,
                                         const char*, const char*, const char* message) {
     auto* self = static_cast<Runtime*>(param);
     const char* text = message ? message : "";
     {
         const std::lock_guard<std::mutex> lock(self->log_mutex_);
+        if (severity >= ORT_LOGGING_LEVEL_WARNING) {
+            ++self->logged_warnings_;
+            self->warning_history_.emplace_back(text);
+            if (self->warning_history_.size() > kLogHistory)
+                self->warning_history_.pop_front();
+        }
         if (self->capture_) {
             self->capture_->emplace_back(text);
             return;  // captured sessions log verbosely; keep stderr clean

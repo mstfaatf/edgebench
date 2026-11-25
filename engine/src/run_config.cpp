@@ -6,6 +6,7 @@
 #include <system_error>
 
 #include "edgebench/model_info.hpp"
+#include "edgebench/npu_options.hpp"
 #include "edgebench/ort_loader.hpp"
 
 namespace fs = std::filesystem;
@@ -67,6 +68,20 @@ std::vector<ConfigError> validate(const RunConfig& c) {
     if (c.constant_value && !std::isfinite(*c.constant_value))
         add("constant-value", "must be a finite number");
 
+    if (c.provider != ProviderKind::npu) {
+        const std::string only_npu = "is only allowed with --provider npu";
+        if (c.npu_fp16)
+            add("npu-fp16", only_npu);
+        if (!c.strict)
+            add("no-strict", only_npu + " (the CPU provider has no fallback to disable)");
+        if (c.htp_performance_mode)
+            add("htp-performance-mode", only_npu);
+    }
+    if (c.htp_performance_mode && !is_htp_performance_mode(*c.htp_performance_mode)) {
+        add("htp-performance-mode", "unsupported mode '" + *c.htp_performance_mode +
+                                        "'; supported modes: " + htp_performance_modes_list());
+    }
+
     if (c.label && c.label->empty())
         add("label", "must not be empty");
     if (c.output_dir.empty())
@@ -115,13 +130,15 @@ std::string_view cli_name(RunBinding binding) {
     return binding == RunBinding::run ? "run" : "iobinding";
 }
 
-std::string_view cli_name(ProviderKind) {
-    return "cpu";
+std::string_view cli_name(ProviderKind provider) {
+    return provider == ProviderKind::npu ? "npu" : "cpu";
 }
 
 std::optional<ProviderKind> parse_provider(std::string_view text) {
     if (text == "cpu")
         return ProviderKind::cpu;
+    if (text == "npu")
+        return ProviderKind::npu;
     return std::nullopt;
 }
 
@@ -154,7 +171,7 @@ std::optional<GraphOptLevel> parse_graph_opt(std::string_view text) {
 }
 
 std::string_view supported_providers() {
-    return "cpu";
+    return "cpu, npu";
 }
 
 std::string_view schema_name(RunBinding binding) {
@@ -179,12 +196,16 @@ std::string_view schema_name(GraphOptLevel level) {
     return "enable_all";
 }
 
-std::string_view execution_provider_name(ProviderKind) {
-    return "CPUExecutionProvider";
+std::string_view execution_provider_name(ProviderKind provider) {
+    return provider == ProviderKind::npu ? "QNNExecutionProvider" : "CPUExecutionProvider";
 }
 
-std::string_view device_type_name(ProviderKind) {
-    return "CPU";
+std::string_view device_type_name(ProviderKind provider) {
+    return provider == ProviderKind::npu ? "NPU" : "CPU";
+}
+
+bool strict_mode(const RunConfig& config) {
+    return config.provider == ProviderKind::npu && config.strict;
 }
 
 nlohmann::ordered_json resolved_config_json(const RunConfig& c) {
@@ -206,7 +227,7 @@ nlohmann::ordered_json resolved_config_json(const RunConfig& c) {
          {{"execution_provider", execution_provider_name(c.provider)},
           {"device_type", device_type_name(c.provider)},
           {"compute_precision", nullptr}}},
-        {"strict_mode", false},
+        {"strict_mode", strict_mode(c)},
         {"batch_size", nullptr},
         {"input", input},
         {"warmup_iterations", c.warmup},
@@ -219,7 +240,12 @@ nlohmann::ordered_json resolved_config_json(const RunConfig& c) {
         {"graph_optimization_level", schema_name(c.graph_opt)},
         {"ep_options", json::object()},
         {"session_config", json::object()},
-        {"ep_context_cache", nullptr},
+        {"ep_context_cache", c.provider == ProviderKind::npu ? json{{"enabled", false},
+                                                                    {"cache_file", nullptr},
+                                                                    {"state", "disabled"},
+                                                                    {"files", json::array()},
+                                                                    {"key", nullptr}}
+                                                             : json(nullptr)},
         {"run_binding", schema_name(c.binding)},
         {"profiling", {{"ort", false}, {"qnn_level", "off"}}},
     };

@@ -15,12 +15,14 @@
 #include <onnxruntime_cxx_api.h>
 
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "edgebench/qnn_log.hpp"
 #include "edgebench/result.hpp"
 
 namespace edgebench {
@@ -33,6 +35,9 @@ struct NodeAssignment {
     /// Results schema execution.verification_method: counts come from ORT's node
     /// placement log, so "node_assignment".
     std::string verification_method = "node_assignment";
+    /// The QNN EP's node validation from the same session log (QNN sessions only;
+    /// results schema: execution.qnn_validation).
+    std::optional<QnnValidation> qnn_validation;
 
     /// True if every node is on `ep` (and there is at least one node).
     bool all_on(std::string_view ep) const;
@@ -50,5 +55,21 @@ std::optional<NodeAssignment> parse_node_placements(const std::vector<std::strin
 /// session options; their log severity is set to verbose here.
 Result<NodeAssignment> record_node_placement(Runtime& runtime, const std::filesystem::path& model,
                                              Ort::SessionOptions& options);
+
+/// The verbose placement session's parsed node placements and every message it logged.
+struct PlacementCapture {
+    NodeAssignment assignment;
+    std::vector<std::string> messages;
+};
+
+/// record_node_placement() that also returns the captured messages. `while_alive`,
+/// if given, runs while the placement session exists (e.g. to check the modules
+/// it loaded); its error fails the call. ONNX Runtime failures creating the
+/// session are session_creation_failed with the ORT error; `messages` of the
+/// failed attempt are then lost, so callers that classify failures read
+/// Runtime::warnings_since() instead.
+Result<PlacementCapture> capture_node_placement(
+    Runtime& runtime, const std::filesystem::path& model, Ort::SessionOptions& options,
+    const std::function<Result<void>()>& while_alive = {});
 
 }  // namespace edgebench

@@ -9,6 +9,7 @@
 
 #include "edgebench/bundle_modules.hpp"
 #include "edgebench/interrupt.hpp"
+#include "edgebench/npu_options.hpp"
 #include "edgebench/run_identity.hpp"
 #include "edgebench/runtime.hpp"
 #include "edgebench/scheduler.hpp"
@@ -221,6 +222,20 @@ Result<void> check_determinism(const BenchmarkResult& result, int trial,
     return {};
 }
 
+// "CPUExecutionProvider 1, QNNExecutionProvider 2"
+std::string describe_placement(const NodeAssignment& p) {
+    std::string out;
+    for (const auto& [ep, n] : p.nodes_by_ep)
+        out += (out.empty() ? "" : ", ") + ep + " " + std::to_string(n);
+    return out;
+}
+
+// Nodes ONNX Runtime places on the QNN EP: each one is a fused partition.
+int qnn_partitions(const NodeAssignment& p) {
+    const auto it = p.nodes_by_ep.find("QNNExecutionProvider");
+    return it == p.nodes_by_ep.end() ? 0 : it->second;
+}
+
 void add_unavailable(BenchmarkResult& r, const char* path, const char* message) {
     r.warnings.push_back({"value_unavailable", message, std::string(path)});
 }
@@ -319,6 +334,21 @@ BenchmarkResult failed_load_result(const RunConfig& config, const OrtLoadResult&
 
 BenchmarkResult run_benchmark(Runtime& runtime, const RunConfig& config, const ProgressFn& progress,
                               const StopHook& hook) {
+    // A model the NPU cannot run in the requested precision is a usage error;
+    // report it before registering the QNN EP and selecting the device.
+    if (config.provider == ProviderKind::npu) {
+        if (Result<OnnxGraphSummary> graph = inspect_onnx_file(config.model); graph) {
+            if (Result<std::optional<std::string>> precision =
+                    requested_compute_precision(config, infer_precision(graph.value()));
+                !precision) {
+                BenchmarkResult r = begin_result(config);
+                if (!r.failure)
+                    set_failure(r, precision.error(), "model_load");
+                finish_result(r);
+                return r;
+            }
+        }
+    }
     Result<std::unique_ptr<Provider>> provider = make_provider(runtime, config);
     if (!provider) {
         BenchmarkResult r = begin_result(config);
@@ -356,6 +386,33 @@ BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunCon
              std::to_string(config.threads) + " intra-op threads requested on a CPU with " +
                  std::to_string(*logical) + " logical processors; threads will compete for cores",
              std::string("/config/intra_op_threads")});
+    }
+    if (r.runtime.provider.qnn)
+        r.timing.session_init.ep_context_state = "cold";  // compiled from the graph, no cache
+    if (!r.failure) {
+        if (!r.graph && config.provider == ProviderKind::npu) {
+            set_failure(r,
+                        Error{ExitCode::usage_error, "invalid_onnx",
+                              "cannot decode " + path_to_utf8(config.model.filename()) +
+                                  ", so its precision, which decides the NPU compute precision, "
+                                  "is unknown"},
+                        "model_load");
+        } else if (r.graph) {
+            Result<std::optional<std::string>> precision =
+                requested_compute_precision(config, r.model.precision);
+            if (!precision) {
+                set_failure(r, precision.error(), "model_load");
+            } else {
+                r.compute_precision = precision.value();
+                r.model.precision_notes = precision_notes(r.model.precision, r.compute_precision);
+            }
+        }
+    }
+    if (config.provider == ProviderKind::npu && !config.strict) {
+        r.warnings.push_back({"strict_mode_off",
+                              "CPU fallback is allowed (--no-strict): nodes the NPU cannot run "
+                              "execute on the CPU, inside the measured time.",
+                              std::string("/config/strict_mode")});
     }
     if (r.failure) {
         finish_result(r);
@@ -452,18 +509,49 @@ BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunCon
             const std::string requested_ep(execution_provider_name(config.provider));
             r.execution.node_assignment = std::move(placement).value();
             r.known.placement = true;
-            r.execution.full_device_execution_verified =
-                r.execution.node_assignment.all_on(requested_ep);
+            const NodeAssignment& p = r.execution.node_assignment;
+            const bool all_on = p.all_on(requested_ep);
+            const std::optional<QnnValidation>& qv = p.qnn_validation;
+            const bool qnn_rejected = qv && (!qv->rejected_nodes.empty() || qv->failed_nodes() > 0);
+            r.execution.full_device_execution_verified = all_on && !qnn_rejected;
             r.execution.verification_details =
-                "Node placement from ONNX Runtime's verbose session log, recorded in a separate "
-                "session with the same options after the timed trials.";
-            if (!r.execution.full_device_execution_verified) {
-                const NodeAssignment& p = r.execution.node_assignment;
-                r.warnings.push_back({"nodes_not_on_requested_ep",
-                                      std::to_string(p.nodes_not_on(requested_ep)) + " of " +
-                                          std::to_string(p.total_nodes) + " nodes are not on " +
-                                          requested_ep,
+                qv ? "Node placement from ONNX Runtime's verbose session log, and node validation "
+                     "from the QNN execution provider's log of the same session, recorded in a "
+                     "separate session with the same options after the timed trials. QNN "
+                     "partitions (fused nodes on QNNExecutionProvider): " +
+                         std::to_string(qnn_partitions(p)) + "."
+                   : "Node placement from ONNX Runtime's verbose session log, recorded in a "
+                     "separate session with the same options after the timed trials.";
+            const std::string not_on = std::to_string(p.nodes_not_on(requested_ep)) + " of " +
+                                       std::to_string(p.total_nodes) + " nodes are not on " +
+                                       requested_ep;
+            if (!all_on && strict_mode(config)) {
+                set_failure(r,
+                            Error{ExitCode::internal_error, "strict_placement_mismatch",
+                                  "strict mode is on, but the placement session reports that " +
+                                      not_on + " (" + describe_placement(p) +
+                                      "); ONNX Runtime should have refused the session"},
+                            "session_creation");
+            } else if (!all_on && config.provider != ProviderKind::cpu) {
+                std::string message = not_on + " and run on the CPU (" + describe_placement(p) +
+                                      "), inside the measured time";
+                if (qv && !qv->rejected_nodes.empty())
+                    message += "; rejected by the QNN EP: " + describe_nodes(qv->rejected_nodes);
+                r.warnings.push_back(
+                    {"cpu_fallback_nodes", message, std::string("/execution/node_assignment")});
+            } else if (!all_on) {
+                r.warnings.push_back({"nodes_not_on_requested_ep", not_on,
                                       std::string("/execution/node_assignment")});
+            } else if (qnn_rejected) {
+                r.warnings.push_back({"qnn_validation_rejected_nodes",
+                                      "every node is placed on " + requested_ep +
+                                          ", but the QNN EP's validation log reports " +
+                                          std::to_string(qv->failed_nodes()) +
+                                          " failed node validations" +
+                                          (qv->rejected_nodes.empty()
+                                               ? std::string()
+                                               : " (" + describe_nodes(qv->rejected_nodes) + ")"),
+                                      std::string("/execution/qnn_validation")});
             }
             // The placement session itself is not interruptible; stop right after it.
             if (should_stop(hook, StopPoint::after_placement, 0, 0))
@@ -612,6 +700,12 @@ void finish_result(BenchmarkResult& r) {
         add_unavailable(r, "/runtime/ep_device/driver_version",
                         "The device driver version could not be determined.");
     }
+    if (r.known.provider && r.runtime.provider.qnn) {
+        add_unavailable(r, "/runtime/qnn/sdk_version",
+                        "The QNN SDK version is not read from the backend.");
+        add_unavailable(r, "/runtime/qnn/backend_build",
+                        "The QNN backend build is not read from the backend.");
+    }
     if (!t.trials.empty() && !t.first_inference_ms) {
         add_unavailable(r, "/timing/first_inference_ms",
                         "There were no warm-up iterations to time separately.");
@@ -636,6 +730,18 @@ std::string format_summary(const BenchmarkResult& r) {
     out << "Provider    " << p.execution_provider << ", " << c.threads
         << " intra-op threads, binding " << schema_name(c.binding) << ", graph optimization "
         << schema_name(c.graph_opt) << "\n";
+    if (p.qnn) {
+        out << "NPU         strict " << (strict_mode(c) ? "on" : "off") << ", compute precision "
+            << r.compute_precision.value_or("-") << " (model " << r.model.precision.stored_precision
+            << ")\n";
+        out << "EP options ";
+        for (const auto& [key, value] : p.ep_options)
+            out << " " << key << "=" << value;
+        out << "\nSession cfg";
+        for (const auto& [key, value] : p.session_config)
+            out << " " << key << "=" << value;
+        out << "\n";
+    }
     out << "Trials      " << c.trials << " x " << c.iterations << " measured iterations ("
         << c.warmup << " warm-up, " << c.cooldown_ms << " ms cooldown), batch size " << r.batch_size
         << "\n";
@@ -731,9 +837,20 @@ std::string format_summary(const BenchmarkResult& r) {
     out << "Placement   " << na.total_nodes << " nodes:";
     for (const auto& [ep, n] : na.nodes_by_ep)
         out << " " << ep << " " << n;
+    if (na.qnn_validation)
+        out << ", QNN partitions " << qnn_partitions(na);
     out << (r.execution.full_device_execution_verified ? " (all on the requested EP)"
                                                        : " (NOT all on the requested EP)")
         << "\n";
+    if (const std::optional<QnnValidation>& qv = na.qnn_validation) {
+        out << "QNN check  ";
+        for (std::size_t i = 0; i < qv->passes.size(); ++i) {
+            out << " pass " << i + 1 << ": " << qv->passes[i].passed_nodes << " passed, "
+                << qv->passes[i].failed_nodes << " failed;";
+        }
+        out << " rejected: "
+            << (qv->rejected_nodes.empty() ? "none" : describe_nodes(qv->rejected_nodes)) << "\n";
+    }
 
     bool printed = false;
     for (const ResultWarning& w : r.warnings) {

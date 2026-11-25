@@ -7,6 +7,7 @@
 // bundle-module check runs again right after it.
 #pragma once
 
+#include <array>
 #include <filesystem>
 #include <string_view>
 
@@ -29,6 +30,27 @@ constexpr bool qnn_ep_in_build() noexcept {
 #endif
 }
 
+/// Files of the QNN HTP (NPU) backend that every NPU session needs and that can be
+/// checked before one is created: the backend itself (passed as backend_path) and
+/// the graph preparation library it loads to compile a graph without an EP
+/// context cache. The QNN EP lists the NPU even when they are missing; without
+/// QnnHtp.dll it claims no node (in strict mode ONNX Runtime then reports a
+/// refusal), without QnnHtpPrepare.dll the session fails with an unrelated
+/// layout error. The architecture-specific stub (QnnHtpV73Stub.dll, ...) depends
+/// on the device and cannot be checked up front; when it is missing the backend
+/// loads the display driver's copies instead, which the bundle-module check
+/// after session creation reports.
+inline constexpr std::array<std::wstring_view, 2> kQnnHtpBackendFiles = {L"QnnHtp.dll",
+                                                                         L"QnnHtpPrepare.dll"};
+
+/// <bundle_dir>/QnnHtp.dll.
+std::filesystem::path qnn_htp_backend_path(const std::filesystem::path& bundle_dir);
+
+/// The absolute path of the bundled HTP backend, if every kQnnHtpBackendFiles
+/// entry exists in `bundle_dir`; otherwise qnn_backend_not_bundled (exit code 4)
+/// naming each missing file.
+Result<std::filesystem::path> check_qnn_htp_backend(const std::filesystem::path& bundle_dir);
+
 /// <bundle_dir>/onnxruntime_providers_qnn.dll.
 std::filesystem::path qnn_ep_library_path(const std::filesystem::path& bundle_dir);
 
@@ -40,8 +62,8 @@ std::filesystem::path qnn_ep_library_path(const std::filesystem::path& bundle_di
 /// module_outside_bundle (the library is unregistered again before returning).
 Result<EpLibrary*> register_qnn_ep(Runtime& runtime);
 
-/// One-line advice for the errors of register_qnn_ep() and select_qnn_npu()
-/// (empty for other kinds).
+/// One-line advice for the errors of register_qnn_ep(), select_qnn_npu(),
+/// check_qnn_htp_backend() and NPU session creation (empty for other kinds).
 std::string_view qnn_ep_hint(std::string_view kind);
 
 }  // namespace edgebench

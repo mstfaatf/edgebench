@@ -29,6 +29,20 @@ TensorInfo tensor_info(const std::string& name, const Ort::TypeInfo& type) {
 
 }  // namespace
 
+GraphOptimizationLevel ort_graph_optimization_level(GraphOptLevel level) {
+    switch (level) {
+        case GraphOptLevel::disable_all:
+            return ORT_DISABLE_ALL;
+        case GraphOptLevel::enable_basic:
+            return ORT_ENABLE_BASIC;
+        case GraphOptLevel::enable_extended:
+            return ORT_ENABLE_EXTENDED;
+        case GraphOptLevel::enable_all:
+            return ORT_ENABLE_ALL;
+    }
+    return ORT_ENABLE_ALL;
+}
+
 std::vector<TensorInfo> session_inputs(const Ort::Session& session) {
     Ort::AllocatorWithDefaultOptions allocator;
     std::vector<TensorInfo> out;

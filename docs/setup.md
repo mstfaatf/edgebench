@@ -497,7 +497,7 @@ select the tests it can run:
 | `unit` | nothing beyond the build: no ONNX Runtime DLL | `edgebench_tests`, `ort_probe_tests` |
 | `ort` | the bundled ONNX Runtime for the build's architecture (x64 or ARM64) and the committed fixture models in `engine/tests/fixtures/models/` | `edgebench_bundle_tests` (loader, `doctor`, `run`, `ort_probe.exe`, exit paths, missing/wrong/damaged `onnxruntime.dll`, registering the QNN EP library without using a device) |
 | `models` | additionally the exported models (`models/`) or reference data (`data/ort_probe_reference/`); see [Preparing data and models](#preparing-data-and-models) | `edgebench_bundle_tests` suites ending in `Models`; they skip when the files are missing |
-| `npu` | the QNN execution provider, its backend and an NPU (ARM64 Snapdragon only) | `edgebench_bundle_tests` suites ending in `Npu` (`QnnEpNpu`, `DoctorNpu`). They skip, with the reason, in x64 builds and on machines without any Qualcomm hardware; on a Snapdragon machine whose NPU cannot be selected they fail |
+| `npu` | the QNN execution provider, its backend and an NPU (ARM64 Snapdragon only) | `edgebench_bundle_tests` suites ending in `Npu` (`QnnEpNpu`, `DoctorNpu`, `QnnProviderNpu`, `RunNpu`, `OrtProbeNpu`); they use the committed fixture models only. They skip, with the reason, in x64 builds and on machines without any Qualcomm hardware; on a Snapdragon machine whose NPU cannot be selected they fail |
 | `schema` | the Python environment (`EDGEBENCH_PYTHON`, default `.venv`) | `results_schema_tests` (the validator suite through pytest) |
 
 In the ONNX Runtime test program the label follows the test suite name (see
@@ -631,9 +631,11 @@ The probe uses edgebench's [exit codes](cli.md#exit-codes): 0 if everything
 passed, 1 if the output comparison failed, 2 on a usage error, 3 on an ONNX
 Runtime error (the error code and message are printed) or when `--target npu`
 finds no single QNN NPU device (`no_qnn_ep_devices`, `no_npu_device`,
-`multiple_npu_devices`, with the device list), 4 if ONNX Runtime or the QNN
-execution provider could not be loaded or a loaded ONNX Runtime/QNN DLL is not
-the bundled one, and 6 if the `--json` file could not be written. It registers
+`multiple_npu_devices`, with the device list), 4 if ONNX Runtime, the QNN
+execution provider or its HTP backend (`QnnHtp.dll`, `QnnHtpPrepare.dll`,
+checked before the first NPU session) could not be loaded or a loaded ONNX
+Runtime/QNN DLL is not the bundled one, 5 if strict mode refused the NPU session
+(`strict_mode_refusal`), and 6 if the `--json` file could not be written. It registers
 the QNN EP and selects the NPU with the same code as `edgebench`. `--json` never
 overwrites: if the path already exists, the probe exits with 6 before doing
 anything. It loads ONNX Runtime the same way as

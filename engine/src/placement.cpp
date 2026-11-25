@@ -47,19 +47,30 @@ std::optional<NodeAssignment> parse_node_placements(const std::vector<std::strin
     return result;
 }
 
-Result<NodeAssignment> record_node_placement(Runtime& runtime, const std::filesystem::path& model,
-                                             Ort::SessionOptions& options) {
+Result<PlacementCapture> capture_node_placement(Runtime& runtime,
+                                                const std::filesystem::path& model,
+                                                Ort::SessionOptions& options,
+                                                const std::function<Result<void>()>& while_alive) {
     std::vector<std::string> messages;
+    std::optional<Error> alive_error;
     try {
         options.SetLogSeverityLevel(ORT_LOGGING_LEVEL_VERBOSE);
         Runtime::LogCapture capture(runtime);
-        { Ort::Session session(runtime.env(), model.c_str(), options); }
+        {
+            Ort::Session session(runtime.env(), model.c_str(), options);
+            if (while_alive) {
+                if (Result<void> r = while_alive(); !r)
+                    alive_error = r.error();
+            }
+        }
         messages = capture.messages();
     } catch (const Ort::Exception& e) {
         return ort_error("session_creation_failed",
                          "creating the node placement session for " + path_to_utf8(model),
                          e.GetOrtErrorCode(), e.what());
     }
+    if (alive_error)
+        return *alive_error;
     std::optional<NodeAssignment> placement = parse_node_placements(messages);
     if (!placement) {
         return Error{ExitCode::internal_error, "placement_unavailable",
@@ -68,7 +79,15 @@ Result<NodeAssignment> record_node_placement(Runtime& runtime, const std::filesy
                          path_to_utf8(model) + " (" + std::to_string(messages.size()) +
                          " log messages captured)"};
     }
-    return *placement;
+    return PlacementCapture{std::move(*placement), std::move(messages)};
+}
+
+Result<NodeAssignment> record_node_placement(Runtime& runtime, const std::filesystem::path& model,
+                                             Ort::SessionOptions& options) {
+    Result<PlacementCapture> captured = capture_node_placement(runtime, model, options);
+    if (!captured)
+        return captured.error();
+    return std::move(captured).value().assignment;
 }
 
 }  // namespace edgebench

@@ -26,6 +26,7 @@
 #include "edgebench/exit_codes.hpp"
 #include "edgebench/interrupt.hpp"
 #include "edgebench/ort_loader.hpp"
+#include "edgebench/qnn_ep.hpp"
 #include "edgebench/result_files.hpp"
 #include "edgebench/result_json.hpp"
 #include "edgebench/run_config.hpp"
@@ -60,7 +61,7 @@ std::string hint_for(const eb::Error& e) {
         case eb::ExitCode::output_error:
             return "Choose another --output-dir, or check that it is writable.";
         default:
-            return {};
+            return std::string(eb::qnn_ep_hint(e.kind));  // QNN EP, NPU and backend errors
     }
 }
 

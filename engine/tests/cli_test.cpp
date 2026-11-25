@@ -158,9 +158,10 @@ TEST(CliRun, SeedWithRandomInput) {
 TEST(CliRun, ProviderValues) {
     TempModel model;
     EXPECT_FALSE(parse(run_args(model, {"--provider", "cpu"})).exit.has_value());
-    for (const char* bad : {"npu", "qnn", "gpu", "CPU"}) {
+    EXPECT_FALSE(parse(run_args(model, {"--provider", "npu"})).exit.has_value());
+    for (const char* bad : {"qnn", "gpu", "CPU", "NPU"}) {
         const eb::ParseResult r = parse(run_args(model, {"--provider", bad}));
-        expect_usage_error(r, "supported providers: cpu");
+        expect_usage_error(r, "supported providers: cpu, npu");
         EXPECT_TRUE(contains(r.err, bad)) << r.err;
     }
 }
@@ -175,7 +176,8 @@ TEST(CliRun, ModelErrors) {
 
 TEST(CliRun, InvalidNumbers) {
     TempModel model;
-    expect_usage_error(parse(run_args(model, {"--threads", "0"})), "error: [usage_error] --threads: must be between 1 and 256 (got 0)");
+    expect_usage_error(parse(run_args(model, {"--threads", "0"})),
+                       "error: [usage_error] --threads: must be between 1 and 256 (got 0)");
     expect_usage_error(parse(run_args(model, {"--threads", "-1"})), "--threads");
     expect_usage_error(parse(run_args(model, {"--threads", "four"})), "--threads");
     expect_usage_error(parse(run_args(model, {"--iterations", "0"})), "--iterations");

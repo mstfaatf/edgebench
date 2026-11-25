@@ -13,6 +13,32 @@ fs::path qnn_ep_library_path(const fs::path& bundle_dir) {
     return bundle_dir / kQnnEpLibraryFile;
 }
 
+fs::path qnn_htp_backend_path(const fs::path& bundle_dir) {
+    return bundle_dir / kQnnHtpBackendFiles.front();
+}
+
+Result<fs::path> check_qnn_htp_backend(const fs::path& bundle_dir) {
+    std::string missing;
+    int count = 0;
+    for (std::wstring_view name : kQnnHtpBackendFiles) {
+        const fs::path file = bundle_dir / name;
+        std::error_code ec;
+        if (!fs::is_regular_file(file, ec)) {
+            missing += (missing.empty() ? "" : ", ") + path_to_utf8(file);
+            ++count;
+        }
+    }
+    if (count > 0) {
+        return Error{ExitCode::ort_load_failure, "qnn_backend_not_bundled",
+                     std::string("the QNN HTP backend ") + (count == 1 ? "file " : "files ") +
+                         missing + (count == 1 ? " does" : " do") +
+                         " not exist; NPU sessions need it"};
+    }
+    std::error_code ec;
+    fs::path backend = fs::absolute(qnn_htp_backend_path(bundle_dir), ec);
+    return ec ? qnn_htp_backend_path(bundle_dir) : backend;
+}
+
 Result<EpLibrary*> register_qnn_ep(Runtime& runtime) {
     const fs::path bundle = runtime.bundle_dir();
     const fs::path library = qnn_ep_library_path(bundle);
@@ -56,6 +82,16 @@ std::string_view qnn_ep_hint(std::string_view kind) {
         return "Check that onnxruntime_providers_qnn.dll is the QNN execution provider fetched by "
                "scripts/fetch_deps.ps1 for this architecture; re-run scripts/fetch_deps.ps1 -Force "
                "and rebuild.";
+    }
+    if (kind == "qnn_backend_not_bundled" || kind == "qnn_backend_load_failed") {
+        return "The build copies the QNN HTP backend DLLs from the package fetched by "
+               "scripts/fetch_deps.ps1 next to the executable; rebuild, or re-run "
+               "scripts/fetch_deps.ps1 -Force and rebuild.";
+    }
+    if (kind == "strict_mode_refusal") {
+        return "Strict mode refuses sessions in which any node would run on the CPU. Use a "
+               "model the NPU supports, or pass --no-strict to let those nodes run on the CPU "
+               "(recorded in the result and warned about).";
     }
     if (kind == "module_outside_bundle")
         return load_error_hint(OrtLoadError::foreign_module_loaded);

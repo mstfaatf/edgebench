@@ -15,7 +15,8 @@ enum class ExitCode : int {
     /// ONNX Runtime failed at run time: no usable EP device (none, or more than one,
     /// matches the requested device), session creation, or inference.
     ort_runtime_error = 3,
-    /// ONNX Runtime could not be loaded, or a loaded ORT/QNN DLL is not the bundled one.
+    /// ONNX Runtime, the QNN EP or its HTP backend could not be loaded, or a loaded
+    /// ORT/QNN DLL is not the bundled one.
     ort_load_failure = 4,
     /// Strict mode refused the session: not every node can run on the requested device.
     strict_mode_refusal = 5,

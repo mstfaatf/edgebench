@@ -6,6 +6,7 @@
 #include <sstream>
 
 #include "edgebench/diagnostics.hpp"
+#include "edgebench/npu_options.hpp"
 #include "edgebench/ort_loader.hpp"
 #include "edgebench/version.hpp"
 
@@ -59,6 +60,8 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
     RunConfig defaults;
     std::string model, provider = "cpu", binding = "iobinding", input = "random", graph = "all";
     std::string label, name, format = "summary", output_dir = defaults.output_dir.string();
+    std::string htp_mode(kDefaultHtpPerformanceMode);
+    bool no_strict = false;
     std::uint64_t seed = 0;
     double constant_value = 0.0;
     RunConfig& cfg = result.run;
@@ -125,6 +128,18 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
         ->type_name("FORMAT")
         ->check(choice(parse_output_format, "summary, json", "format"))
         ->capture_default_str();
+    run->add_flag("--no-strict", no_strict,
+                  "NPU: allow nodes the NPU cannot run to fall back to the CPU (recorded and "
+                  "warned); by default the session is refused instead");
+    run->add_flag("--npu-fp16", cfg.npu_fp16,
+                  "NPU: run an FP32 model with FP16 compute (enable_htp_fp16_precision = 1); the "
+                  "NPU has no FP32 compute, so FP32 models require it");
+    CLI::Option* htp_opt =
+        run->add_option("--htp-performance-mode", htp_mode, "NPU: QNN HTP performance mode")
+            ->type_name("MODE")
+            ->check(choice([](std::string_view v) { return is_htp_performance_mode(v); },
+                           htp_performance_modes_list(), "HTP performance mode"))
+            ->capture_default_str();
     run->add_flag("--dry-run", cfg.dry_run,
                   "Validate, create the session, run one inference, print the resolved "
                   "configuration as JSON");
@@ -186,6 +201,9 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
         if (name_opt->count() > 0)
             cfg.name = name;
         cfg.format = *parse_output_format(format);
+        cfg.strict = !no_strict;
+        if (htp_opt->count() > 0)
+            cfg.htp_performance_mode = htp_mode;
         cfg.output_dir = std::filesystem::path(std::u8string(output_dir.begin(), output_dir.end()));
 
         const std::vector<ConfigError> errors = validate(cfg);

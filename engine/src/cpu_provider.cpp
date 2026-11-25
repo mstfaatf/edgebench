@@ -3,27 +3,10 @@
 #include <onnxruntime_cxx_api.h>
 
 #include "edgebench/ort_bench_session.hpp"
+#include "edgebench/qnn_provider.hpp"
 #include "edgebench/runtime.hpp"
 
 namespace edgebench {
-
-namespace {
-
-GraphOptimizationLevel ort_level(GraphOptLevel level) {
-    switch (level) {
-        case GraphOptLevel::disable_all:
-            return ORT_DISABLE_ALL;
-        case GraphOptLevel::enable_basic:
-            return ORT_ENABLE_BASIC;
-        case GraphOptLevel::enable_extended:
-            return ORT_ENABLE_EXTENDED;
-        case GraphOptLevel::enable_all:
-            return ORT_ENABLE_ALL;
-    }
-    return ORT_ENABLE_ALL;
-}
-
-}  // namespace
 
 Result<std::unique_ptr<CpuProvider>> CpuProvider::create(Runtime& runtime) {
     std::vector<EpDeviceInfo> devices;
@@ -60,7 +43,7 @@ Ort::SessionOptions CpuProvider::session_options(const RunConfig& config) const 
     Ort::SessionOptions options;
     options.SetIntraOpNumThreads(config.threads);
     options.SetExecutionMode(ORT_SEQUENTIAL);
-    options.SetGraphOptimizationLevel(ort_level(config.graph_opt));
+    options.SetGraphOptimizationLevel(ort_graph_optimization_level(config.graph_opt));
     for (const auto& [key, value] : description_.session_config)
         options.AddConfigEntry(key.c_str(), value.c_str());
     return options;
@@ -97,6 +80,12 @@ Result<std::unique_ptr<Provider>> make_provider(Runtime& runtime, const RunConfi
     switch (config.provider) {
         case ProviderKind::cpu:
             break;
+        case ProviderKind::npu: {
+            Result<std::unique_ptr<QnnProvider>> npu = QnnProvider::create(runtime, config);
+            if (!npu)
+                return npu.error();
+            return std::unique_ptr<Provider>(std::move(npu).value());
+        }
     }
     Result<std::unique_ptr<CpuProvider>> cpu = CpuProvider::create(runtime);
     if (!cpu)

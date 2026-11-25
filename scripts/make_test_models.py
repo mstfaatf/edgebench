@@ -11,6 +11,10 @@ bytes each):
   generated input lies in [0, 1), so every output value is NaN.
 - runtime_error.onnx: input "x" float32 [1, 4] -> Gather(axis 1, index 7) -> output "y"
   [1, 1]. The session is created, but every Run() fails: the index is out of range.
+- npu_unsupported_op.onnx: input "x" float32 [1, 4, 4] -> Relu -> Det -> Relu -> output "y"
+  float32 [1]. The QNN execution provider implements Relu but not Det, so a strict NPU
+  session is refused, and without strict mode Det runs on the CPU between two QNN
+  partitions.
 
 Weights are fixed constants, so the output is byte-identical on every run.
 Only needs the onnx package (no ONNX Runtime), so it runs on any platform:
@@ -97,12 +101,26 @@ def runtime_error() -> onnx.ModelProto:
     return _model(graph)
 
 
+def npu_unsupported_op() -> onnx.ModelProto:
+    nodes = [
+        helper.make_node("Relu", ["x"], ["r"], name="accepted_relu_in"),
+        helper.make_node("Det", ["r"], ["d"], name="unsupported_det"),
+        helper.make_node("Relu", ["d"], ["y"], name="accepted_relu_out"),
+    ]
+    graph = helper.make_graph(
+        nodes, "npu_unsupported_op",
+        [helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 4, 4])],
+        [helper.make_tensor_value_info("y", TensorProto.FLOAT, [1])])
+    return _model(graph)
+
+
 MODELS = {
     "fixed_float32.onnx": lambda: dense_relu(1),
     "dynamic_batch.onnx": lambda: dense_relu("batch"),
     "int64_input.onnx": int64_input,
     "nan_output.onnx": nan_output,
     "runtime_error.onnx": runtime_error,
+    "npu_unsupported_op.onnx": npu_unsupported_op,
 }
 
 

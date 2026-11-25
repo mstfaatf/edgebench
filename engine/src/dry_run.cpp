@@ -1,6 +1,9 @@
 #include "edgebench/dry_run.hpp"
 
+#include "edgebench/bundle_modules.hpp"
 #include "edgebench/model_info.hpp"
+#include "edgebench/npu_options.hpp"
+#include "edgebench/onnx_inspect.hpp"
 #include "edgebench/provider.hpp"
 #include "edgebench/runtime.hpp"
 #include "edgebench/version.hpp"
@@ -47,6 +50,19 @@ Result<json> dry_run(Runtime& runtime, const RunConfig& config) {
     if (!model)
         return model.error();
 
+    // The NPU compute precision follows from the model's stored precision.
+    std::optional<std::string> compute_precision;
+    if (config.provider == ProviderKind::npu) {
+        Result<OnnxGraphSummary> graph = inspect_onnx_file(model.value().path);
+        if (!graph)
+            return graph.error();
+        Result<std::optional<std::string>> precision =
+            requested_compute_precision(config, infer_precision(graph.value()));
+        if (!precision)
+            return precision.error();
+        compute_precision = precision.value();
+    }
+
     Result<std::unique_ptr<Provider>> provider = make_provider(runtime, config);
     if (!provider)
         return provider.error();
@@ -57,6 +73,9 @@ Result<json> dry_run(Runtime& runtime, const RunConfig& config) {
     if (!created)
         return created.error();
     BenchSession& session = *created.value();
+    // Execution providers load their libraries with the session.
+    if (Result<void> modules = check_bundle_modules(runtime.bundle_dir()).result(); !modules)
+        return modules.error();
 
     if (Result<void> r = session.run_once(); !r)
         return r.error();
@@ -76,6 +95,13 @@ Result<json> dry_run(Runtime& runtime, const RunConfig& config) {
     const NodeAssignment& placement = placed.value();
     const std::string requested_ep(execution_provider_name(config.provider));
     const bool all_on_requested = placement.all_on(requested_ep);
+    if (!all_on_requested && strict_mode(config)) {
+        return Error{ExitCode::internal_error, "strict_placement_mismatch",
+                     "strict mode is on, but " +
+                         std::to_string(placement.nodes_not_on(requested_ep)) + " of " +
+                         std::to_string(placement.total_nodes) + " nodes are not on " +
+                         requested_ep + "; ONNX Runtime should have refused the session"};
+    }
 
     json out = {{"command", "run"},
                 {"dry_run", true},
@@ -91,6 +117,7 @@ Result<json> dry_run(Runtime& runtime, const RunConfig& config) {
     cfg["batch_size"] = session.batch_size();
     cfg["ep_options"] = desc.ep_options;
     cfg["session_config"] = desc.session_config;
+    cfg["requested"]["compute_precision"] = opt(compute_precision);
 
     const OrtLoadResult& ort = runtime.load_result();
     out["runtime"] = {
@@ -103,6 +130,9 @@ Result<json> dry_run(Runtime& runtime, const RunConfig& config) {
          {{"name", desc.execution_provider},
           {"version", opt(desc.ep_version)},
           {"library_path", opt(desc.ep_library_path)}}},
+        {"qnn", desc.qnn
+                    ? json{{"backend", desc.qnn->backend}, {"backend_path", desc.qnn->backend_path}}
+                    : json(nullptr)},
         {"ep_device", ep_device_json(desc.ep_device)},
     };
     out["execution"] = {
@@ -116,11 +146,13 @@ Result<json> dry_run(Runtime& runtime, const RunConfig& config) {
     };
     json warnings = json::array();
     if (!all_on_requested) {
-        warnings.push_back({{"code", "nodes_not_on_requested_ep"},
-                            {"message", std::to_string(placement.nodes_not_on(requested_ep)) +
-                                            " of " + std::to_string(placement.total_nodes) +
-                                            " nodes are not on " + requested_ep},
-                            {"path", "/execution/node_assignment"}});
+        warnings.push_back(
+            {{"code", config.provider == ProviderKind::cpu ? "nodes_not_on_requested_ep"
+                                                           : "cpu_fallback_nodes"},
+             {"message", std::to_string(placement.nodes_not_on(requested_ep)) + " of " +
+                             std::to_string(placement.total_nodes) + " nodes are not on " +
+                             requested_ep},
+             {"path", "/execution/node_assignment"}});
     }
     out["warnings"] = warnings;
     out["dry_run_check"] = {

@@ -47,9 +47,10 @@ struct ModelResult {
     ModelFileInfo file;
     std::optional<std::int64_t> opset, ir_version;
     ModelPrecision precision;
-    std::optional<std::string> export_tool;  // producer name and version from the file
-    std::optional<std::string> normalization;  // from the file's metadata, if recorded
-    QuantizationRecord quantization_record;    // from the file's metadata, if recorded
+    std::optional<std::string> export_tool;      // producer name and version from the file
+    std::optional<std::string> normalization;    // from the file's metadata, if recorded
+    QuantizationRecord quantization_record;      // from the file's metadata, if recorded
+    std::optional<std::string> precision_notes;  // e.g. FP32 stored, FP16 computed on the NPU
     std::vector<TensorInfo> inputs, outputs;
 };
 
@@ -61,7 +62,7 @@ struct ExecutionResult {
 
 struct SessionInitResult {
     double session_create_ms = 0;                  // nearest-rank median of cold_ms
-    std::string ep_context_state = "not_used";     // no EP context cache (CPU)
+    std::string ep_context_state = "not_used";     // CPU: no EP context cache; NPU: "cold"
     std::vector<double> cold_ms;                   // one per trial, in trial order
     std::optional<double> context_build_ms;        // null: no cache
     std::optional<std::vector<double>> cached_ms;  // null: no cache
@@ -149,7 +150,10 @@ struct BenchmarkResult {
     ModelResult model;
     std::optional<OnnxGraphSummary> graph;  // decoded model file
 
-    RunConfig config;                 // as requested; the schema's config block derives from it
+    RunConfig config;  // as requested; the schema's config block derives from it
+    /// config.requested.compute_precision: null for CPU runs; "int8" or "fp16" on the
+    /// NPU (requested_compute_precision()).
+    std::optional<std::string> compute_precision;
     std::int64_t batch_size = 0;      // 0: unknown (written as null; failed results only)
     std::string input_preprocessing;  // config.input.preprocessing
 
@@ -193,7 +197,9 @@ void finish_result(BenchmarkResult& result);
 /// environment, code = the loader's error kind).
 BenchmarkResult failed_load_result(const RunConfig& config, const OrtLoadResult& load);
 
-/// Creates the provider for `config` and runs the benchmark with it.
+/// Creates the provider for `config` and runs the benchmark with it. For the NPU
+/// the model's precision is checked first (requested_compute_precision()), so a
+/// usage error is reported before the QNN EP is registered.
 BenchmarkResult run_benchmark(Runtime& runtime, const RunConfig& config,
                               const ProgressFn& progress = {}, const StopHook& hook = {});
 
@@ -208,6 +214,11 @@ BenchmarkResult run_benchmark(Runtime& runtime, const RunConfig& config,
 /// matches trial 0, release the session. After the last trial, read the process
 /// memory, record node placement in a separate session, and compare the power
 /// state with the one at the start.
+///
+/// In strict mode every node must be placed on the requested EP; otherwise the
+/// run fails with internal_error (strict_placement_mismatch), because ONNX
+/// Runtime should have refused the session. Without strict mode, nodes on the
+/// CPU are a cpu_fallback_nodes warning.
 ///
 /// Never throws for run failures: the result's `failure` is set and everything
 /// collected so far is kept. run_once() failures are ort_runtime_error naming

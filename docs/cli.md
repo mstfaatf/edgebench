@@ -28,7 +28,7 @@ measuring or writing anything.
 | Option | Default | Constraints / meaning |
 |---|---|---|
 | `--model PATH` | (required) | Must exist, be a regular file that can be opened for reading, and end in `.onnx` (any case) |
-| `--provider NAME` | `cpu` | Supported providers: `cpu` |
+| `--provider NAME` | `cpu` | `cpu` (ONNX Runtime's CPU EP) or `npu` (the QNN EP on the NPU; ARM64 builds only, see [NPU runs](#npu-runs)) |
 | `--threads N` | `4` | CPU intra-op threads, 1 to 256. Always set explicitly and recorded; there is no "ONNX Runtime default" setting, because CPU latency depends strongly on it. More threads than logical processors is allowed, with a `threads_exceed_logical_processors` warning |
 | `--binding MODE` | `iobinding` | `run`: `Session::Run` with input and output values created per call. `iobinding`: IoBinding with buffers allocated once. Recorded as `config.run_binding` = `run` / `iobinding_preallocated` |
 | `--warmup N` | `20` | Unmeasured iterations before each trial, 0 to 100,000 |
@@ -45,6 +45,9 @@ measuring or writing anything.
 | `--name TEXT` | `<model stem>_<provider>_<binding>_t<threads>` | Base name of the result files. Letters, digits, `-`, `_` and `.` only, not starting with `.`, at most 128 characters. In the default, other characters of the model file name become `_`, e.g. `mobilenetv2_fp32_b1_cpu_iobinding_t4` |
 | `--format FORMAT` | `summary` | What goes to stdout: `summary` (human-readable) or `json` (the full result document). Progress and errors stay on stderr; the files are written either way |
 | `--dry-run` | off | Validate the options, create the session, run one inference, print the resolved configuration as JSON, exit 0 |
+| `--no-strict` | off | NPU only: allow nodes the NPU cannot run to fall back to the CPU (recorded as `config.strict_mode` false, with `strict_mode_off` and `cpu_fallback_nodes` warnings). By default such a session is refused (exit 5) |
+| `--npu-fp16` | off | NPU only: run an FP32 model with FP16 compute (`enable_htp_fp16_precision` = `1`). Required for FP32 models, a usage error for INT8 models |
+| `--htp-performance-mode MODE` | `burst` | NPU only: the QNN EP's `htp_performance_mode`: `burst`, `balanced`, `default`, `high_performance`, `high_power_saver`, `low_balanced`, `low_power_saver`, `power_saver`, `extreme_power_saver`, `sustained_high_performance` |
 
 All validation problems are reported together, one per line, as
 `error: [usage_error] --<option>: <message>` (`[model_unreadable]` when the
@@ -53,6 +56,44 @@ exclusively; the message is the operating system's), followed by one
 `hint: Run 'edgebench run --help' for the options.` line. The upper bounds keep
 a run's memory and duration finite (one million iterations store 8 MB of
 latencies per trial); they are not measurement recommendations.
+
+### NPU runs
+
+`--provider npu` registers the bundled QNN execution provider, selects the one
+QNN device of type NPU (exactly one must exist; exit 3 otherwise), checks that
+the HTP backend files `QnnHtp.dll` and `QnnHtpPrepare.dll` are in the bundle
+(exit 4 otherwise: the EP lists the NPU even without them), and attaches every
+session to that device. The trial loop, the IoBinding default and the timing are
+the same as for the CPU.
+
+edgebench passes exactly these settings and records them in the result; every
+other QNN EP option stays at the EP's default:
+
+| Where | Key | Value |
+|---|---|---|
+| `config.ep_options` | `backend_path` | absolute path of the bundled `QnnHtp.dll` |
+| `config.ep_options` | `htp_performance_mode` | `--htp-performance-mode` (default `burst`) |
+| `config.ep_options` | `enable_htp_fp16_precision` | `1`, only with `--npu-fp16` |
+| `config.session_config` | `session.disable_cpu_ep_fallback` | `1` (strict mode), `0` with `--no-strict` |
+| `config.session_config` | `ep.context_enable` | `0`: no EP context cache (`config.ep_context_cache.state` `disabled`) |
+
+The compute precision follows from the model: an INT8 QDQ model runs as stored
+(`config.requested.compute_precision` `int8`); an FP32 model needs `--npu-fp16`
+(`fp16`, next to `model.stored_precision` `fp32` and a `model.precision_notes`
+entry), because the NPU has no FP32 compute. Without the flag it is refused with
+`npu_fp32_needs_fp16` (exit 2); other stored precisions are
+`npu_precision_unsupported`.
+
+Session failures are told apart by what ONNX Runtime and the QNN EP report:
+a backend the QNN EP could not load (`qnn_backend_load_failed`, exit 4); in
+strict mode, an `ORT_FAIL` whose message says CPU fallback was disabled
+(`strict_mode_refusal`, exit 5, with the unsupported nodes the QNN EP logged);
+anything else exit 3. Node placement comes from a separate verbose session
+after the trials (as for the CPU), together with the QNN EP's node validation
+(`execution.qnn_validation`, `verification_method` `combined`). In strict mode
+a node placed anywhere but on the QNN EP is an internal error (exit 1). After
+every QNN session creation the loaded ONNX Runtime/QNN modules are checked
+again: the HTP backend DLLs load at that point.
 
 ### What `run` measures
 
@@ -619,8 +660,8 @@ Shared by `edgebench` and `tools/ort_probe` (defined in
 | 1 | `internal_error` | Internal or unexpected error. `ort_probe` also uses it when its output comparison fails |
 | 2 | `usage_error` | Bad arguments, invalid values, or model file not found |
 | 3 | `ort_runtime_error` | ONNX Runtime error: no usable EP device (none, or more than one, matches the requested device), or session creation or inference failed |
-| 4 | `ort_load_failure` | ONNX Runtime could not be loaded (any loader error kind), or a loaded ONNX Runtime/QNN DLL is not the bundled one |
-| 5 | `strict_mode_refusal` | Strict mode refused the session: not every node can run on the requested device. Reserved for the NPU provider |
+| 4 | `ort_load_failure` | ONNX Runtime, the QNN execution provider or its HTP backend could not be loaded, or a loaded ONNX Runtime/QNN DLL is not the bundled one |
+| 5 | `strict_mode_refusal` | Strict mode refused the session: not every node can run on the requested device (NPU runs without `--no-strict`; `ort_probe --target npu`) |
 | 6 | `output_error` | Results could not be written (`edgebench run`: after the summary was printed, or before measuring if `--output-dir` is an existing file; `ort_probe`: the `--json` file exists or could not be written) |
 | 130 | `interrupted` | Stopped by Ctrl+C, Ctrl+Break or closing the console (the conventional 128 + SIGINT) |
 
@@ -653,7 +694,8 @@ Every way `edgebench` and `ort_probe` can end with an error. "Result" says
 whether a result document is written. Tests are in
 `engine/tests/exit_paths_test.cpp`, `failure_paths_test.cpp`,
 `edgebench_exe_test.cpp`, `benchmark_test.cpp`, `qnn_ep_test.cpp`,
-`npu_selection_test.cpp`, `run_config_test.cpp` and `cli_test.cpp`; "not triggerable" marks paths that need ONNX Runtime or Windows
+`qnn_provider_test.cpp`, `npu_options_test.cpp`, `npu_selection_test.cpp`,
+`run_config_test.cpp` and `cli_test.cpp`; "not triggerable" marks paths that need ONNX Runtime or Windows
 to fail internally and that a test cannot provoke.
 
 `edgebench run`:
@@ -682,6 +724,17 @@ to fail internally and that a test cannot provoke.
 | ONNX Runtime loads the model but its metadata cannot be decoded | `invalid_onnx` | 1 | yes, `model_load` | not triggerable |
 | The placement session fails | as reported by ONNX Runtime | 3 | yes, `session_creation`, all trials kept | `FailurePaths.PlacementFailureFailsTheRun` |
 | The placement session logs no placement | `placement_unavailable` | 1 | yes, `session_creation` | not triggerable |
+| `--npu-fp16`, `--no-strict` or `--htp-performance-mode` without `--provider npu`; unknown `--htp-performance-mode` | `usage_error` | 2 | no | `NpuCli.NpuOptionsWithTheCpuProviderAreUsageErrors`, `NpuCli.UnknownPerformanceModeIsAUsageError` |
+| NPU: FP32 model without `--npu-fp16` | `npu_fp32_needs_fp16` | 2 | no | `Cli.RunNpuPrecisionRulesAreUsageErrors`, `ComputePrecision.Fp32WithoutTheFlagIsRefused` |
+| NPU: `--npu-fp16` with an INT8 model | `npu_fp16_needs_fp32_model` | 2 | no | `ComputePrecision.TheFlagOnAnInt8ModelIsAUsageError` |
+| NPU: other stored precision (FP16, mixed, dynamic or QOperator quantization) | `npu_precision_unsupported` | 2 | no | `ComputePrecision.OtherStoredPrecisionsAreNotSupported` |
+| NPU: no `onnxruntime_providers_qnn.dll` in the bundle (also every x64 build) | `qnn_ep_not_bundled` | 4 | yes, `ep_registration` | `Cli.RunNpuWithoutTheQnnEpExits4AndWritesAFailedResult` |
+| NPU: no QNN EP device, none of type NPU, more than one | `no_qnn_ep_devices`, `no_npu_device`, `multiple_npu_devices` | 3 | yes, `ep_registration` | `Cli.RunNpuWithoutASingleNpuExits3` (runs only where the QNN EP offers no single NPU, e.g. the ARM64 CI runner), `NpuSelection.*` |
+| NPU: `QnnHtp.dll` or `QnnHtpPrepare.dll` missing from the bundle | `qnn_backend_not_bundled` | 4 | yes, `ep_registration` | `RunNpu.MissingHtpBackendExits4NamingTheFile`, `QnnHtpBackend.MissingFilesAreALoadFailureNamingThem` |
+| NPU: the QNN EP logs that its backend could not be loaded | `qnn_backend_load_failed` (ORT code kept) | 4 | yes, `session_creation` | `QnnSessionFailure.BackendLoadFailureIsExit4EvenThoughOrtReportsARefusal` |
+| NPU, strict mode: a node cannot run on the NPU | `strict_mode_refusal` (code `ORT_FAIL`) | 5 | yes, `session_creation` | `RunNpu.StrictRefusalExits5AndWritesAFailedResult`, `QnnProviderNpu.StrictRefusalIsExit5WithTheOrtError`, `QnnSessionFailure.*` |
+| NPU: after a QNN session is created, a QNN module is loaded from outside the bundle (e.g. the display driver's HTP stub when the bundled one is missing) | `module_outside_bundle` | 4 | yes, `session_creation` | `QnnProviderNpu.ModulesAreCheckedAfterEveryQnnSessionCreation`, `RunNpu.BackendStubFromOutsideTheBundleExits4` |
+| NPU, strict mode: the placement session reports a node off the QNN EP | `strict_placement_mismatch` | 1 | yes, `session_creation` | not triggerable (ONNX Runtime refuses such a session) |
 | Ctrl+C, Ctrl+Break, console closed | `interrupted` | 130 | yes, current stage, completed trials kept | `ExitPaths.CtrlBreakDuringARunWritesAnInterruptedResult`, `Interrupt.*` |
 | Second Ctrl+C or Ctrl+Break | none | 130 | no | `ExitPaths.SecondCtrlBreakExitsAtOnce` |
 | Ctrl+C or Ctrl+Break during `--dry-run` | none | 130 | no | same handler mode as `ExitPaths.OrtProbeCtrlBreakExits130WithoutWriting` |
@@ -690,7 +743,11 @@ to fail internally and that a test cannot provoke.
 | A crash (structured exception) | `internal_error` | 1 | no | `ExitPaths.UnhandledExceptionIsReportedAndExits1` |
 
 Warnings that do not end the run: `nondeterministic_outputs`
-(`FailurePaths.OutputsDifferingWithTheSameTop1AreAWarning`),
+(`FailurePaths.OutputsDifferingWithTheSameTop1AreAWarning`), `strict_mode_off`
+and `cpu_fallback_nodes` (NPU with `--no-strict`;
+`QnnProviderNpu.WithoutStrictModeUnsupportedNodesRunOnTheCpuWithAWarning`),
+`qnn_validation_rejected_nodes` (every node on the QNN EP, but its validation
+log reports failed nodes; not triggerable),
 `nodes_not_on_requested_ep` (`FailurePaths.NodesOffTheRequestedEpAreAWarning`),
 `threads_exceed_logical_processors`
 (`ExitPaths.ThreadsAboveLogicalProcessorsWarnEverywhere`),
@@ -729,7 +786,9 @@ Warnings that do not end the run: `nondeterministic_outputs`
 | `--target npu`: the QNN EP reports no device | `no_qnn_ep_devices` | 3 | `OrtProbe.NpuTargetWithoutASingleNpuExits3` (runs only on a machine without a QNN NPU, e.g. the ARM64 CI runner), `NpuSelection.NoDevicesAtAll`, `NpuSelection.CpuOnlyMeansNoQnnDevices` |
 | `--target npu`: the QNN EP reports devices, none of type NPU | `no_npu_device` | 3 | `NpuSelection.GpuOnlyMeansNoNpu`, `NpuSelection.NpuOfAnotherEpIsNotSelected` (and the probe test above where it applies) |
 | `--target npu`: the QNN EP reports more than one NPU | `multiple_npu_devices` | 3 | `NpuSelection.TwoNpusAreRefused` |
+| `--target npu`: `QnnHtp.dll` or `QnnHtpPrepare.dll` missing from the bundle | `qnn_backend_not_bundled` | 4 | `QnnHtpBackend.MissingFilesAreALoadFailureNamingThem` (same check, in process) |
+| `--target npu`, `--strict on`: a node cannot run on the NPU | `strict_mode_refusal` | 5 | `OrtProbeNpu.StrictRefusalExits5` |
 | Output comparison fails | check output | 1 | manual (NPU) |
-| ONNX Runtime error, e.g. strict mode refusing a session | `ort_runtime_error` with the ORT code | 3 | manual (`tools/qnn_rejection_check.py`, NPU) |
+| Other ONNX Runtime error | `ort_runtime_error` with the ORT code | 3 | not tested |
 | Ctrl+C or Ctrl+Break | none | 130 | `ExitPaths.OrtProbeCtrlBreakExits130WithoutWriting` |
 | A crash | `internal_error` | 1 | same handler as `ExitPaths.UnhandledExceptionIsReportedAndExits1` |

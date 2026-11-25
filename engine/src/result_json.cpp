@@ -90,6 +90,13 @@ json runtime_json(const BenchmarkResult& r) {
             };
         }
     }
+    json qnn = nullptr;
+    if (r.known.provider && p.qnn) {
+        qnn = {{"sdk_version", opt(p.qnn->sdk_version)},
+               {"backend", p.qnn->backend},
+               {"backend_path", p.qnn->backend_path},
+               {"backend_build", opt(p.qnn->backend_build)}};
+    }
     json modules = json::array();
     for (const LoadedModule& m : r.runtime.loaded_modules)
         modules.push_back({{"name", m.name}, {"path", path_to_utf8(m.path)}});
@@ -106,7 +113,7 @@ json runtime_json(const BenchmarkResult& r) {
           {"api_version", ort.api_version},
           {"load_check", ort.load_check()}}},
         {"execution_provider", execution_provider},
-        {"qnn", nullptr},
+        {"qnn", qnn},
         {"ep_device", ep_device},
         {"loaded_modules", modules},
         {"ep_devices", devices},
@@ -150,9 +157,34 @@ json model_json(const BenchmarkResult& r) {
           {"weight_dtype", opt(p.weight_dtype)},
           {"calibration", calibration_json(m)},
           {"tool", quantized(m) ? opt(m.quantization_record.tool) : json(nullptr)}}},
-        {"precision_notes", nullptr},
+        {"precision_notes", opt(m.precision_notes)},
         {"normalization", opt(m.normalization)},
     };
+}
+
+// The NPU runs without an EP context cache for now: recorded as disabled. The
+// CPU EP has none (null).
+json ep_context_cache_json(const RunConfig& c) {
+    if (c.provider != ProviderKind::npu)
+        return nullptr;
+    return {{"enabled", false},
+            {"cache_file", nullptr},
+            {"state", "disabled"},
+            {"files", json::array()},
+            {"key", nullptr}};
+}
+
+json qnn_validation_json(const std::optional<QnnValidation>& v) {
+    if (!v)
+        return nullptr;
+    json passes = json::array();
+    for (const QnnValidationPass& p : v->passes)
+        passes.push_back({{"passed_nodes", p.passed_nodes}, {"failed_nodes", p.failed_nodes}});
+    json rejected = json::array();
+    for (const QnnRejectedNode& n : v->rejected_nodes)
+        rejected.push_back(
+            {{"op_type", n.op_type}, {"node_name", n.node_name}, {"reason", opt(n.reason)}});
+    return {{"passes", passes}, {"rejected_nodes", rejected}};
 }
 
 json config_json(const BenchmarkResult& r) {
@@ -162,8 +194,8 @@ json config_json(const BenchmarkResult& r) {
         {"requested",
          {{"execution_provider", execution_provider_name(c.provider)},
           {"device_type", device_type_name(c.provider)},
-          {"compute_precision", nullptr}}},
-        {"strict_mode", false},
+          {"compute_precision", opt(r.compute_precision)}}},
+        {"strict_mode", strict_mode(c)},
         {"batch_size", r.batch_size > 0 ? json(r.batch_size) : json(nullptr)},
         {"input",
          {{"kind", schema_name(c.input)},
@@ -182,7 +214,7 @@ json config_json(const BenchmarkResult& r) {
         {"graph_optimization_level", schema_name(c.graph_opt)},
         {"ep_options", r.known.provider ? json(p.ep_options) : json::object()},
         {"session_config", r.known.provider ? json(p.session_config) : json::object()},
-        {"ep_context_cache", nullptr},
+        {"ep_context_cache", ep_context_cache_json(c)},
         {"run_binding", schema_name(c.binding)},
         {"profiling", {{"ort", false}, {"qnn_level", "off"}}},
     };
@@ -196,7 +228,7 @@ json execution_json(const BenchmarkResult& r) {
             {"verification_method", na.verification_method},
             {"verification_details", r.execution.verification_details},
             {"node_assignment", {{"total_nodes", na.total_nodes}, {"nodes_by_ep", na.nodes_by_ep}}},
-            {"qnn_validation", nullptr},
+            {"qnn_validation", qnn_validation_json(na.qnn_validation)},
         };
     }
     if (!r.known.session)

@@ -67,6 +67,9 @@ private:
     bool has_run_ = false;
 };
 
+/// ONNX Runtime's graph optimization level for `level`.
+GraphOptimizationLevel ort_graph_optimization_level(GraphOptLevel level);
+
 /// Inputs and outputs of an ONNX Runtime session as TensorInfo.
 std::vector<TensorInfo> session_inputs(const Ort::Session& session);
 std::vector<TensorInfo> session_outputs(const Ort::Session& session);

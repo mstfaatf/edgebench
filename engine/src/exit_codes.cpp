@@ -36,8 +36,8 @@ std::string_view describe(ExitCode code) noexcept {
             return "ONNX Runtime error: no usable EP device, or session creation or inference "
                    "failed";
         case ExitCode::ort_load_failure:
-            return "ONNX Runtime could not be loaded, or a loaded ONNX Runtime/QNN DLL is not the "
-                   "bundled one";
+            return "ONNX Runtime, the QNN execution provider or its HTP backend could not be "
+                   "loaded, or a loaded ONNX Runtime/QNN DLL is not the bundled one";
         case ExitCode::strict_mode_refusal:
             return "Strict mode refused the session: not every node can run on the requested "
                    "device";

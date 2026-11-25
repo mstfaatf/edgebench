@@ -370,7 +370,8 @@ TEST(Cli, UsageErrorsExit2OnStderr) {
         {L"--bogus"},
         {L"run"},
         {L"run", L"--model", L"missing.onnx"},
-        {L"run", L"--model", iso.dummy_model().native(), L"--provider", L"npu"},
+        {L"run", L"--model", iso.dummy_model().native(), L"--provider", L"gpu"},
+        {L"run", L"--model", iso.dummy_model().native(), L"--npu-fp16"},
         {L"run", L"--model", iso.dummy_model().native(), L"--threads", L"0"},
         {L"run", L"--model", iso.dummy_model().native(), L"--input", L"constant", L"--seed", L"1"},
         {L"doctor", L"--bogus"},
@@ -384,10 +385,10 @@ TEST(Cli, UsageErrorsExit2OnStderr) {
     }
     const ProcessResult none = run_process(iso.exe, {}, iso.dir.path());
     EXPECT_TRUE(contains(none.err, "doctor")) << describe(none);  // help is printed
-    const ProcessResult npu = run_process(
-        iso.exe, {L"run", L"--model", iso.dummy_model().native(), L"--provider", L"npu"},
+    const ProcessResult gpu = run_process(
+        iso.exe, {L"run", L"--model", iso.dummy_model().native(), L"--provider", L"gpu"},
         iso.dir.path());
-    EXPECT_TRUE(contains(npu.err, "supported providers: cpu")) << describe(npu);
+    EXPECT_TRUE(contains(gpu.err, "supported providers: cpu, npu")) << describe(gpu);
 }
 
 TEST(CliModels, RunDryRunPrintsResolvedConfig) {
@@ -672,6 +673,79 @@ TEST(OrtProbe, QnnEpThatIsNotAnEpLibraryExits4) {
     expect_no_crash(r);
     EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
     EXPECT_TRUE(contains(r.err, "error: [ep_registration_failed] ")) << describe(r);
+}
+
+// `run --provider npu` without the QNN execution provider in the bundle: exit 4
+// and a failed result (stage ep_registration). Runs everywhere.
+TEST(Cli, RunNpuWithoutTheQnnEpExits4AndWritesAFailedResult) {
+    const CpuOnlyBundle bundle(kEdgebenchExe);
+    TempDir out;
+    const ProcessResult r =
+        run_process(bundle.exe,
+                    {L"run", L"--model", (kFixtureDir / "fixed_float32.onnx").native(),
+                     L"--provider", L"npu", L"--npu-fp16", L"--trials", L"1", L"--cooldown-ms",
+                     L"0", L"--load-sample-ms", L"0", L"--output-dir", out.path().native()},
+                    bundle.dir.path());
+    expect_no_crash(r);
+    EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
+    EXPECT_TRUE(contains(r.err, "error: [qnn_ep_not_bundled] ")) << describe(r);
+    EXPECT_TRUE(contains(r.err, "hint: ")) << describe(r);
+    const fs::path latest = out.path() / "fixed_float32_npu_iobinding_t4_latest.json";
+    ASSERT_TRUE(fs::is_regular_file(latest)) << describe(r);
+    const json doc = json::parse(std::ifstream(latest));
+    EXPECT_EQ(doc.at("error").at("stage"), "ep_registration");
+    EXPECT_EQ(doc.at("config").at("strict_mode"), true);
+    eb::test::validate_or_skip(latest);
+}
+
+// The precision rule is checked before the QNN EP is registered, so these usage
+// errors need no NPU and write nothing.
+TEST(Cli, RunNpuPrecisionRulesAreUsageErrors) {
+    TempDir out;
+    const std::vector<std::pair<std::vector<std::wstring>, std::string>> cases = {
+        {{L"--model", (kFixtureDir / "fixed_float32.onnx").native()}, "npu_fp32_needs_fp16"},
+        {{L"--model", (kFixtureDir / "nan_output.onnx").native(), L"--no-strict"},
+         "npu_fp32_needs_fp16"},
+    };
+    for (const auto& [extra, kind] : cases) {
+        std::vector<std::wstring> args = {L"run", L"--provider", L"npu", L"--output-dir",
+                                          out.path().native()};
+        args.insert(args.end(), extra.begin(), extra.end());
+        const ProcessResult r = run_process(kEdgebenchExe, args, kSourceDir);
+        expect_no_crash(r);
+        EXPECT_EQ(r.exit_code, code(ExitCode::usage_error)) << describe(r);
+        EXPECT_TRUE(contains(r.err, "error: [" + kind + "] the NPU has no FP32 compute"))
+            << describe(r);
+    }
+    EXPECT_TRUE(fs::is_empty(out.path()));
+}
+
+// Like the probe test below: only reachable where the QNN EP offers no single NPU.
+TEST(Cli, RunNpuWithoutASingleNpuExits3) {
+    if (!eb::qnn_ep_in_build())
+        GTEST_SKIP() << "this build does not include the QNN execution provider";
+    const eb::test::QnnNpuProbe probe = eb::test::probe_qnn_npu();
+    ASSERT_FALSE(probe.registration_error) << probe.registration_error->message;
+    ASSERT_TRUE(probe.selection);
+    if (probe.selection->ok()) {
+        GTEST_SKIP() << "this machine has exactly one QNN NPU ("
+                     << eb::describe_device(probe.devices[*probe.selection->index]) << ")";
+    }
+    TempDir out;
+    const ProcessResult r =
+        run_process(kEdgebenchExe,
+                    {L"run", L"--model", (kFixtureDir / "fixed_float32.onnx").native(),
+                     L"--provider", L"npu", L"--npu-fp16", L"--cooldown-ms", L"0",
+                     L"--load-sample-ms", L"0", L"--output-dir", out.path().native()},
+                    kSourceDir);
+    expect_no_crash(r);
+    EXPECT_EQ(r.exit_code, code(ExitCode::ort_runtime_error)) << describe(r);
+    EXPECT_TRUE(
+        contains(r.err, "error: [" + std::string(eb::to_string(*probe.selection->failure)) + "] "))
+        << describe(r);
+    const fs::path latest = out.path() / "fixed_float32_npu_iobinding_t4_latest.json";
+    ASSERT_TRUE(fs::is_regular_file(latest)) << describe(r);
+    eb::test::validate_or_skip(latest);
 }
 
 // Device selection failures exit with 3 and list the devices. Only reachable on a

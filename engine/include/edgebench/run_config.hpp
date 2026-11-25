@@ -12,7 +12,7 @@
 
 namespace edgebench {
 
-enum class ProviderKind { cpu };
+enum class ProviderKind { cpu, npu };
 
 // Upper bounds of the run options (docs/cli.md); larger values are usage errors.
 inline constexpr int kMaxIterations = 1'000'000;
@@ -49,6 +49,11 @@ struct RunConfig {
     OutputFormat format = OutputFormat::summary;
     bool dry_run = false;
 
+    // NPU only (--provider npu); usage errors with any other provider.
+    bool strict = true;     // session.disable_cpu_ep_fallback = 1; --no-strict clears it
+    bool npu_fp16 = false;  // --npu-fp16: FP32 model with FP16 compute
+    std::optional<std::string> htp_performance_mode;  // default: burst
+
     std::uint64_t effective_seed() const { return seed.value_or(0); }
     double effective_constant_value() const { return constant_value.value_or(0.0); }
 };
@@ -81,9 +86,9 @@ std::optional<InputKind> parse_input_kind(std::string_view text);
 std::optional<GraphOptLevel> parse_graph_opt(std::string_view text);
 std::optional<OutputFormat> parse_output_format(std::string_view text);
 std::string_view cli_name(RunBinding binding);     // "run" or "iobinding"
-std::string_view cli_name(ProviderKind provider);  // "cpu"
+std::string_view cli_name(ProviderKind provider);  // "cpu" or "npu"
 
-/// Comma-separated list of the accepted `--provider` values, e.g. "cpu".
+/// Comma-separated list of the accepted `--provider` values, e.g. "cpu, npu".
 std::string_view supported_providers();
 
 // Results-schema spellings (config.run_binding, config.graph_optimization_level, ...).
@@ -92,6 +97,10 @@ std::string_view schema_name(InputKind kind);
 std::string_view schema_name(GraphOptLevel level);
 std::string_view execution_provider_name(ProviderKind provider);  // e.g. "CPUExecutionProvider"
 std::string_view device_type_name(ProviderKind provider);         // e.g. "CPU"
+
+/// True if CPU fallback is disabled (results schema: config.strict_mode): NPU runs
+/// unless --no-strict was given. The CPU provider has no fallback to disable.
+bool strict_mode(const RunConfig& config);
 
 /// The resolved configuration, with every default filled in. `config` holds the
 /// fields of the results schema's config block under the schema's names

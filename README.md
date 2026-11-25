@@ -16,10 +16,11 @@ and writes results as schema-validated JSON plus CSV.
 - **CPU benchmarking works**: `edgebench run` benchmarks a model on the ONNX
   Runtime CPU execution provider with repeated trials, statistics, system-state
   recording and result files.
-- **NPU support is in progress.** NPU execution through the Qualcomm QNN
-  execution provider has been verified in a separate diagnostic tool and in the
-  Python scripts ([feasibility note](docs/feasibility.md)); the engine's NPU
-  provider is not built yet.
+- **NPU support is in progress.** `edgebench run --provider npu` creates and
+  times sessions on the NPU through the Qualcomm QNN execution provider, in
+  strict mode by default, with the provider options and node placement recorded
+  ([docs/cli.md](docs/cli.md#npu-runs)). Checking its outputs against the saved
+  NPU references is next; no NPU latency results are published yet.
 - **Accuracy results are published**: every model variant on ImageNetV2,
   on the CPU and on the NPU (strict mode), with confidence intervals and paired
   CPU vs NPU comparisons ([docs/accuracy.md](docs/accuracy.md)). On the same

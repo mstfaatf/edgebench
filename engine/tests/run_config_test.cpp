@@ -193,13 +193,17 @@ TEST(Validate, ReportsEveryProblem) {
               (std::vector<std::string>{"model", "threads", "iterations", "trials", "seed"}));
 }
 
-TEST(Provider, OnlyCpuIsAccepted) {
+TEST(Provider, CpuAndNpuAreAccepted) {
     EXPECT_EQ(eb::parse_provider("cpu"), eb::ProviderKind::cpu);
-    for (const char* bad : {"npu", "qnn", "gpu", "dml", "CPU", "", "cpu "})
+    EXPECT_EQ(eb::parse_provider("npu"), eb::ProviderKind::npu);
+    for (const char* bad : {"qnn", "gpu", "dml", "CPU", "NPU", "", "cpu "})
         EXPECT_FALSE(eb::parse_provider(bad).has_value()) << "'" << bad << "'";
-    EXPECT_EQ(eb::supported_providers(), "cpu");
+    EXPECT_EQ(eb::supported_providers(), "cpu, npu");
     EXPECT_EQ(eb::execution_provider_name(eb::ProviderKind::cpu), "CPUExecutionProvider");
     EXPECT_EQ(eb::device_type_name(eb::ProviderKind::cpu), "CPU");
+    EXPECT_EQ(eb::execution_provider_name(eb::ProviderKind::npu), "QNNExecutionProvider");
+    EXPECT_EQ(eb::device_type_name(eb::ProviderKind::npu), "NPU");
+    EXPECT_EQ(eb::cli_name(eb::ProviderKind::npu), "npu");
 }
 
 TEST(Spellings, CliToSchemaNames) {

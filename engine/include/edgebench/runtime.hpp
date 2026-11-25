@@ -12,6 +12,8 @@
 
 #include <onnxruntime_cxx_api.h>
 
+#include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <memory>
 #include <mutex>
@@ -58,6 +60,14 @@ public:
     /// are a no-op. On error the registration is kept.
     Result<void> unregister_ep_library(std::string_view registration_name);
 
+    /// Warning and error messages ONNX Runtime has logged so far (captured or not),
+    /// numbered from 0; the most recent kLogHistory are kept. Read the position
+    /// before an operation and the messages since it afterwards, e.g. to classify
+    /// a failed session creation by what the execution provider reported.
+    static constexpr std::size_t kLogHistory = 256;
+    std::uint64_t log_position();
+    std::vector<std::string> warnings_since(std::uint64_t position);
+
     /// Collects every ONNX Runtime log message delivered while it is alive (only
     /// one capture at a time). Messages from sessions with verbose log severity are
     /// included; outside a capture only warnings and errors are printed to stderr.
@@ -83,6 +93,8 @@ private:
     OrtLoadResult load_;
     std::mutex log_mutex_;
     std::vector<std::string>* capture_ = nullptr;  // guarded by log_mutex_
+    std::uint64_t logged_warnings_ = 0;            // guarded by log_mutex_
+    std::deque<std::string> warning_history_;      // guarded by log_mutex_; the newest last
     Ort::Env env_;                                 // after the members its logger uses
     // After env_, so the libraries are unregistered before the environment is released.
     std::vector<std::unique_ptr<EpLibrary>> ep_libraries_;
