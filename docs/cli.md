@@ -10,7 +10,8 @@ edgebench <command> --help
 - Results and JSON go to stdout; errors and diagnostics go to stderr. There are
   no color codes.
 - `--help` and `--version` never load ONNX Runtime, so they work even when the
-  DLLs are missing. Running `edgebench` with no command, or with an unknown
+  DLLs are missing. `--version` prints the edgebench version, the results
+  schema version and the ONNX Runtime version the build requires. Running `edgebench` with no command, or with an unknown
   command, prints the help to stderr and exits with code 2.
 - Commands that need ONNX Runtime load the bundled `onnxruntime.dll` from the
   executable's directory and verify it first; see

@@ -118,6 +118,13 @@ def quantize(names: list[str], batches: list[int], sources: list[str]) -> int:
         print("Imagenette calibration images missing: run scripts/get_data.py first",
               file=sys.stderr)
         return 1
+    # Check every source first, so a missing one stops the run before anything is written.
+    missing = [relative_path(n, s, b) for n in names for s in sources for b in sorted({1, *batches})
+               if not (MODELS_DIR / relative_path(n, s, b)).is_file()]
+    if missing:
+        print(f"source FP32 file(s) missing: {', '.join(missing)}; run scripts/export_models.py "
+              "and scripts/fold_models.py first (or choose --normalization)", file=sys.stderr)
+        return 1
     manifest, tools = read_manifest()
     by_file = {f.file: f for f in manifest}
     images = ox.check_images()

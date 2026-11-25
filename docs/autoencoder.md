@@ -206,7 +206,7 @@ record's own export hashes.
 | Epochs | 143 run, best epoch 133 restored (366 s) |
 | Reconstruction MSE | train 1.81e-5, validation 3.07e-5; validation window MSE p50 2.8e-5, p99 8.7e-5, max 3.5e-4 |
 | FP32 files | b1 `a73173e6…f37c` (46,144 bytes), b4 `4aab5841…7379`, b8 `04b3cfd0…55f8a1` (46,189 bytes) |
-| Keras vs ONNX (Colab, x64 ONNX Runtime) | max abs diff 2.4e-6 on all validation windows, 4.3e-6 on the reference windows; b4 and b8 equal b1 |
+| Keras vs ONNX (Colab, x64 ONNX Runtime) | max abs diff 2.4e-6 on the validation windows (all 2,676 at b1 and b4, the 2,672 that fill whole batches at b8), 4.3e-6 on the reference windows; b4 and b8 equal b1 |
 
 **What tf2onnx produced.** 26 nodes: `Conv` ×3, `ConvTranspose` ×2, `Add` ×5,
 `Relu` ×4, `Reshape` ×2, `Squeeze` ×5, `Unsqueeze` ×5, and no `Transpose`.
@@ -394,7 +394,7 @@ runs. A rerun reproduces every number and the SHA256 of every score file.
 
 | Run | Batch | Threshold | ROC-AUC | PR-AUC | Precision | Recall | F1 | False-positive rate | Events detected |
 |---|---|---|---|---|---|---|---|---|---|
-| CPU FP32 | 8 | 3.46e-4 | 0.709 | 0.427 | 0.923 | 0.059 | 0.111 | 0.15% | 2 of 4 |
+| CPU FP32 | 8 | 3.45e-4 | 0.709 | 0.427 | 0.923 | 0.059 | 0.111 | 0.15% | 2 of 4 |
 | CPU INT8 | 8 | 1.30e-3 | 0.813 | 0.714 | 0.796 | 0.528 | 0.635 | 4.2% | 4 of 4 |
 | NPU INT8 | 8 | 1.14e-3 | 0.805 | 0.706 | 0.796 | 0.531 | 0.637 | 4.2% | 4 of 4 |
 | NPU FP16 | 8 | 3.47e-4 | 0.713 | 0.432 | 0.928 | 0.059 | 0.110 | 0.14% | 2 of 4 |
@@ -436,7 +436,7 @@ Paired comparisons (`comparisons.json`; each run flags with its own threshold):
   better modelling.** The INT8 input's quantization range comes from the
   calibration windows: [−4.67, 2.29] in normalized units, raw values 52.3 to
   108.5.
-  The training data barely leaves it, but 7.6% of the test points do (the
+  The training data barely leaves it, but 7.5% of the test points do (the
   series drops to −10.9 normalized during the failures), and 54% of the
   anomalous test windows contain such points against 4.4% of the normal ones.
   Clipped inputs cannot be reconstructed, so their error is large: the

@@ -53,6 +53,29 @@ dependencies, is in [requirements.txt](requirements.txt).
 | jsonschema | 4.26.0 | MIT | <https://github.com/python-jsonschema/jsonschema> |
 | pytest | 9.2.0 | MIT | <https://github.com/pytest-dev/pytest> |
 
+## Training notebook (Colab only)
+
+`notebooks/train_autoencoder.ipynb` trains the Conv1D autoencoder in Google
+Colab and exports it to ONNX; these packages are installed there by the
+notebook's first cell, pinned by version, and are not used on the target
+machine. The notebook also installs onnx and onnxruntime (versions as above).
+
+| Package | Version | License | Source |
+|---|---|---|---|
+| TensorFlow | 2.21.0 | Apache-2.0 | <https://github.com/tensorflow/tensorflow> |
+| Keras | 3.15.1 | Apache-2.0 | <https://github.com/keras-team/keras> |
+| tf2onnx | 1.17.0 | Apache-2.0 | <https://github.com/onnx/tensorflow-onnx> |
+
+## Continuous integration only
+
+Used by `.github/workflows/ci.yml` on GitHub-hosted runners, not part of any
+build or result.
+
+| Component | Version | License | Source |
+|---|---|---|---|
+| OpenCppCoverage (coverage job; installer pinned by SHA-256) | 0.9.9.0 | GPL-3.0 | <https://github.com/OpenCppCoverage/OpenCppCoverage> |
+| GitHub Actions `actions/checkout`, `actions/setup-python`, `actions/cache`, `actions/upload-artifact` (pinned by commit) | see `ci.yml` | MIT | <https://github.com/actions> |
+
 ## Models (downloaded by the scripts, not redistributed)
 
 | Model | Used by | License | Source |
@@ -63,6 +86,9 @@ dependencies, is in [requirements.txt](requirements.txt).
 | Qualcomm AI Hub MobileNet-v2 (float and w8a8 ONNX assets, AI Hub Models 0.67.0) | `scripts/get_aihub_baseline.py` | Model card: Apache-2.0; `qai_hub_models`: BSD-3-Clause | <https://huggingface.co/qualcomm/MobileNet-v2>, <https://github.com/qualcomm/ai-hub-models> |
 
 Exported and quantized models are written to `models/`, which is not committed.
+The one model whose weights are committed, the Conv1D autoencoder in
+`models/sources/conv1d_autoencoder/`, was trained for EdgeBench by the notebook
+above and is covered by EdgeBench's MIT License.
 
 ## Datasets (downloaded by the scripts, not redistributed)
 
@@ -72,9 +98,11 @@ Exported and quantized models are written to `models/`, which is not committed.
 | Imagenette (`imagenette2-320`) | `scripts/get_data.py`, calibration and the feasibility accuracy scripts | Repository: Apache-2.0; the images are a subset of ImageNet: see upstream for their terms | <https://github.com/fastai/imagenette> |
 | Numenta Anomaly Benchmark: `data/realKnownCause/machine_temperature_system_failure.csv` and `labels/combined_windows.json` (commit `ea702d75`) | `scripts/get_data.py`, the time-series autoencoder (its committed weights in `models/sources/conv1d_autoencoder/` were trained on this series; the data itself is not committed) | MIT (Copyright 2014-2024 Numenta Inc.; repository license covering data and labels) | <https://github.com/numenta/NAB> |
 
-The archives, the extracted images and the split lists derived from them are
-kept under `data/`, which is not committed. The committed manifests in
-`datasets/` list only paths, class indices and SHA-256 hashes of the images.
+The archives, the extracted images, the NAB files and the split lists derived
+from them are kept under `data/`, which is not committed. The committed
+manifests in `datasets/` hold only paths, class indices and SHA-256 hashes of
+the images, and for NAB the source hashes, index ranges of the splits and the
+normalization constants, not the data.
 
 `scripts/common/imagenet_classes.json` (ImageNet-1k class index, WordNet ID and
 name) combines the WordNet IDs from ImageNetV2's `data/metadata/class_info.json`

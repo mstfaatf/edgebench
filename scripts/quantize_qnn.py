@@ -41,6 +41,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common.onnx_prune import prune  # noqa: E402
+from common.onnx_quantize import strip_metadata  # noqa: E402
 from common.platform_guard import NonNativeInterpreterError, require_native_arm64  # noqa: E402
 from common.preprocess import (  # noqa: E402
     IMAGENETTE_ROOT,
@@ -247,10 +248,14 @@ def main() -> int:
     verify = read_split(VERIFY_SPLIT)
 
     with tempfile.TemporaryDirectory() as tmp:
+        # The exported FP32 files carry metadata_props, which qnn_preprocess_model in
+        # ONNX Runtime 1.32 cannot handle; the quantized models never carried them.
+        stripped = Path(tmp) / "fp32_without_metadata.onnx"
+        strip_metadata(fp32, stripped)
         preprocessed = Path(tmp) / "preprocessed.onnx"
-        changed = qnn_preprocess_model(str(fp32), str(preprocessed))
+        changed = qnn_preprocess_model(str(stripped), str(preprocessed))
         print(f"qnn_preprocess_model: {'graph modified' if changed else 'no changes'}")
-        source = preprocessed if changed else fp32
+        source = preprocessed if changed else stripped
 
         for name, (per_channel, weight_type) in VARIANTS.items():
             out = MODEL_DIR / name

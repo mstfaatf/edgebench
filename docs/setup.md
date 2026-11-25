@@ -47,7 +47,7 @@ The ARM64 build is the one tagged `-arm64`. Confirm it with `sysconfig`:
 > |---|---|---|
 > | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `scripts/export_models.py`, `scripts/export_mobilenetv2.py`, `scripts/fold_models.py`, `scripts/quantize_models.py`, `scripts/make_references.py` (except `--check`), `scripts/eval_accuracy.py`, `scripts/prepare_autoencoder.py`, `scripts/eval_anomaly.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `scripts/npu_overhead.py`, `scripts/check_autoencoder_npu.py`, `tools/qnn_rejection_check.py`, `tools/ort_probe/reference.py`, `tools/ort_probe/make_reference.py` |
 > | Environment diagnostic | Runs and reports the problem prominently | `scripts/check_env.py` |
-> | Downloads and platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/get_data.py`, `scripts/get_aihub_baseline.py`, `scripts/validate_results.py`, `scripts/make_test_models.py`, `scripts/check_hygiene.py`, `scripts/coverage_summary.py`, `scripts/validate_accuracy.py`, `scripts/model_recipes.py`, `scripts/model_info.py` (they read model files with onnx but never run them), and the tests in `scripts/tests/` |
+> | Downloads and platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/get_data.py`, `scripts/get_aihub_baseline.py`, `scripts/validate_results.py`, `scripts/make_test_models.py`, `scripts/check_hygiene.py`, `scripts/coverage_summary.py`, `scripts/validate_accuracy.py`, `scripts/check_doc_numbers.py`, `scripts/model_recipes.py`, `scripts/model_info.py` (they read model files with onnx but never run them), and the tests in `scripts/tests/` |
 > | Shared modules in `scripts/common/` | Not checked themselves. `npu_harness.py` and `ort_qnn.py` load ONNX Runtime and are imported only by guarded scripts, after the check; `onnx_export.py` and `onnx_quantize.py` import torch, onnx and ONNX Runtime inside their functions and are used by `export_models.py`, `fold_models.py`, `quantize_models.py` and their tests; `onnx_fold.py` needs onnx and NumPy only; `model_recipe.py` imports onnx inside the functions that read model files; `reference_outputs.py` imports NumPy only to generate the SplitMix64 input; `timeseries.py` is standard library only except for the two functions that build NumPy arrays; `autoencoder.py`, `autoencoder_pipeline.py` and `onnx_cleanup.py` import onnx and NumPy (the pipeline also ONNX Runtime) inside their functions, so the source-bundle checks of `autoencoder_pipeline.py` run anywhere; `anomaly_stats.py` is standard library only; `imagenet_eval.py` needs NumPy and Pillow; `accuracy_stats.py` is standard library only; the others (`preprocess.py`, `manifests.py`, `model_registry.py`, `accuracy.py`, `qnn_log.py`, `onnx_prune.py`, `qdq_inspect.py`, `results_io.py`, `cli.py`) do not | – |
 >
 > The C++ build accepts ARM64 (the measurement build) and x64 (CPU only, for
@@ -112,8 +112,10 @@ benchmark result files against the [results schema](results-schema.md):
 .\.venv\Scripts\python.exe scripts\validate_results.py benchmarks\results\published
 ```
 
-`benchmarks/results/published/` holds no result files yet, so this currently
-reports "No JSON files found" (exit code 0). `docs\examples\v1.0.0` and
+`benchmarks/results/published/` holds no benchmark result files yet; the
+accuracy and anomaly-detection results in `published/accuracy/` have their own
+schemas, so this lists them as skipped (exit code 0); they are checked with
+`scripts\validate_accuracy.py`. `docs\examples\v1.0.0` and
 `docs\examples\v1.1.0` hold example results that validate. The validator picks
 the schema from each file's `schema_version`, reports errors and warnings
 separately, and with `--strict` also fails on warnings. Its tests need only
@@ -127,10 +129,13 @@ CTest runs the same tests as `results_schema_tests` (label `schema`).
 
 ## Preparing data and models
 
-These steps produce the evaluation data and the MobileNetV2 models used by the
-benchmarks. Run them from the repository root, in order. Nothing they produce
-is committed: `data/`, `models/` (except its README), `cache/` and
-`benchmarks/results/local/` are gitignored.
+These steps produce the evaluation data, every model file listed in
+`models/manifest.json` (the three image classifiers in FP32, normalization-folded
+FP32 and INT8, and the Conv1D autoencoder), their reference outputs and the
+published accuracy results. Run them from the repository root, in order: each
+step needs the files of the steps before it. Nothing they produce is committed:
+`data/`, `models/` (except its README, `manifest.json` and `sources/`), `cache/`
+and `benchmarks/results/local/` are gitignored.
 
 ### 1. Download the datasets
 
@@ -235,66 +240,90 @@ the ONNX metadata are in [models.md](models.md).
 `scripts\export_mobilenetv2.py` exports only `mobilenetv2_fp32_b1.onnx`, the
 input of the next step.
 
-### 3. Quantize to INT8 QDQ
+### 3. Fold the normalization into the first convolution
+
+```powershell
+.\.venv\Scripts\python.exe scripts\fold_models.py
+```
+
+Writes the normalization-folded FP32 variants from the files of step 2:
+`models/<model>/<model>_fp32_folded_b<batch>.onnx`, with the mean/std folded
+into the first convolution, so they take the [0, 1] image tensor. `--verify`
+folds again and compares. See [models.md](models.md#normalization-folded-models).
+
+### 4. Quantize to INT8 QDQ
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\quantize_models.py
 ```
 
-Quantizes every FP32 file from step 2 to static INT8 QDQ with the default
+Quantizes every FP32 file from steps 2 and 3 to static INT8 QDQ with the default
 recipe (per-channel symmetric int8 weights, uint8 activations, MinMax
-calibration on the 200 calibration images): `models/<model>/<model>_int8_b<batch>.onnx`,
-pruned, plus the unpruned reference `<model>_int8_unpruned_b<batch>.onnx`, all
-listed in `models/manifest.json`. `--verify` re-quantizes and compares. Recipe,
-metadata and checks are in [models.md](models.md#int8-qdq-models).
+calibration on the 200 calibration images): `models/<model>/<model>_int8_b<batch>.onnx`
+and `<model>_int8_folded_b<batch>.onnx`, pruned, plus the unpruned references
+`<model>_int8_unpruned_b<batch>.onnx` and `<model>_int8_folded_unpruned_b<batch>.onnx`,
+all listed in `models/manifest.json`. It needs the files of both step 2 and
+step 3 (`--normalization external` or `folded` quantizes one kind only).
+`--verify` re-quantizes and compares. Recipe, metadata and checks are in
+[models.md](models.md#int8-qdq-models).
 
-Optional normalization-folded variants (mean/std folded into the first
-convolution; the models take [0, 1] input):
-
-```powershell
-.\.venv\Scripts\python.exe scripts\fold_models.py
-.\.venv\Scripts\python.exe scripts\quantize_models.py --normalization folded
-```
-
-See [models.md](models.md#normalization-folded-models).
-
-Reference outputs of every model file (CPU, and NPU for the INT8 files), used by
-the C++ `ReferenceModels` tests (label `models`):
-
-```powershell
-.\.venv\Scripts\python.exe scripts\make_references.py
-```
-
-See [models.md](models.md#reference-outputs).
-
-Accuracy of every variant on ImageNetV2 eval-full, CPU and NPU (about 15
-minutes; the first run also caches the resized images in `data/cache/`):
-
-```powershell
-.\.venv\Scripts\python.exe scripts\eval_accuracy.py
-.\.venv\Scripts\python.exe scripts\validate_accuracy.py benchmarks\results\published\accuracy
-```
-
-See [accuracy.md](accuracy.md).
+### 5. Prepare the autoencoder
 
 The Conv1D time-series autoencoder is not exported here: its FP32 files come
 from a Colab run and are committed in `models/sources/conv1d_autoencoder/`. Its
 model files (the imported graph, the cleaned FP32 graph and the INT8 models,
-with sidecars and manifest entries) are made from that source and the NAB data:
+with sidecars and manifest entries) are made from that source and the NAB data
+of step 1:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\get_data.py --dataset nab
 .\.venv\Scripts\python.exe scripts\prepare_autoencoder.py            # --verify rebuilds and compares
 .\.venv\Scripts\python.exe scripts\check_autoencoder_npu.py --models # strict NPU check, no timing
-.\.venv\Scripts\python.exe scripts\eval_anomaly.py                   # anomaly-detection results
 ```
 
-See [autoencoder.md](autoencoder.md). `make_references.py` covers these files
-too (run it after `prepare_autoencoder.py`).
+See [autoencoder.md](autoencoder.md).
+
+### 6. Check the manifest and make the reference outputs
+
+```powershell
+.\.venv\Scripts\python.exe scripts\model_recipes.py --check
+.\.venv\Scripts\python.exe scripts\make_references.py
+```
+
+`model_recipes.py --check` checks every model file, its sidecars and manifest
+entry, and the lineage ([models.md](models.md#recipes-and-the-manifest)).
+`make_references.py` writes the reference outputs of all 66 files (CPU, and NPU
+for the INT8 files) to `models/references/`, used by the C++ `ReferenceModels`
+tests (label `models`); `make_references.py --check` checks them against the
+model files. See [models.md](models.md#reference-outputs).
+
+### 7. Measure accuracy
+
+Accuracy of every image-model variant on ImageNetV2 eval-full, CPU and NPU
+(about 15 minutes; the first run also caches the resized images in
+`data/cache/`), and the autoencoder's anomaly detection on the NAB test split
+(under a minute):
+
+```powershell
+.\.venv\Scripts\python.exe scripts\eval_accuracy.py
+.\.venv\Scripts\python.exe scripts\eval_anomaly.py
+.\.venv\Scripts\python.exe scripts\validate_accuracy.py benchmarks\results\published\accuracy
+.\.venv\Scripts\python.exe scripts\check_doc_numbers.py
+```
+
+Both evaluations write to `benchmarks/results/published/accuracy/`; to compare a
+rerun with the committed results instead, pass `--output-dir` (and
+`--predictions-dir` / `--scores-dir`). Metrics and the SHA256 of the prediction
+and score files are reproducible. `check_doc_numbers.py` (standard library only,
+also run in CI) checks that the numbers quoted in README.md, accuracy.md,
+autoencoder.md and models.md match the committed results, the manifest and the
+split manifest. See [accuracy.md](accuracy.md).
+
+### 8. Feasibility-study models (optional)
 
 The feasibility study's MobileNetV2 variants (used by `eval_cpu.py`,
-`npu_check.py`, `compare_aihub.py` and `tools/ort_probe/make_reference.py`) come
-from an older script:
+`npu_check.py`, `compare_aihub.py`, `tools/ort_probe/make_reference.py`, and six
+C++ tests with the `models` label that skip without them) come from an older
+script:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\quantize_qnn.py
@@ -322,7 +351,7 @@ Each model gets a JSON sidecar recording the source model, calibration data,
 the configuration applied, the pruning result, a summary of the quantized
 graph, the ONNX Runtime version, and the model's SHA256.
 
-### 4. Check accuracy on the CPU
+#### Check accuracy on the CPU
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\eval_cpu.py
@@ -337,7 +366,7 @@ with FP32. Each run saves a new summary,
 Earlier summaries are never overwritten; the measurement scripts below follow the
 same scheme.
 
-### 5. Check the models on the NPU
+#### Check the models on the NPU
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\npu_check.py
@@ -366,7 +395,7 @@ checks should pass):
 .\.venv\Scripts\python.exe tools\qnn_rejection_check.py
 ```
 
-### 6. Compare with Qualcomm AI Hub's model
+#### Compare with Qualcomm AI Hub's model
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\get_aihub_baseline.py
@@ -625,8 +654,8 @@ the `unit` and `ort` labels only, never `models` or `npu`.
 
 | Job | Runner | What it does |
 |---|---|---|
-| `python (validator, hygiene)` | `ubuntu-latest`, Python 3.12 | Installs `requirements-ci.txt` (jsonschema and pytest, pinned); runs the validator, hygiene-check, coverage-summary, dataset-manifest, model-registry, model-manifest/recipe, reference-output, accuracy, time-series, autoencoder (source bundle, recipes, lineage) and anomaly-detection tests; validates `benchmarks/results/published/accuracy/` (classification and anomaly-detection results) with `scripts/validate_accuracy.py`; validates `docs/examples/` and `benchmarks/results/published/` with `--strict`; runs the hygiene check |
-| `windows-x64` | `windows-latest` | MSVC x64 environment; fetches the x64 ONNX Runtime; `x64` preset, Release, `/W4 /WX`; `ctest -L "unit\|ort"`; uploads the CTest log on failure |
+| `python (validator, hygiene)` | `ubuntu-latest`, Python 3.12 | Installs `requirements-ci.txt` (jsonschema and pytest, pinned); runs the validator, hygiene-check, coverage-summary, dataset-manifest, model-registry, model-manifest/recipe, reference-output, accuracy, time-series, autoencoder (source bundle, recipes, lineage), anomaly-detection and documented-numbers tests; checks the numbers quoted in the docs against the published results (`scripts/check_doc_numbers.py`); validates `benchmarks/results/published/accuracy/` (classification and anomaly-detection results) with `scripts/validate_accuracy.py`; validates `docs/examples/` and `benchmarks/results/published/` with `--strict`; runs the hygiene check |
+| `windows-x64` | `windows-latest` | MSVC x64 environment (`scripts/msvc_dev_env.ps1`: `vcvarsall.bat` of the newest Visual Studio, exported to the following steps); fetches the x64 ONNX Runtime; `x64` preset, Release, `/W4 /WX`; `ctest -L "unit\|ort"`; uploads the CTest log on failure |
 | `windows-arm64` | `windows-11-arm` | The same for ARM64 (`arm64-ninja` preset); the QNN files are bundled, but there is no NPU, so no `npu` tests run |
 | `coverage (x64)` | `windows-latest` | x64 Debug build; the `unit` and `ort` tests under [OpenCppCoverage](https://github.com/OpenCppCoverage/OpenCppCoverage) 0.9.9.0 (installer pinned by SHA256), including child processes, filtered to `engine/src`; uploads the HTML and Cobertura report (`coverage-x64` artifact) and prints per-file line coverage in the job summary. Report only, no threshold |
 
@@ -640,9 +669,10 @@ To run the same checks locally:
 
 ```powershell
 # python job (any OS; with the full .venv or a venv with requirements-ci.txt)
-python -m pytest scripts/tests/test_validate_results.py scripts/tests/test_check_hygiene.py scripts/tests/test_coverage_summary.py scripts/tests/test_manifests.py scripts/tests/test_export_models.py scripts/tests/test_model_recipes.py scripts/tests/test_references.py scripts/tests/test_accuracy_eval.py scripts/tests/test_timeseries.py scripts/tests/test_autoencoder.py scripts/tests/test_autoencoder_pipeline.py scripts/tests/test_anomaly_eval.py
+python -m pytest scripts/tests/test_validate_results.py scripts/tests/test_check_hygiene.py scripts/tests/test_coverage_summary.py scripts/tests/test_manifests.py scripts/tests/test_export_models.py scripts/tests/test_model_recipes.py scripts/tests/test_references.py scripts/tests/test_accuracy_eval.py scripts/tests/test_timeseries.py scripts/tests/test_autoencoder.py scripts/tests/test_autoencoder_pipeline.py scripts/tests/test_anomaly_eval.py scripts/tests/test_doc_numbers.py
 python scripts/validate_accuracy.py benchmarks/results/published/accuracy
 python scripts/validate_results.py --strict docs/examples benchmarks/results/published
+python scripts/check_doc_numbers.py
 python scripts/check_hygiene.py
 
 # windows-x64 job: see "x64 and Ninja builds" above

@@ -67,9 +67,10 @@ the `schema` test is not added; configure again after creating it.
 
 To benchmark a model you need an ONNX file with fixed input shapes. The
 [setup guide](docs/setup.md#preparing-data-and-models) creates FP32 models
-(MobileNetV2, ResNet-18 and EfficientNet-Lite0, batch sizes 1, 4 and 8; see [docs/models.md](docs/models.md))
-and their static INT8 QDQ versions with a Python environment
-(`scripts\export_models.py`, `scripts\quantize_models.py`), and the files of the
+(MobileNetV2, ResNet-18 and EfficientNet-Lite0, batch sizes 1, 4 and 8; see [docs/models.md](docs/models.md)),
+their normalization-folded variants and their static INT8 QDQ versions with a
+Python environment (`scripts\export_models.py`, `scripts\fold_models.py`,
+`scripts\quantize_models.py`), and the files of the
 Conv1D time-series autoencoder from its committed source
 (`scripts\prepare_autoencoder.py`). Then:
 
@@ -113,8 +114,10 @@ Tests carry CTest labels by what they need: `unit` (nothing), `ort` (the ONNX
 Runtime DLLs), `models` (locally prepared models), `npu` (the NPU) and
 `schema` (the Python environment). Continuous integration builds with
 `/W4 /WX` and runs `unit` and `ort` on Windows x64 and ARM64 runners, line
-coverage on x64, and the result validator, dataset manifest and repository
-hygiene tests on Linux. See [Test labels](docs/setup.md#test-labels) and
+coverage on x64, and on Linux the result and accuracy validators, the
+manifest and pipeline tests that need no model files, a check that the numbers
+quoted in the documentation match the published results, and the repository
+hygiene check. See [Test labels](docs/setup.md#test-labels) and
 [Continuous integration](docs/setup.md#continuous-integration).
 
 ## Documentation
@@ -123,7 +126,8 @@ hygiene tests on Linux. See [Test labels](docs/setup.md#test-labels) and
   statistics, recorded system state, and what EdgeBench does not claim
 - [docs/models.md](docs/models.md): supported models (MobileNetV2, ResNet-18,
   EfficientNet-Lite0, and the imported Conv1D autoencoder), weights, export
-  settings and checks; the models expect normalized input
+  settings and checks; which input each file expects (normalized, or [0, 1] for
+  the normalization-folded files)
 - [docs/accuracy.md](docs/accuracy.md): accuracy of every variant on ImageNetV2,
   CPU and NPU, and the CPU vs NPU comparison
 - [docs/autoencoder.md](docs/autoencoder.md): time-series anomaly-detection

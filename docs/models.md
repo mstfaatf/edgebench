@@ -201,7 +201,9 @@ sidecars are not committed (`models/` is gitignored except its README,
 variants `fp32_imported`, `fp32`, `int8` and `int8_unpruned`. Two sidecars sit next to each file:
 `<name>.json` records the results of the checks the making script ran (see
 below), and `<name>.recipe.json` records how the file was made
-([Recipes and the manifest](#recipes-and-the-manifest)). The INT8 models of the
+([Recipes and the manifest](#recipes-and-the-manifest)). The image models'
+unpruned INT8 files have only the recipe sidecar: the checks that involve them
+(pruned == unpruned) are recorded in the pruned file's `<name>.json`. The INT8 models of the
 feasibility study (`scripts/quantize_qnn.py`) also live in `models/mobilenetv2/`;
 they have no recipe sidecar and are not in the manifest.
 

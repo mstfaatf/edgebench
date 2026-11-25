@@ -52,12 +52,16 @@ jobs:
           scripts/tests/test_autoencoder.py
           scripts/tests/test_autoencoder_pipeline.py
           scripts/tests/test_anomaly_eval.py
+          scripts/tests/test_doc_numbers.py
 
       - name: Validate example and published results
         run: python scripts/validate_results.py --strict docs/examples benchmarks/results/published
 
       - name: Validate published accuracy results
         run: python scripts/validate_accuracy.py benchmarks/results/published/accuracy
+
+      - name: Documented numbers match the published results
+        run: python scripts/check_doc_numbers.py
 
       - name: Hygiene check
         run: python scripts/check_hygiene.py --base origin/main
@@ -101,9 +105,9 @@ jobs:
           & "$env:RUNNER_TEMP\venv\Scripts\python.exe" -m pip install --only-binary=:all: -r requirements-ci.txt
           "EDGEBENCH_CI_PYTHON=$env:RUNNER_TEMP\venv\Scripts\python.exe" >> $env:GITHUB_ENV
 
-      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
-        with:
-          arch: ${{ matrix.msvc_arch }}
+      - name: MSVC developer environment
+        shell: pwsh
+        run: ./scripts/msvc_dev_env.ps1 -Arch ${{ matrix.msvc_arch }}
 
       - name: Cache ONNX Runtime
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -159,9 +163,9 @@ jobs:
           & "$env:RUNNER_TEMP\venv\Scripts\python.exe" -m pip install --only-binary=:all: -r requirements-ci.txt
           "EDGEBENCH_CI_PYTHON=$env:RUNNER_TEMP\venv\Scripts\python.exe" >> $env:GITHUB_ENV
 
-      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
-        with:
-          arch: amd64
+      - name: MSVC developer environment
+        shell: pwsh
+        run: ./scripts/msvc_dev_env.ps1 -Arch amd64
 
       - name: Cache ONNX Runtime
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
