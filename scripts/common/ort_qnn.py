@@ -34,6 +34,36 @@ QNN_EP = "QNNExecutionProvider"
 STRICT_CONFIG = {"session.disable_cpu_ep_fallback": "1"}
 
 
+# --------------------------------------------------------------------------- versions
+
+
+def file_product_version(path: Path) -> str | None:
+    """The ProductVersion string of a Windows DLL's version resource."""
+    version = ctypes.WinDLL("version")
+    size = version.GetFileVersionInfoSizeW(str(path), None)
+    if not size:
+        return None
+    buf = ctypes.create_string_buffer(size)
+    if not version.GetFileVersionInfoW(str(path), 0, size, buf):
+        return None
+    value, length = ctypes.c_wchar_p(), ctypes.c_uint()
+    # Language 0409 (US English), code page 04B0 (Unicode): what the QNN DLLs use.
+    if not version.VerQueryValueW(buf, r"\StringFileInfo\040904B0\ProductVersion",
+                                  ctypes.byref(value), ctypes.byref(length)):
+        return None
+    return value.value
+
+
+def htp_backend_path() -> Path:
+    return Path(onnxruntime_qnn.get_library_path()).parent / "QnnHtp.dll"
+
+
+def qnn_versions() -> dict[str, str | None]:
+    """The QNN execution provider package version and the QNN backend (SDK) build."""
+    return {"onnxruntime_qnn": onnxruntime_qnn.__version__,
+            "qnn_backend": file_product_version(htp_backend_path())}
+
+
 # --------------------------------------------------------------------------- devices
 
 

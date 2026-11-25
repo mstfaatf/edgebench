@@ -20,8 +20,12 @@ and writes results as schema-validated JSON plus CSV.
   execution provider has been verified in a separate diagnostic tool and in the
   Python scripts ([feasibility note](docs/feasibility.md)); the engine's NPU
   provider is not built yet.
-- **No published results yet.** Numbers in the docs are methodology checks from
-  one machine, not benchmark results.
+- **Accuracy results are published**: every model variant on ImageNetV2,
+  on the CPU and on the NPU (strict mode), with confidence intervals and paired
+  CPU vs NPU comparisons ([docs/accuracy.md](docs/accuracy.md)). On the same
+  INT8 file the NPU matches the CPU within 0.15 top-1 points.
+- **No published latency results yet.** Latency numbers in the docs are
+  methodology checks from one machine, not benchmark results.
 
 ## Requirements
 
@@ -115,6 +119,8 @@ hygiene tests on Linux. See [Test labels](docs/setup.md#test-labels) and
   statistics, recorded system state, and what EdgeBench does not claim
 - [docs/models.md](docs/models.md): supported models, weights, export settings
   and checks; the models expect normalized input
+- [docs/accuracy.md](docs/accuracy.md): accuracy of every variant on ImageNetV2,
+  CPU and NPU, and the CPU vs NPU comparison
 - [docs/cli.md](docs/cli.md): `edgebench` commands, options, output and exit
   codes
 - [docs/results-schema.md](docs/results-schema.md): result file format (JSON

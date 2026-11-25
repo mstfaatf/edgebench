@@ -25,6 +25,12 @@ first convolution, so the model takes [0, 1] input and the timed run includes
 whatever the fold adds). Only results with the same normalization placement
 measure the same work ([models.md](models.md#normalization-folded-models)).
 
+Latency is only half of a CPU vs NPU comparison: the two devices compute an
+INT8 model with different kernels, so their outputs differ. The accuracy of
+every variant on each device, and whether the NPU's accuracy on the same INT8
+file matches the CPU's, is measured separately and needs no idle machine
+([accuracy.md](accuracy.md)).
+
 Session creation is measured separately (`timing.session_init.cold_ms`, one
 value per trial) and is never mixed into the iteration latencies.
 

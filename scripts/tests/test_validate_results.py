@@ -108,7 +108,9 @@ def test_examples_are_marked_illustrative(path):
     assert any(w["code"] == "illustrative_example" for w in doc["warnings"])
 
 
-@pytest.mark.parametrize("path", sorted(PUBLISHED.rglob("*.json")), ids=rel)
+# Accuracy results have their own schema and validator (scripts/validate_accuracy.py).
+@pytest.mark.parametrize("path", sorted(p for p in PUBLISHED.rglob("*.json")
+                                        if not vr.is_accuracy_document(p)), ids=rel)
 def test_published_results_are_valid(validators, path):
     assert vr.errors(vr.validate_file(path, validators)) == []
 

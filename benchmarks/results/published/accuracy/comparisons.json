@@ -1,0 +1,459 @@
+{
+  "accuracy_schema_version": "1.0.0",
+  "kind": "comparisons",
+  "timestamp_utc": "2026-11-25T00:03:20.121Z",
+  "dataset": {
+    "name": "ImageNetV2 matched-frequency",
+    "split": "eval-full",
+    "manifest": "datasets/imagenetv2-matched-frequency/eval-full.tsv",
+    "manifest_sha256": "f28c92578baeb703b3674c055c014b7c6bacb7eb1ba5e6b3f011aabb1dcd42b4",
+    "image_count": 10000,
+    "label_source": "manifest label = integer folder name; class order of scripts/common/imagenet_classes.json"
+  },
+  "test": "mcnemar_exact",
+  "runs": {
+    "efficientnet_lite0_fp32_cpu": {
+      "status": "success",
+      "top5_indices_sha256": "89123e486023579d1041a78013a09dd9234b820b060afb624ffca0fbe41da87a"
+    },
+    "efficientnet_lite0_fp32_folded_cpu": {
+      "status": "success",
+      "top5_indices_sha256": "89123e486023579d1041a78013a09dd9234b820b060afb624ffca0fbe41da87a"
+    },
+    "efficientnet_lite0_fp32_npu_fp16": {
+      "status": "success",
+      "top5_indices_sha256": "73bf390c92698e91c4894aa862a08420a2b67330322bd4feef1879ed21bdc4d1"
+    },
+    "efficientnet_lite0_int8_cpu": {
+      "status": "success",
+      "top5_indices_sha256": "d8ce3c6205cb548102bcf4b8474cbcadd4be5a3f4625a94dc81ffe12607d12fd"
+    },
+    "efficientnet_lite0_int8_folded_cpu": {
+      "status": "success",
+      "top5_indices_sha256": "3cf8b2d29082a1ea6d681e5d16c7357dc763e3e441d38e02b6e26806e6dc363d"
+    },
+    "efficientnet_lite0_int8_folded_npu": {
+      "status": "success",
+      "top5_indices_sha256": "1ec828b02a3e2b66c287aba5d48a273a3f8ceb6c9d9ec7106d45f7e0df765e31"
+    },
+    "efficientnet_lite0_int8_npu": {
+      "status": "success",
+      "top5_indices_sha256": "aca99339db4549bb8234a40df14d1d602777a3a81e06486c485b7b69408685e2"
+    },
+    "mobilenetv2_fp32_cpu": {
+      "status": "success",
+      "top5_indices_sha256": "720df88cf0302dd4cde795e1ad00a89cb9b75ef8963462af1fec96daffa7e52f"
+    },
+    "mobilenetv2_fp32_folded_cpu": {
+      "status": "success",
+      "top5_indices_sha256": "720df88cf0302dd4cde795e1ad00a89cb9b75ef8963462af1fec96daffa7e52f"
+    },
+    "mobilenetv2_fp32_npu_fp16": {
+      "status": "success",
+      "top5_indices_sha256": "42ea8926a7a063504eca1bca903bb4848aaf7be0df5b74fa5a336a6b77dcc0b5"
+    },
+    "mobilenetv2_int8_cpu": {
+      "status": "success",
+      "top5_indices_sha256": "967672c2ac954621059458865250a3f26796345009f4f4b9f771bab254f2da06"
+    },
+    "mobilenetv2_int8_folded_cpu": {
+      "status": "success",
+      "top5_indices_sha256": "33aa0c230b52c59fc47661419baeab69f42c9b47a4276056aa51a5591912d953"
+    },
+    "mobilenetv2_int8_folded_npu": {
+      "status": "success",
+      "top5_indices_sha256": "9cc58b004968111a358307023558b20ca616414dafc6763ea21aade86dde61fe"
+    },
+    "mobilenetv2_int8_npu": {
+      "status": "success",
+      "top5_indices_sha256": "e5e071ca4197164d5eaea05c86a0ebf89b3fae1cd05191691bb5fc14626e9bdb"
+    },
+    "resnet18_fp32_cpu": {
+      "status": "success",
+      "top5_indices_sha256": "a75a2570fae0a4002fb21a4fb915419d1868e524602db28ea492f0755cd619a3"
+    },
+    "resnet18_fp32_folded_cpu": {
+      "status": "success",
+      "top5_indices_sha256": "a75a2570fae0a4002fb21a4fb915419d1868e524602db28ea492f0755cd619a3"
+    },
+    "resnet18_fp32_npu_fp16": {
+      "status": "success",
+      "top5_indices_sha256": "158165cf00e86eba47d08f136327e0388c8dcd70ec2a3316b50777be853ab656"
+    },
+    "resnet18_int8_cpu": {
+      "status": "success",
+      "top5_indices_sha256": "ffaf46f7bf4e5ff649cd7f55e50055653aef31204ba93cb862b6d62daebbe632"
+    },
+    "resnet18_int8_folded_cpu": {
+      "status": "success",
+      "top5_indices_sha256": "df3276549c8687f24beeadd6162bd1b803cc569381af655c9f0d7314765eba78"
+    },
+    "resnet18_int8_folded_npu": {
+      "status": "success",
+      "top5_indices_sha256": "34e10db3a92a8a359bcdf9368fa5b6fdf974c04e0735a7ab0aea3c074dd782e6"
+    },
+    "resnet18_int8_npu": {
+      "status": "success",
+      "top5_indices_sha256": "02a479b6271f4003f5b914abd0d04f835b74dde904fc134843075f53e0c722ec"
+    }
+  },
+  "comparisons": [
+    {
+      "name": "efficientnet_lite0: NPU INT8 vs CPU INT8",
+      "question": "Does the NPU get the same accuracy as the CPU on the same INT8 file (external normalization)?",
+      "a": "efficientnet_lite0_int8_npu",
+      "b": "efficientnet_lite0_int8_cpu",
+      "top1_a": 0.626,
+      "top1_b": 0.6259,
+      "top1_delta": 9.999999999998899e-05,
+      "top1_agreement": 0.9709,
+      "counts": {
+        "both_correct": 6202,
+        "only_a_correct": 58,
+        "only_b_correct": 57,
+        "both_wrong": 3683
+      },
+      "p_value": 1.0
+    },
+    {
+      "name": "efficientnet_lite0: NPU INT8 folded vs CPU INT8 folded",
+      "question": "Does the NPU get the same accuracy as the CPU on the same INT8 file (normalization folded)?",
+      "a": "efficientnet_lite0_int8_folded_npu",
+      "b": "efficientnet_lite0_int8_folded_cpu",
+      "top1_a": 0.6285,
+      "top1_b": 0.6272,
+      "top1_delta": 0.0012999999999999678,
+      "top1_agreement": 0.9718,
+      "counts": {
+        "both_correct": 6215,
+        "only_a_correct": 70,
+        "only_b_correct": 57,
+        "both_wrong": 3658
+      },
+      "p_value": 0.28691460720309814
+    },
+    {
+      "name": "efficientnet_lite0: CPU INT8 vs CPU FP32",
+      "question": "What does INT8 quantization cost (external normalization)?",
+      "a": "efficientnet_lite0_int8_cpu",
+      "b": "efficientnet_lite0_fp32_cpu",
+      "top1_a": 0.6259,
+      "top1_b": 0.6277,
+      "top1_delta": -0.0018000000000000238,
+      "top1_agreement": 0.9474,
+      "counts": {
+        "both_correct": 6154,
+        "only_a_correct": 105,
+        "only_b_correct": 123,
+        "both_wrong": 3618
+      },
+      "p_value": 0.26018223025239634
+    },
+    {
+      "name": "efficientnet_lite0: CPU INT8 folded vs CPU FP32 folded",
+      "question": "What does INT8 quantization cost (normalization folded)?",
+      "a": "efficientnet_lite0_int8_folded_cpu",
+      "b": "efficientnet_lite0_fp32_folded_cpu",
+      "top1_a": 0.6272,
+      "top1_b": 0.6277,
+      "top1_delta": -0.000500000000000056,
+      "top1_agreement": 0.9395,
+      "counts": {
+        "both_correct": 6146,
+        "only_a_correct": 126,
+        "only_b_correct": 131,
+        "both_wrong": 3597
+      },
+      "p_value": 0.8030229037909535
+    },
+    {
+      "name": "efficientnet_lite0: CPU FP32 folded vs CPU FP32",
+      "question": "Does folding the normalization change FP32 accuracy?",
+      "a": "efficientnet_lite0_fp32_folded_cpu",
+      "b": "efficientnet_lite0_fp32_cpu",
+      "top1_a": 0.6277,
+      "top1_b": 0.6277,
+      "top1_delta": 0.0,
+      "top1_agreement": 1.0,
+      "counts": {
+        "both_correct": 6277,
+        "only_a_correct": 0,
+        "only_b_correct": 0,
+        "both_wrong": 3723
+      },
+      "p_value": 1.0
+    },
+    {
+      "name": "efficientnet_lite0: CPU INT8 folded vs CPU INT8",
+      "question": "Does folding the normalization change INT8 accuracy?",
+      "a": "efficientnet_lite0_int8_folded_cpu",
+      "b": "efficientnet_lite0_int8_cpu",
+      "top1_a": 0.6272,
+      "top1_b": 0.6259,
+      "top1_delta": 0.0012999999999999678,
+      "top1_agreement": 0.9595,
+      "counts": {
+        "both_correct": 6181,
+        "only_a_correct": 91,
+        "only_b_correct": 78,
+        "both_wrong": 3650
+      },
+      "p_value": 0.35600412650468466
+    },
+    {
+      "name": "efficientnet_lite0: NPU FP16 vs CPU FP32",
+      "question": "What does FP16 compute on the NPU cost against FP32 on the CPU (same FP32 file)?",
+      "a": "efficientnet_lite0_fp32_npu_fp16",
+      "b": "efficientnet_lite0_fp32_cpu",
+      "top1_a": 0.6278,
+      "top1_b": 0.6277,
+      "top1_delta": 9.999999999998899e-05,
+      "top1_agreement": 0.9974,
+      "counts": {
+        "both_correct": 6271,
+        "only_a_correct": 7,
+        "only_b_correct": 6,
+        "both_wrong": 3716
+      },
+      "p_value": 1.0
+    },
+    {
+      "name": "mobilenetv2: NPU INT8 vs CPU INT8",
+      "question": "Does the NPU get the same accuracy as the CPU on the same INT8 file (external normalization)?",
+      "a": "mobilenetv2_int8_npu",
+      "b": "mobilenetv2_int8_cpu",
+      "top1_a": 0.5913,
+      "top1_b": 0.5918,
+      "top1_delta": -0.0004999999999999449,
+      "top1_agreement": 0.9522,
+      "counts": {
+        "both_correct": 5816,
+        "only_a_correct": 97,
+        "only_b_correct": 102,
+        "both_wrong": 3985
+      },
+      "p_value": 0.776837706894034
+    },
+    {
+      "name": "mobilenetv2: NPU INT8 folded vs CPU INT8 folded",
+      "question": "Does the NPU get the same accuracy as the CPU on the same INT8 file (normalization folded)?",
+      "a": "mobilenetv2_int8_folded_npu",
+      "b": "mobilenetv2_int8_folded_cpu",
+      "top1_a": 0.5933,
+      "top1_b": 0.5919,
+      "top1_delta": 0.0014000000000000679,
+      "top1_agreement": 0.9538,
+      "counts": {
+        "both_correct": 5822,
+        "only_a_correct": 111,
+        "only_b_correct": 97,
+        "both_wrong": 3970
+      },
+      "p_value": 0.3674194207113102
+    },
+    {
+      "name": "mobilenetv2: CPU INT8 vs CPU FP32",
+      "question": "What does INT8 quantization cost (external normalization)?",
+      "a": "mobilenetv2_int8_cpu",
+      "b": "mobilenetv2_fp32_cpu",
+      "top1_a": 0.5918,
+      "top1_b": 0.5956,
+      "top1_delta": -0.0038000000000000256,
+      "top1_agreement": 0.9224,
+      "counts": {
+        "both_correct": 5771,
+        "only_a_correct": 147,
+        "only_b_correct": 185,
+        "both_wrong": 3897
+      },
+      "p_value": 0.042129713088694565
+    },
+    {
+      "name": "mobilenetv2: CPU INT8 folded vs CPU FP32 folded",
+      "question": "What does INT8 quantization cost (normalization folded)?",
+      "a": "mobilenetv2_int8_folded_cpu",
+      "b": "mobilenetv2_fp32_folded_cpu",
+      "top1_a": 0.5919,
+      "top1_b": 0.5956,
+      "top1_delta": -0.0037000000000000366,
+      "top1_agreement": 0.9212,
+      "counts": {
+        "both_correct": 5762,
+        "only_a_correct": 157,
+        "only_b_correct": 194,
+        "both_wrong": 3887
+      },
+      "p_value": 0.054509006815369763
+    },
+    {
+      "name": "mobilenetv2: CPU FP32 folded vs CPU FP32",
+      "question": "Does folding the normalization change FP32 accuracy?",
+      "a": "mobilenetv2_fp32_folded_cpu",
+      "b": "mobilenetv2_fp32_cpu",
+      "top1_a": 0.5956,
+      "top1_b": 0.5956,
+      "top1_delta": 0.0,
+      "top1_agreement": 1.0,
+      "counts": {
+        "both_correct": 5956,
+        "only_a_correct": 0,
+        "only_b_correct": 0,
+        "both_wrong": 4044
+      },
+      "p_value": 1.0
+    },
+    {
+      "name": "mobilenetv2: CPU INT8 folded vs CPU INT8",
+      "question": "Does folding the normalization change INT8 accuracy?",
+      "a": "mobilenetv2_int8_folded_cpu",
+      "b": "mobilenetv2_int8_cpu",
+      "top1_a": 0.5919,
+      "top1_b": 0.5918,
+      "top1_delta": 9.999999999998899e-05,
+      "top1_agreement": 0.9434,
+      "counts": {
+        "both_correct": 5801,
+        "only_a_correct": 118,
+        "only_b_correct": 117,
+        "both_wrong": 3964
+      },
+      "p_value": 1.0
+    },
+    {
+      "name": "mobilenetv2: NPU FP16 vs CPU FP32",
+      "question": "What does FP16 compute on the NPU cost against FP32 on the CPU (same FP32 file)?",
+      "a": "mobilenetv2_fp32_npu_fp16",
+      "b": "mobilenetv2_fp32_cpu",
+      "top1_a": 0.595,
+      "top1_b": 0.5956,
+      "top1_delta": -0.0006000000000000449,
+      "top1_agreement": 0.9965,
+      "counts": {
+        "both_correct": 5946,
+        "only_a_correct": 4,
+        "only_b_correct": 10,
+        "both_wrong": 4040
+      },
+      "p_value": 0.1795654296875
+    },
+    {
+      "name": "resnet18: NPU INT8 vs CPU INT8",
+      "question": "Does the NPU get the same accuracy as the CPU on the same INT8 file (external normalization)?",
+      "a": "resnet18_int8_npu",
+      "b": "resnet18_int8_cpu",
+      "top1_a": 0.5721,
+      "top1_b": 0.5708,
+      "top1_delta": 0.0013000000000000789,
+      "top1_agreement": 0.9626,
+      "counts": {
+        "both_correct": 5653,
+        "only_a_correct": 68,
+        "only_b_correct": 55,
+        "both_wrong": 4224
+      },
+      "p_value": 0.2791985549760796
+    },
+    {
+      "name": "resnet18: NPU INT8 folded vs CPU INT8 folded",
+      "question": "Does the NPU get the same accuracy as the CPU on the same INT8 file (normalization folded)?",
+      "a": "resnet18_int8_folded_npu",
+      "b": "resnet18_int8_folded_cpu",
+      "top1_a": 0.5727,
+      "top1_b": 0.5712,
+      "top1_delta": 0.0014999999999999458,
+      "top1_agreement": 0.9615,
+      "counts": {
+        "both_correct": 5653,
+        "only_a_correct": 74,
+        "only_b_correct": 59,
+        "both_wrong": 4214
+      },
+      "p_value": 0.22462992985836266
+    },
+    {
+      "name": "resnet18: CPU INT8 vs CPU FP32",
+      "question": "What does INT8 quantization cost (external normalization)?",
+      "a": "resnet18_int8_cpu",
+      "b": "resnet18_fp32_cpu",
+      "top1_a": 0.5708,
+      "top1_b": 0.5728,
+      "top1_delta": -0.0020000000000000018,
+      "top1_agreement": 0.9505,
+      "counts": {
+        "both_correct": 5625,
+        "only_a_correct": 83,
+        "only_b_correct": 103,
+        "both_wrong": 4189
+      },
+      "p_value": 0.16339823196739311
+    },
+    {
+      "name": "resnet18: CPU INT8 folded vs CPU FP32 folded",
+      "question": "What does INT8 quantization cost (normalization folded)?",
+      "a": "resnet18_int8_folded_cpu",
+      "b": "resnet18_fp32_folded_cpu",
+      "top1_a": 0.5712,
+      "top1_b": 0.5728,
+      "top1_delta": -0.0015999999999999348,
+      "top1_agreement": 0.9466,
+      "counts": {
+        "both_correct": 5619,
+        "only_a_correct": 93,
+        "only_b_correct": 109,
+        "both_wrong": 4179
+      },
+      "p_value": 0.2912226705584375
+    },
+    {
+      "name": "resnet18: CPU FP32 folded vs CPU FP32",
+      "question": "Does folding the normalization change FP32 accuracy?",
+      "a": "resnet18_fp32_folded_cpu",
+      "b": "resnet18_fp32_cpu",
+      "top1_a": 0.5728,
+      "top1_b": 0.5728,
+      "top1_delta": 0.0,
+      "top1_agreement": 1.0,
+      "counts": {
+        "both_correct": 5728,
+        "only_a_correct": 0,
+        "only_b_correct": 0,
+        "both_wrong": 4272
+      },
+      "p_value": 1.0
+    },
+    {
+      "name": "resnet18: CPU INT8 folded vs CPU INT8",
+      "question": "Does folding the normalization change INT8 accuracy?",
+      "a": "resnet18_int8_folded_cpu",
+      "b": "resnet18_int8_cpu",
+      "top1_a": 0.5712,
+      "top1_b": 0.5708,
+      "top1_delta": 0.00040000000000006697,
+      "top1_agreement": 0.9504,
+      "counts": {
+        "both_correct": 5618,
+        "only_a_correct": 94,
+        "only_b_correct": 90,
+        "both_wrong": 4198
+      },
+      "p_value": 0.8250403507533893
+    },
+    {
+      "name": "resnet18: NPU FP16 vs CPU FP32",
+      "question": "What does FP16 compute on the NPU cost against FP32 on the CPU (same FP32 file)?",
+      "a": "resnet18_fp32_npu_fp16",
+      "b": "resnet18_fp32_cpu",
+      "top1_a": 0.5729,
+      "top1_b": 0.5728,
+      "top1_delta": 9.999999999998899e-05,
+      "top1_agreement": 0.9989,
+      "counts": {
+        "both_correct": 5726,
+        "only_a_correct": 3,
+        "only_b_correct": 2,
+        "both_wrong": 4269
+      },
+      "p_value": 1.0
+    }
+  ]
+}

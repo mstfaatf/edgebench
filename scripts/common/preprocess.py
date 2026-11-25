@@ -82,15 +82,26 @@ def _center_crop(img: Image.Image, size: int) -> Image.Image:
     return img.crop((left, top, left + size, top + size))
 
 
+def preprocess_image_uint8(img: Image.Image) -> np.ndarray:
+    """Steps 1-3: the resized and center-cropped RGB image as a [224, 224, 3] uint8 array."""
+    img = _center_crop(_resize_shorter_side(img.convert("RGB"), RESIZE_SIZE), CROP_SIZE)
+    return np.asarray(img, dtype=np.uint8)
+
+
+def unit_from_uint8(hwc: np.ndarray) -> np.ndarray:
+    """Steps 4 and 6 for [224, 224, 3] or [N, 224, 224, 3] uint8: float32 NCHW in [0, 1]."""
+    x = hwc.astype(np.float32) / 255.0
+    x = x[np.newaxis] if x.ndim == 3 else x
+    return np.ascontiguousarray(x.transpose(0, 3, 1, 2), dtype=np.float32)
+
+
 def preprocess_image_unit(img: Image.Image) -> np.ndarray:
     """Steps 1-4 and 6: a [1, 3, 224, 224] float32 RGB array in [0, 1], not normalized.
 
     For models that normalize internally (e.g. Qualcomm AI Hub exports, which take a
     [0, 1] image and quantize it to uint8).
     """
-    img = _center_crop(_resize_shorter_side(img.convert("RGB"), RESIZE_SIZE), CROP_SIZE)
-    x = np.asarray(img, dtype=np.float32) / 255.0  # HWC
-    return np.ascontiguousarray(x.transpose(2, 0, 1)[np.newaxis], dtype=np.float32)
+    return unit_from_uint8(preprocess_image_uint8(img))
 
 
 def normalize(x_unit: np.ndarray, mean: tuple[float, ...] = MEAN,

@@ -14,7 +14,9 @@ Usage:
     python scripts/validate_results.py FILE_OR_DIR [FILE_OR_DIR ...]
     python scripts/validate_results.py --strict benchmarks/results/published
 
-Directories are searched recursively for *.json files. Exits with status 1 if
+Directories are searched recursively for *.json files. Accuracy results (files
+with accuracy_schema_version, written by scripts/eval_accuracy.py) are reported
+as skipped: scripts/validate_accuracy.py checks them. Exits with status 1 if
 any file fails, 2 on usage errors.
 
 Platform-independent: needs only Python 3.10+ and jsonschema, so result files
@@ -567,6 +569,15 @@ def collect_files(paths: Iterable[Path]) -> list[Path]:
     return files
 
 
+def is_accuracy_document(path: Path) -> bool:
+    """An accuracy result (scripts/eval_accuracy.py), which has its own schema and validator."""
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(doc, dict) and "accuracy_schema_version" in doc
+
+
 def make_output_safe() -> None:
     """Never fail on printing: replace characters the console encoding cannot show.
 
@@ -598,8 +609,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     validators = Validators(forced_schema=load_schema(args.schema) if args.schema else None)
-    failed = warned = 0
+    failed = warned = skipped = 0
     for path in files:
+        if is_accuracy_document(path):
+            skipped += 1
+            print(f"SKIP {path} (accuracy result: checked by scripts/validate_accuracy.py)")
+            continue
         issues = validate_file(path, validators)
         n_errors, n_warnings = len(errors(issues)), len(warnings_of(issues))
         warned += n_warnings > 0
@@ -610,7 +625,8 @@ def main(argv: list[str] | None = None) -> int:
         for issue in sorted(issues, key=lambda i: i.severity != ERROR):
             print(f"  {issue}")
     mode = " (strict: warnings fail)" if args.strict else ""
-    print(f"\n{len(files) - failed} passed, {failed} failed, {warned} with warnings{mode}")
+    print(f"\n{len(files) - failed - skipped} passed, {failed} failed, {warned} with warnings"
+          + (f", {skipped} skipped" if skipped else "") + mode)
     return 1 if failed else 0
 
 

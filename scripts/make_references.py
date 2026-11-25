@@ -26,7 +26,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import ctypes
 import hashlib
 import shutil
 import sys
@@ -36,23 +35,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common import reference_outputs as ro  # noqa: E402
 from common.model_registry import MODELS_DIR, read_manifest  # noqa: E402
-
-
-def file_product_version(path: Path) -> str | None:
-    """The ProductVersion string of a Windows DLL's version resource."""
-    version = ctypes.WinDLL("version")
-    size = version.GetFileVersionInfoSizeW(str(path), None)
-    if not size:
-        return None
-    buf = ctypes.create_string_buffer(size)
-    if not version.GetFileVersionInfoW(str(path), 0, size, buf):
-        return None
-    value, length = ctypes.c_wchar_p(), ctypes.c_uint()
-    # Language 0409 (US English), code page 04B0 (Unicode): what the QNN DLLs use.
-    if not version.VerQueryValueW(buf, r"\StringFileInfo\040904B0\ProductVersion",
-                                  ctypes.byref(value), ctypes.byref(length)):
-        return None
-    return value.value
 
 
 def cpu_session(path: Path):
@@ -164,13 +146,10 @@ def generate(npu: bool) -> int:
 
     qnn = {}
     if npu:
-        import onnxruntime_qnn
-
         from common import onnx_quantize as oq
+        from common.ort_qnn import qnn_versions
 
-        backend = Path(onnxruntime_qnn.get_library_path()).parent / "QnnHtp.dll"
-        qnn = {"onnxruntime_qnn": onnxruntime_qnn.__version__,
-               "qnn_backend": file_product_version(backend)}
+        qnn = qnn_versions()
 
     failures = 0
     for entry in present:

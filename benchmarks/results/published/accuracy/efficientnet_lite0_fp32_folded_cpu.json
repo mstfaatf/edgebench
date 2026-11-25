@@ -1,0 +1,100 @@
+{
+  "accuracy_schema_version": "1.0.0",
+  "kind": "run",
+  "run_id": "efficientnet_lite0_fp32_folded_cpu",
+  "timestamp_utc": "2026-11-24T23:36:19.931Z",
+  "status": "success",
+  "error": null,
+  "model": {
+    "file": "efficientnet_lite0/efficientnet_lite0_fp32_folded_b8.onnx",
+    "sha256": "da05590cd9f551d4c2fb2dd7f270b5bed9b3fa0d14076d48e854b4b3eddd66ff",
+    "model": "efficientnet_lite0",
+    "variant": "fp32_folded",
+    "stored_precision": "fp32",
+    "normalization": "folded",
+    "batch_size": 8
+  },
+  "execution": {
+    "device": "cpu",
+    "execution_provider": "CPUExecutionProvider",
+    "strict": false,
+    "compute_precision": "fp32",
+    "intra_op_threads": 4,
+    "provider_options": {},
+    "session_config": {},
+    "batch_equivalence": {
+      "split": "eval-quick",
+      "reference_batch": 1,
+      "identical_top5": true,
+      "images": 1000,
+      "candidates": {
+        "b1": "identical",
+        "b4": "identical",
+        "b8": "identical"
+      }
+    }
+  },
+  "dataset": {
+    "name": "ImageNetV2 matched-frequency",
+    "split": "eval-full",
+    "manifest": "datasets/imagenetv2-matched-frequency/eval-full.tsv",
+    "manifest_sha256": "f28c92578baeb703b3674c055c014b7c6bacb7eb1ba5e6b3f011aabb1dcd42b4",
+    "image_count": 10000,
+    "label_source": "manifest label = integer folder name; class order of scripts/common/imagenet_classes.json"
+  },
+  "preprocessing": {
+    "resize_shorter_side": 256,
+    "interpolation": "bilinear (PIL)",
+    "center_crop": 224,
+    "scale": "1/255",
+    "mean": null,
+    "std": null,
+    "input": "[0, 1]",
+    "image_cache": {
+      "used": true,
+      "verified_sample": 200,
+      "bit_identical": true
+    }
+  },
+  "metrics": {
+    "top1": {
+      "correct": 6277,
+      "total": 10000,
+      "accuracy": 0.6277,
+      "ci95": {
+        "low": 0.6181778422504763,
+        "high": 0.6371240845656528,
+        "method": "wilson"
+      }
+    },
+    "top5": {
+      "correct": 8402,
+      "total": 10000,
+      "accuracy": 0.8402,
+      "ci95": {
+        "low": 0.8328878452721584,
+        "high": 0.8472508822364331,
+        "method": "wilson"
+      }
+    }
+  },
+  "predictions": {
+    "top5_indices": {
+      "file": "benchmarks/results/local/accuracy/predictions/efficientnet_lite0_fp32_folded_cpu.top5_indices.npy",
+      "sha256": "89123e486023579d1041a78013a09dd9234b820b060afb624ffca0fbe41da87a"
+    },
+    "top5_logits": {
+      "file": "benchmarks/results/local/accuracy/predictions/efficientnet_lite0_fp32_folded_cpu.top5_logits.npy",
+      "sha256": "0b21eea9070ff5f90903b3b49accc7f9517247276b212ad1c85d125fa3d830d1"
+    }
+  },
+  "environment": {
+    "python": "3.12.8",
+    "numpy": "2.5.5",
+    "onnxruntime": "1.32.0",
+    "onnxruntime_qnn": "2.8.0",
+    "qnn_backend": "2.52.0.261104115025",
+    "os": "Windows-11-10.0.26200-SP0",
+    "machine": "ARM64"
+  }
+}
