@@ -484,6 +484,8 @@ def check_models(c: Checker) -> None:
     c.sentence(doc, r"\| `cpu` \| all (\d+) \|", len(m))
     c.sentence(doc, r"\| `npu` \| the (\d+) INT8 files",
                sum(1 for f in m.values() if f["precision"] == "int8"))
+    c.sentence(doc, r"\| `npu_fp16` \| the (\d+) FP32 files",
+               sum(1 for f in m.values() if f["precision"] == "fp32"))
     for spec in reg.MODELS.values():
         c.sentence(doc, rf"`{spec.weights_sha256}`, ([\d,]+) bytes",
                    lambda t, s=spec: int(t.replace(",", "")) == s.weights_size_bytes)

@@ -18,7 +18,8 @@
 namespace edgebench::test {
 
 /// Loads the bundled ONNX Runtime and creates the Runtime on first use; throws
-/// std::runtime_error if either fails.
+/// std::runtime_error if either fails. Released by a global test environment
+/// when the test program finishes (before main() returns).
 Runtime& shared_runtime();
 
 /// What the QNN EP offers on this machine: registered on the shared runtime,

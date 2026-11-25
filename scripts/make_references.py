@@ -11,8 +11,12 @@ stores inputs, outputs, an index and one JSON record per file and device in
   provider session settings (sequential execution, all graph optimizations,
   ``session.intra_op.allow_spinning`` 1);
 - ``npu``: every INT8 file, QNN HTP in strict mode (CPU fallback disabled),
-  burst performance mode. Each NPU input is run twice in the same session;
-  whether the two outputs are identical is recorded.
+  burst performance mode;
+- ``npu_fp16``: every FP32 file, the same session with
+  ``enable_htp_fp16_precision`` 1 (the NPU computes FP32 models in FP16).
+
+Each NPU input is run twice in the same session; whether the two outputs are
+identical is recorded.
 
 The directory is replaced as a whole; the previous one is kept until the new one
 is complete. ``--check`` writes nothing and fails (exit 1) if a reference is
@@ -195,15 +199,17 @@ def generate(npu: bool) -> int:
                         "session.intra_op.allow_spinning": "1"},
             "outputs": outputs})
         line = f"{entry.file}: cpu {len(outputs)} runs"
-        if npu and entry.precision == "int8":
+        device = ro.NPU_DEVICES.get(entry.precision)
+        if npu and device:
+            fp16 = device == "npu_fp16"
             try:
-                session = oq.npu_session(path)
+                session = oq.npu_session(path, fp16=fp16)
             except Exception as exc:  # noqa: BLE001 - reported, the run fails at the end
                 failures += 1
                 print(f"{entry.file}: NPU strict session failed: {str(exc)[:300]}",
                       file=sys.stderr)
                 continue
-            outputs_npu, identical = run_all(session, entry, recipe, "npu", repeat=True)
+            outputs_npu, identical = run_all(session, entry, recipe, device, repeat=True)
             del session
             if recipe["preprocessing"]["kind"] == "time_series":
                 # Reconstructions: the largest difference from the CPU on the windows.
@@ -222,14 +228,18 @@ def generate(npu: bool) -> int:
                 agree = sum(a == b for a, b in zip(cpu_top1, npu_top1))
                 agreement = {"images_top1_agreement_with_cpu": f"{agree}/{len(cpu_top1)}"}
                 said = f"image top-1 vs cpu {agree}/{len(cpu_top1)}"
-            ro.write_json(ro.record_path(entry.file, "npu", tmp), {
-                **common, "device": "npu", "execution_provider": "QNNExecutionProvider",
+            provider_options = {"backend_path": "<onnxruntime_qnn>/QnnHtp.dll",
+                                "htp_performance_mode": "burst"}
+            if fp16:
+                provider_options["enable_htp_fp16_precision"] = "1"
+            ro.write_json(ro.record_path(entry.file, device, tmp), {
+                **common, "device": device, "execution_provider": "QNNExecutionProvider",
                 "strict": True, "session": {"session.disable_cpu_ep_fallback": "1"},
-                "provider_options": {"backend_path": "<onnxruntime_qnn>/QnnHtp.dll",
-                                     "htp_performance_mode": "burst"},
+                "provider_options": provider_options,
+                **({"compute_precision": "fp16"} if fp16 else {}),
                 **qnn, "repeat_identical": identical, **agreement,
                 "outputs": outputs_npu})
-            line += f"; npu strict ok, {said}, repeat identical {identical}"
+            line += f"; {device} strict ok, {said}, repeat identical {identical}"
         print(line)
 
     selection = [{"path": e.path, "label": e.label, "sha256": e.sha256} for e in images]

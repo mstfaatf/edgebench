@@ -180,8 +180,14 @@ def record_path(model_rel: str, device: str, root: Path = REFERENCE_DIR) -> Path
     return output_dir(model_rel, root) / f"{device}.json"
 
 
+NPU_DEVICES = {"int8": "npu", "fp32": "npu_fp16"}  # NPU reference device per precision
+
+
 def expected_devices(entry: ManifestFile) -> list[str]:
-    return ["cpu", "npu"] if entry.precision == "int8" else ["cpu"]
+    """cpu for every file; npu (INT8 as stored) for INT8 files, npu_fp16 (FP16 compute,
+    ``enable_htp_fp16_precision`` 1) for FP32 files."""
+    npu = NPU_DEVICES.get(entry.precision)
+    return ["cpu", npu] if npu else ["cpu"]
 
 
 def check_problems(manifest: list[ManifestFile], root: Path = REFERENCE_DIR,

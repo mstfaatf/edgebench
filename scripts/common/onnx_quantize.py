@@ -336,8 +336,11 @@ def graph_without_metadata(proto: Any) -> bytes:
     return copy.SerializeToString()
 
 
-def npu_session(path: Path) -> Any:
-    """A QNN HTP (NPU) session in strict mode: creation fails if any node would fall back to CPU."""
+def npu_session(path: Path, fp16: bool = False) -> Any:
+    """A QNN HTP (NPU) session in strict mode: creation fails if any node would fall back to CPU.
+
+    ``fp16`` adds ``enable_htp_fp16_precision`` = 1, for FP32 files (FP16 compute on the NPU).
+    """
     import onnxruntime as ort
     import onnxruntime_qnn
 
@@ -346,6 +349,8 @@ def npu_session(path: Path) -> Any:
     register_qnn()
     npu = select_qnn_npu(list_devices())
     backend = str(Path(onnxruntime_qnn.get_library_path()).parent / "QnnHtp.dll")
-    options = qnn_npu_session_options(npu, {"backend_path": backend,
-                                            "htp_performance_mode": "burst"}, strict=True)
+    provider_options = {"backend_path": backend, "htp_performance_mode": "burst"}
+    if fp16:
+        provider_options["enable_htp_fp16_precision"] = "1"
+    options = qnn_npu_session_options(npu, provider_options, strict=True)
     return ort.InferenceSession(str(path), sess_options=options)

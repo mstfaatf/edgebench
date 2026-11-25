@@ -665,6 +665,7 @@ and SHA256, and the SHA256 of every input tensor.
 |---|---|---|
 | `cpu` | all 66 | CPU EP, 4 intra-op threads, sequential execution, all graph optimizations, `session.intra_op.allow_spinning` 1 (the engine's CPU provider settings) |
 | `npu` | the 42 INT8 files | QNN HTP, strict (`session.disable_cpu_ep_fallback` 1, so session creation fails if any node would run on the CPU), burst performance mode |
+| `npu_fp16` | the 24 FP32 files | the same, with `enable_htp_fp16_precision` 1: the NPU computes FP32 models in FP16 (`edgebench run --npu-fp16`) |
 
 Tensors are raw little-endian float32 files (the format
 `tools/ort_probe/make_reference.py` already used), listed in
@@ -678,10 +679,10 @@ SHA256 and top-1 classes (for the autoencoder: each window's reconstruction
 MSE). NPU records also say whether running the same input twice gave identical
 outputs, and the top-1 agreement with the CPU on the images (for the
 autoencoder: the largest difference from the CPU on the windows). Like the
-models, the references are not committed (22 MB).
+models, the references are not committed (24 MB).
 
 ```powershell
-# write all references (CPU and NPU; --no-npu for CPU only); about 2 minutes
+# write all references (CPU and NPU; --no-npu for CPU only); about 3 minutes
 .\.venv\Scripts\python.exe scripts\make_references.py
 
 # write nothing; fail on missing, stale or damaged references
@@ -714,9 +715,12 @@ A further test checks that the index lists exactly the files the tests cover.
 Without the model files or the references the tests are skipped with the
 reason (CI has neither).
 
-The NPU references are not used by a C++ test yet: they are the answer key for
-the engine's NPU provider. Repeated NPU runs of the same input are bit-identical,
-so that provider can be held to the NPU reference exactly; NPU and CPU outputs
-of the same INT8 file differ (different kernels and accumulation), with top-1
+On the NPU (suite `ReferenceModelsNpu`, label `npu`) the engine's outputs are
+bit-identical to the Python ONNX Runtime references on the same device and
+versions, for every INT8 file (`npu`) and every FP32 file run with FP16 compute
+(`npu_fp16`), at every batch size, on both input sets, through the QNN provider
+in strict mode with IoBinding; `ReferenceDeterminismNpu` adds that fresh
+sessions and both run bindings give identical outputs. NPU and CPU outputs of
+the same INT8 file differ (different kernels and accumulation), with top-1
 agreement on the 8 images of 8/8 for every INT8 file except EfficientNet-Lite0's
 folded ones (7/8).

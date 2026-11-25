@@ -19,8 +19,9 @@ and writes results as schema-validated JSON plus CSV.
 - **NPU support is in progress.** `edgebench run --provider npu` creates and
   times sessions on the NPU through the Qualcomm QNN execution provider, in
   strict mode by default, with the provider options and node placement recorded
-  ([docs/cli.md](docs/cli.md#npu-runs)). Checking its outputs against the saved
-  NPU references is next; no NPU latency results are published yet.
+  ([docs/cli.md](docs/cli.md#npu-runs)); its outputs are bit-identical to the
+  Python ONNX Runtime references on the NPU ([docs/models.md](docs/models.md#what-the-c-tests-prove)).
+  No NPU latency results are published yet.
 - **Accuracy results are published**: every model variant on ImageNetV2,
   on the CPU and on the NPU (strict mode), with confidence intervals and paired
   CPU vs NPU comparisons ([docs/accuracy.md](docs/accuracy.md)). On the same

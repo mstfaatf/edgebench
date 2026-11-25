@@ -81,19 +81,23 @@ def tree(tmp_path):
     rel = "m/m_fp32_b1.onnx"
     model_sha = write(models / rel, b"model")
     entry = reg.ManifestFile(rel, model_sha, 5, "m", "fp32", "fp32", "external", 1, None, None)
-    rows, outputs = [], []
+    rows = []
     for input_set in ("images-normalized-00000000", "splitmix64-seed0-b1"):
         inp = f"inputs/{input_set}/00.f32"
         rows.append(ro.IndexRow("input", input_set, "-", "-", 0, (), inp, "float32", (1,),
                                 write(root / inp, b"x" + input_set.encode())))
-        out = f"outputs/m/m_fp32_b1/cpu/{input_set}-0.f32"
-        sha = write(root / out, b"y" + input_set.encode())
-        rows.append(ro.IndexRow("output", input_set, rel, "cpu", 0, (inp,), out, "float32", (1,),
-                                sha))
-        outputs.append({"input_set": input_set, "run": 0, "sha256": sha})
+    for device in ro.expected_devices(entry):  # cpu and npu_fp16
+        outputs = []
+        for input_set in ("images-normalized-00000000", "splitmix64-seed0-b1"):
+            inp = f"inputs/{input_set}/00.f32"
+            out = f"outputs/m/m_fp32_b1/{device}/{input_set}-0.f32"
+            sha = write(root / out, b"y" + device.encode() + input_set.encode())
+            rows.append(ro.IndexRow("output", input_set, rel, device, 0, (inp,), out, "float32",
+                                    (1,), sha))
+            outputs.append({"input_set": input_set, "run": 0, "sha256": sha})
+        ro.write_json(ro.record_path(rel, device, root), {"model_sha256": model_sha,
+                                                          "outputs": outputs})
     (root / "index.tsv").write_text(ro.format_index(rows), encoding="utf-8")
-    ro.write_json(ro.record_path(rel, "cpu", root), {"model_sha256": model_sha,
-                                                     "outputs": outputs})
     selection = [{"path": e.path} for e in ro.select_images(read_manifest(EVAL_QUICK_MANIFEST))]
     ro.write_json(root / "inputs.json", {"images": {"selection": selection}})
     return models, root, entry
@@ -125,6 +129,16 @@ def test_missing_device_reference_is_found(tree):
     int8 = reg.ManifestFile(entry.file, entry.sha256, 5, "m", "int8", "int8", "external", 1,
                             True, "c" * 64)
     assert any("no npu reference" in p for p in ro.check_problems([int8], root, models))
+    ro.record_path(entry.file, "npu_fp16", root).unlink()
+    assert any("no npu_fp16 reference" in p for p in ro.check_problems([entry], root, models))
+
+
+def test_expected_devices_per_precision():
+    def entry(precision):
+        return reg.ManifestFile("m/x.onnx", "0" * 64, 1, "m", precision, precision, "external", 1,
+                                None, None)
+    assert ro.expected_devices(entry("int8")) == ["cpu", "npu"]
+    assert ro.expected_devices(entry("fp32")) == ["cpu", "npu_fp16"]
 
 
 def test_changed_selection_is_found(tree):
@@ -196,15 +210,17 @@ def test_check_command_passes(references):
     assert r.returncode == 0, r.stdout + r.stderr
 
 
-def test_every_file_has_cpu_and_int8_files_npu_references(references):
+def test_every_file_has_cpu_and_npu_references(references):
     for f in references:
         for device in ro.expected_devices(f):
             rec = json.loads(ro.record_path(f.file, device).read_text(encoding="utf-8"))
             assert rec["model_sha256"] == f.sha256
             data = "windows" if f.model in reg.IMPORTED_MODELS else "images"
             assert {o["input_set"].split("-")[0] for o in rec["outputs"]} == {data, "splitmix64"}
-            if device == "npu":
+            if device.startswith("npu"):
                 assert rec["strict"] is True and rec["repeat_identical"] is True
+                fp16 = rec["provider_options"].get("enable_htp_fp16_precision")
+                assert (fp16 == "1") == (device == "npu_fp16"), f.file
             else:
                 assert rec["intra_op_threads"] == ro.CPU_THREADS
 

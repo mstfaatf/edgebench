@@ -4,20 +4,44 @@
 #include <memory>
 #include <stdexcept>
 
+#include <gtest/gtest.h>
+
 #include "edgebench/qnn_ep.hpp"
 
 namespace edgebench::test {
 
+namespace {
+
+std::unique_ptr<Runtime>& runtime_slot() {
+    static std::unique_ptr<Runtime> runtime;
+    return runtime;
+}
+
+// Releases the shared Runtime (its EP registrations and the ONNX Runtime
+// environment) when the test program finishes, before main() returns, as
+// edgebench.exe does. Left to static destruction after main(), the release
+// intermittently never returned in processes that had used the QNN EP.
+class ReleaseSharedRuntime : public ::testing::Environment {
+public:
+    void TearDown() override { runtime_slot().reset(); }
+};
+
+[[maybe_unused]] ::testing::Environment* const kReleaseSharedRuntime =
+    ::testing::AddGlobalTestEnvironment(new ReleaseSharedRuntime);
+
+}  // namespace
+
 Runtime& shared_runtime() {
-    static std::unique_ptr<Runtime> runtime = [] {
+    std::unique_ptr<Runtime>& runtime = runtime_slot();
+    if (!runtime) {
         const OrtLoadResult load = load_onnxruntime();
         if (!load.ok())
             throw std::runtime_error(load.message);
         Result<std::unique_ptr<Runtime>> created = Runtime::create(load);
         if (!created)
             throw std::runtime_error(created.error().message);
-        return std::move(created).value();
-    }();
+        runtime = std::move(created).value();
+    }
     return *runtime;
 }
 
