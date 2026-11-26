@@ -1,0 +1,35 @@
+Msg Timestamp,Message,Time,Unit of Measurement,Timing Source,Event Level,Event Identifier
+0,BACKEND,23547,US,BACKEND,ROOT,RPC (load binary) time
+0,BACKEND,22776,US,BACKEND,ROOT,Core 0: QNN accelerator (load binary) time
+0,BACKEND,22390,US,BACKEND,ROOT,Core 0: Accelerator (load binary) time
+0,INIT,33105,US,BACKEND,ROOT,QNN (load binary) time
+0,BACKEND,4,COUNT,BACKEND,ROOT,Number of HVX threads used
+0,BACKEND,1057,US,BACKEND,ROOT,RPC (execute) time
+0,BACKEND,391,US,BACKEND,ROOT,QNN accelerator (execute) time
+0,BACKEND,347,US,BACKEND,ROOT,Accelerator (execute) time
+0,BACKEND,64,US,BACKEND,ROOT,Accelerator (execute excluding wait) time
+0,EXECUTE,1153,US,BACKEND,ROOT,QNN (execute) time
+0,BACKEND,4,COUNT,BACKEND,ROOT,Number of HVX threads used
+0,BACKEND,56,US,BACKEND,ROOT,RPC (execute) time
+0,BACKEND,48,US,BACKEND,ROOT,QNN accelerator (execute) time
+0,BACKEND,32,US,BACKEND,ROOT,Accelerator (execute) time
+0,BACKEND,19,US,BACKEND,ROOT,Accelerator (execute excluding wait) time
+0,EXECUTE,99,US,BACKEND,ROOT,QNN (execute) time
+0,BACKEND,4,COUNT,BACKEND,ROOT,Number of HVX threads used
+0,BACKEND,55,US,BACKEND,ROOT,RPC (execute) time
+0,BACKEND,47,US,BACKEND,ROOT,QNN accelerator (execute) time
+0,BACKEND,31,US,BACKEND,ROOT,Accelerator (execute) time
+0,BACKEND,19,US,BACKEND,ROOT,Accelerator (execute excluding wait) time
+0,EXECUTE,104,US,BACKEND,ROOT,QNN (execute) time
+0,BACKEND,4,COUNT,BACKEND,ROOT,Number of HVX threads used
+0,BACKEND,211,US,BACKEND,ROOT,RPC (execute) time
+0,BACKEND,47,US,BACKEND,ROOT,QNN accelerator (execute) time
+0,BACKEND,31,US,BACKEND,ROOT,Accelerator (execute) time
+0,BACKEND,19,US,BACKEND,ROOT,Accelerator (execute excluding wait) time
+0,EXECUTE,267,US,BACKEND,ROOT,QNN (execute) time
+0,BACKEND,4,COUNT,BACKEND,ROOT,Number of HVX threads used
+0,BACKEND,55,US,BACKEND,ROOT,RPC (execute) time
+0,BACKEND,48,US,BACKEND,ROOT,QNN accelerator (execute) time
+0,BACKEND,32,US,BACKEND,ROOT,Accelerator (execute) time
+0,BACKEND,19,US,BACKEND,ROOT,Accelerator (execute excluding wait) time
+0,EXECUTE,101,US,BACKEND,ROOT,QNN (execute) time

@@ -12,7 +12,21 @@
         "max_ms": 0.35
       },
       "source": "qnn_profiling_basic",
-      "note": null
+      "note": null,
+      "level": "basic",
+      "warmup_iterations": 20,
+      "inferences_in_profile": 120,
+      "reported_unit": "us",
+      "execute_events_ms": {
+        "Accelerator (execute) time": {
+          "count": 100,
+          "median_ms": 0.3,
+          "min_ms": 0.29,
+          "max_ms": 0.35
+        }
+      },
+      "init_events": [],
+      "files": []
     }
   },
   "expect": {

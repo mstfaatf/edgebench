@@ -80,7 +80,14 @@ std::vector<ConfigError> validate(const RunConfig& c) {
             add("ep-cache", only_npu + " (the CPU provider has no EP context cache)");
         if (c.init_breakdown)
             add("init-breakdown", only_npu + " (the CPU provider has no EP context cache)");
+        if (c.profile_accelerator)
+            add("profile-accelerator",
+                only_npu + " (the CPU provider has no accelerator to profile)");
     }
+    if (c.profile_iterations && !c.profile_accelerator)
+        add("profile-iterations", "is only used with --profile-accelerator");
+    if (c.profile_iterations)
+        range("profile-iterations", *c.profile_iterations, 1, kMaxIterations);
     if (c.ep_cache_dir && !c.uses_ep_context())
         add("ep-cache-dir", "is only used with --ep-cache build|use or --init-breakdown");
     if (c.ep_cache_dir && c.ep_cache_dir->empty())

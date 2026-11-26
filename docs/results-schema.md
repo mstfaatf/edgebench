@@ -179,7 +179,7 @@ Recommended codes:
 | `execution_provider.version` | string | yes | EP version (e.g. the QNN plugin EP version); `null` for built-in EPs without their own version |
 | `execution_provider.library_path` | string | yes | Plugin EP library, if registered from a library |
 | `qnn` | object | yes | `null` unless the QNN EP is used |
-| `qnn.sdk_version` | string | yes | QNN SDK (QAIRT) version (1.1.0: as reported by the loaded backend) |
+| `qnn.sdk_version` | string | yes | QNN SDK (QAIRT) version (1.1.0: as reported by the loaded backend; 1.2.0: see `value_sources`) |
 | `qnn.backend` | `htp` \| `gpu` \| `cpu` \| `saver` \| `ir` | yes | QNN backend |
 | `qnn.backend_path` | string | yes | Backend library path as passed to the EP |
 | `ep_device` | object | yes | The EP device the session was attached to; `null` if no device-based selection was used |
@@ -499,7 +499,8 @@ key is required. They describe NPU runs more completely; a CPU result has
 | Field | Meaning |
 |---|---|
 | `backend_file_version` | The version resource of the backend library actually loaded (`QnnHtp.dll`), read from the file of the loaded module while a session was alive: `{module_path, product_version, file_version, source}`. `product_version` is the resource's ProductVersion string (`2.52.0.261104115025` for QNN SDK 2.52), `file_version` the numeric file version (`2.52.0.0`), `source` `loaded_module_version_resource`. Null if the module was not loaded or has no version resource |
-| `sdk_version`, `backend_build` (1.1.0), `htp_arch`, `soc_model` | As reported by the loaded backend through the QNN API. The C++ engine does not query the backend yet: `null` with a `value_unavailable` warning. The file version above is a different fact (the file's resource, not an API answer) |
+| `sdk_version`, `backend_build` (1.1.0), `htp_arch`, `soc_model` | As reported at run time, never derived from file names, package versions or a table; `null` with a `value_unavailable` warning when not reported. `backend_build`: the backend's build id (`v2.52.0.261104115025`), logged by the QNN EP when it sets up its backend; `sdk_version`: its `major.minor.patch`; `htp_arch`: from the compatibility info of an EP context the run built or loaded (`v73`; null without one); `soc_model`: not reported by the QNN EP (always null). The file version above is a different fact (the file's resource, not a reported value) |
+| `value_sources` | `{sdk_version, backend_build, htp_arch, soc_model}`: where each value came from, `null` for a null value. `qnn_ep_log_backend_build_id` (the QNN EP's backend setup log) or `ep_compatibility_info` (an EP context's compatibility info). See [cli.md](cli.md#what-the-qnn-ep-reports) |
 | `partition_count` | Graph partitions (fused nodes) ONNX Runtime assigned to the QNN EP in the node placement session; equals `execution.node_assignment.nodes_by_ep.QNNExecutionProvider`. Also named in `verification_details.summary` |
 | `unlisted_ep_options` | `ep_default`: every QNN EP option not listed in `config.ep_options` was left at the EP's default value |
 
@@ -589,12 +590,16 @@ trial records only its timed session's creation, as `cold_ms` (compiled) or
 | `verified_equal_outputs` | Whether a session created from the cache gave bit-identical outputs to one compiled from the ONNX model on the same input; required when `mode` is `build` or `use` |
 | `cache_dir` | Absolute path of the cache directory; also set with `mode` `off` when `--init-breakdown` built its per-trial contexts there |
 | `embed_mode` | `ep.context_embed_mode` of the contexts: `0` (context binary in its own file) |
+| `compatibility` | `{info, verdict, source}` with `build`/`use` (else `null`): the compatibility info the EP stored in the context model (`ep_compatibility_info.<EP>`, e.g. `v2:6:2.52.0:5.52.0:73:0:0:0`) and the EP's verdict for the selected device (`not_applicable`, `optimal`, `prefer_recompilation`, `unsupported`; `null` if not asked), `source` `ort_model_compatibility_for_ep_devices`. The QNN EP 2.8.0 crashes when asked for a verdict after a QNN session existed in the process, so the C++ engine asks only on a cache hit, before its first session |
 
 The `key` object gains, next to its 1.1.0 fields (model SHA256, ONNX Runtime,
 EP and QNN SDK versions, EP options digest, device): `qnn_backend_file_version`
 (`QnnHtp.dll` ProductVersion), `ep_options` (every EP option passed),
 `session_config` (every session config entry that affects compilation: all but
 `ep.context_enable` and `ep.context_file_path`) and `graph_optimization_level`.
+`qnn_sdk_version` is `runtime.qnn.sdk_version` (the C++ engine filled it from
+when it started reading the backend build id, which changed every key and made
+older entries stale).
 With them the key object holds every key field, so the validator recomputes
 `key_id` from it. `state` is `generated` (nothing existed for this model),
 `loaded` (a hit) or `regenerated` (an entry for this model was deleted and
@@ -617,7 +622,20 @@ accelerator_ms, source, note}`: accelerator execute time per inference
 created after the timed trials, with `source` the QNN profiling level. Nothing
 measured in that pass is part of the timed latency fields (`timing.trials`,
 `timing.aggregate`, `session_init`). It supersedes the 1.1.0
-`timing.accelerator`, which 1.2.0 writers leave `null`.
+`timing.accelerator`, which 1.2.0 writers leave `null`. Optional detail:
+
+| Field | Meaning |
+|---|---|
+| `level` | The QNN EP `profiling_level` of the profiled session (`basic`) |
+| `warmup_iterations` | Inferences run first, not used |
+| `inferences_in_profile` | Inferences the profile reports, warm-up included |
+| `reported_unit` | `us`: the unit of the profile (times here are ms) |
+| `execute_events_ms` | Every per-inference execute event of the profile (`RPC (execute) time`, `QNN (execute) time`, ...) as `{count, median_ms, min_ms, max_ms}`; `accelerator_ms` is its `Accelerator (execute) time` |
+| `init_events` | `[{event, time_ms}]`: what the profile reports about the profiled session's creation (graph finalization, or loading a context binary) |
+| `files` | `[{name, path, size_bytes, sha256}]`: the profile files, in the run directory once the result is written (`path` relative to the result file) |
+
+`config.profiling` keeps describing the timed sessions (`off`); error stage
+`profiled_pass` and module-check stage `profiled_session` belong to this pass.
 
 ### Verification evidence
 
@@ -630,8 +648,8 @@ units (an `OrtNodeUnit` is a node with its QDQ neighbours) by operator type:
 that the ONNX Runtime and QNN modules in the process came from the bundle
 directory, in order, as `{stage, trial_index, modules_outside_bundle}`:
 `after_provider_creation` (the EP library is registered), one
-`after_session_creation` per trial, and `placement_session` (while the node
-placement session was alive). A failed check stops the run, so in a
+`after_session_creation` per trial, `placement_session` (while the node
+placement session was alive) and `profiled_session` (`--profile-accelerator`). A failed check stops the run, so in a
 successful result every list is empty. `execution.qnn_validation.rejected_nodes[]`
 entries gain `node_index`.
 
@@ -701,6 +719,13 @@ fields involved are present:
 | `cache_key_id_mismatch` | error | A 1.2.0 `key` (with `session_config`) whose canonical SHA256 is not `key_id`, or whose `model_sha256` / `ep_options` differ from `model.sha256` / `config.ep_options` |
 | `profiled_pass_without_accelerator_ep` | error | An enabled `timing.profiled_pass` on a CPU run |
 | `qnn_partition_count_mismatch` | error | `runtime.qnn.partition_count` differs from the nodes `execution.node_assignment` places on `QNNExecutionProvider` |
+| `qnn_value_source_mismatch` | error | A `runtime.qnn` value without a source in `value_sources`, or a source for a null value |
+| `qnn_sdk_version_mismatch` | error | `runtime.qnn.sdk_version` is not the `major.minor.patch` of `backend_build` |
+| `qnn_backend_build_file_version_mismatch` | warning | `backend_build` (without its `v`) differs from `backend_file_version.product_version` |
+| `accelerator_exceeds_latency_unflagged` | error | The profiled pass's median accelerator time is above the aggregate median latency without an `accelerator_time_exceeds_latency` warning |
+| `accelerator_exceeds_latency_unfounded` | error | That warning on a run whose median accelerator time is not above the median latency |
+| `profiled_pass_count_mismatch` | error | `accelerator_ms.count` differs from `iterations` without a `profiled_pass_incomplete` warning |
+| `cache_compatibility_without_cache` | error | `config.ep_context_cache.compatibility` set with `mode` `off` |
 | `missing_1_2_0_key` | warning | `tool.implementation` is `cpp` and a key added in 1.2.0 is absent. Keys added in 1.1.0 that are absent from a 1.2.0 document are still reported as `missing_1_1_0_key` |
 
 The schema itself also requires: `mode` `off` only with `enabled` `false`;
@@ -852,6 +877,15 @@ the profiled pass are filled in. Amendments so far:
   `verification_details.deleted_stale_cache_files`; module-check stage
   `after_untimed_session`; `session_init_not_applicable` allows per-trial
   cached values with `init_breakdown` and the cache off.
+- Backend-reported values and the profiled pass: `runtime.qnn.value_sources`;
+  `config.ep_context_cache.compatibility`; `timing.profiled_pass` detail
+  (`level`, `warmup_iterations`, `inferences_in_profile`, `reported_unit`,
+  `execute_events_ms`, `init_events`, `files`); error stage `profiled_pass`;
+  module-check stage `profiled_session`; validator rules
+  `qnn_value_source_mismatch`, `qnn_sdk_version_mismatch`,
+  `qnn_backend_build_file_version_mismatch`,
+  `accelerator_exceeds_latency_unflagged` / `_unfounded`,
+  `profiled_pass_count_mismatch`, `cache_compatibility_without_cache`.
 
 ### 1.1.0
 

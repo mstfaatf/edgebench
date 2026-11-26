@@ -1,0 +1,12 @@
+{
+  "description": "Fewer accelerator times than profiled inferences, without the warning.",
+  "base": "docs/examples/v1.2.0/example-npu-int8-profiled-pass-cache-hit.json",
+  "set": {
+    "/timing/profiled_pass/iterations": 60
+  },
+  "expect": {
+    "severity": "error",
+    "code": "profiled_pass_count_mismatch",
+    "path": "/timing/profiled_pass/accelerator_ms"
+  }
+}

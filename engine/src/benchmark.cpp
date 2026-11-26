@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <sstream>
 #include <thread>
 
@@ -13,6 +14,7 @@
 #include "edgebench/ep_context_cache.hpp"
 #include "edgebench/interrupt.hpp"
 #include "edgebench/npu_options.hpp"
+#include "edgebench/qnn_backend_info.hpp"
 #include "edgebench/run_identity.hpp"
 #include "edgebench/runtime.hpp"
 #include "edgebench/scheduler.hpp"
@@ -125,6 +127,28 @@ Error context_load_failed(Error e, const std::filesystem::path& context_model) {
                 "); the context may be corrupt or truncated: rebuild it with --ep-cache build";
     e.unsupported_nodes.reset();
     return e;
+}
+
+// The compatibility info of an EP context model the run built or loaded: the
+// QNN EP stores the HTP arch it compiled for there (read from the device's
+// platform info), so it fills runtime.qnn.htp_arch if nothing did yet. With
+// `record`, the info and the EP's verdict go into config.ep_context_cache.
+void apply_context_compatibility(Provider& provider, BenchmarkResult& r,
+                                 const std::filesystem::path& context_model, bool record) {
+    std::optional<QnnBackendInfo>& qnn = r.runtime.provider.qnn;
+    if (!record && (!qnn || qnn->htp_arch))
+        return;
+    const ContextCompatibility c = provider.context_compatibility(context_model);
+    if (record)
+        r.ep_cache.compatibility = c;
+    if (!qnn || qnn->htp_arch || !c.info)
+        return;
+    if (const std::optional<QnnCompatibilityInfo> info = parse_qnn_compatibility_info(*c.info)) {
+        if (std::optional<std::string> arch = htp_arch_name(*info)) {
+            qnn->htp_arch = std::move(arch);
+            qnn->htp_arch_source = std::string(kSourceEpCompatibilityInfo);
+        }
+    }
 }
 
 // The key fields of this run's EP context (ep_context_cache.hpp).
@@ -308,6 +332,7 @@ Result<void> prepare_ep_cache(Provider& provider, const RunConfig& config, Bench
     }
     c.files = manifest.files;
     c.context_path = found.entry_dir / utf8_path(manifest.context_model);
+    apply_context_compatibility(provider, r, *c.context_path, true);
 
     // A session from the cache must compute exactly what a compiled one computes.
     if (progress)
@@ -367,6 +392,7 @@ Result<TrialSessionInit> measure_init_breakdown(
     init.context_build_ms = built.value().build_ms;
     const std::filesystem::path context_model =
         scratch / utf8_path(built.value().manifest.context_model);
+    apply_context_compatibility(provider, r, context_model, false);
 
     Result<void> step = idle("cached session creation");
     if (step) {
@@ -384,6 +410,75 @@ Result<TrialSessionInit> measure_init_breakdown(
     if (!removed)
         return removed.error();
     return init;
+}
+
+// The --profile-accelerator pass: a session with QNN profiling from `source`
+// (what the timed sessions were created from), --warmup inferences, then the
+// requested ones; released, so the EP writes its profile, which is then read.
+// Untimed: nothing here touches the trials or their statistics.
+Result<ProfiledPassResult> run_profiled_pass(Provider& provider, const RunConfig& config,
+                                             BenchmarkResult& r,
+                                             const std::filesystem::path& source,
+                                             const StopHook& hook) {
+    ProfiledPassResult p;
+    p.warmup_iterations = config.warmup;
+    p.iterations = config.effective_profile_iterations();
+    std::error_code ec;
+    const std::filesystem::path temp = std::filesystem::temp_directory_path(ec);
+    p.staging_dir = temp / ("edgebench-profile-" + r.run_id);
+    if (ec || !std::filesystem::create_directories(p.staging_dir, ec)) {
+        return Error{ExitCode::output_error, "profile_dir_not_writable",
+                     "cannot create the directory for the QNN profile " +
+                         path_to_utf8(p.staging_dir) +
+                         (ec ? ": " + ec.message() : std::string(": it already exists"))};
+    }
+    auto fail = [&p](Error e) -> Result<ProfiledPassResult> {
+        std::error_code ignored;
+        std::filesystem::remove_all(p.staging_dir, ignored);
+        return e;
+    };
+    const std::filesystem::path csv = p.staging_dir / "qnn_profile.csv";
+    {
+        Result<std::unique_ptr<BenchSession>> session =
+            provider.create_profiling_session(source, config, csv);
+        if (!session) {
+            return fail(source == r.model.file.path ? session.error()
+                                                    : context_load_failed(session.error(), source));
+        }
+        if (Result<void> m = check_loaded_modules(r, "profiled_session", std::nullopt); !m)
+            return fail(m.error());
+        const int total = p.warmup_iterations + p.iterations;
+        for (int i = 0; i < total; ++i) {
+            if (should_stop(hook, StopPoint::profiled_pass, 0, i))
+                return fail(interrupted_error("profiled accelerator pass, inference " +
+                                              std::to_string(i + 1)));
+            if (Result<void> run = session.value()->run_once(); !run)
+                return fail(with_context(
+                    run.error(), "profiled accelerator pass, inference " + std::to_string(i + 1)));
+        }
+    }  // released: the EP writes the profile now
+    std::string text;
+    {
+        std::ifstream in(csv, std::ios::binary);
+        if (!in) {
+            return fail(Error{ExitCode::internal_error, "qnn_profile_missing",
+                              "the QNN EP did not write its profile " + path_to_utf8(csv)});
+        }
+        std::ostringstream content;
+        content << in.rdbuf();
+        text = content.str();
+    }
+    Result<std::vector<QnnProfileEvent>> events = parse_qnn_profile_csv(text);
+    if (!events)
+        return fail(events.error());
+    p.profile = summarize_qnn_profile(events.value(), p.warmup_iterations);
+    for (const std::filesystem::directory_entry& e :
+         std::filesystem::directory_iterator(p.staging_dir, ec)) {
+        if (e.is_regular_file(ec))
+            p.files.push_back(e.path());
+    }
+    std::sort(p.files.begin(), p.files.end());
+    return p;
 }
 
 // The HTP backend library of the QNN EP, whose version resource is recorded.
@@ -559,6 +654,12 @@ std::string fmt_opt(const std::optional<double>& v) {
 }
 
 }  // namespace
+
+const std::vector<double>& ProfiledPassResult::accelerator_ms() const {
+    static const std::vector<double> kNone;
+    const auto it = profile.execute_ms.find(std::string(kAcceleratorExecuteEvent));
+    return it == profile.execute_ms.end() ? kNone : it->second;
+}
 
 std::chrono::milliseconds idle_before_trial(const RunConfig& config, int sequence) {
     if (config.cooldown_ms > 0)
@@ -931,16 +1032,41 @@ BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunCon
                 set_failure(r, interrupted_error("after node placement"), "session_creation");
         }
     }
+    // The profiled accelerator pass: last, after placement, so no timed or
+    // placement session follows a profiled one.
+    if (!r.failure && config.profile_accelerator) {
+        report("profiled accelerator pass: " + std::to_string(config.warmup) + " warm-up + " +
+               std::to_string(config.effective_profile_iterations()) +
+               " inferences with QNN profiling (not timed)");
+        Result<ProfiledPassResult> pass =
+            run_profiled_pass(provider, config, r, timed_source, hook);
+        if (!pass)
+            set_failure(r, pass.error(), "profiled_pass");
+        else
+            r.timing.profiled_pass = std::move(pass).value();
+    }
     // ONNX Runtime's verdict on the EP context models, if it logged one: a context
     // compiled for this device but not in the form the EP would compile now. The
     // outputs were checked against a compiled session, so this is a note.
     if (config.uses_ep_context()) {
         for (const std::string& message : runtime.warnings_since(log_start)) {
             if (message.find(kRecompileMessage) != std::string::npos) {
-                r.notes.push_back(
-                    {"ep_context_recompilation_suggested",
-                     "ONNX Runtime reported for the EP context models of this run: " + message,
-                     std::string("/config/ep_context_cache")});
+                std::string text =
+                    "ONNX Runtime reported for the EP context models of this run: " + message;
+                const std::optional<ContextCompatibility>& cc = r.ep_cache.compatibility;
+                if (cc && cc->info) {
+                    if (const std::optional<QnnCompatibilityInfo> info =
+                            parse_qnn_compatibility_info(*cc->info)) {
+                        if (const std::optional<std::string> why = recompilation_reason(*info))
+                            text += " " + *why;
+                    }
+                }
+                if (r.ep_cache.verified_equal_outputs == true)
+                    text +=
+                        " Sessions from this context gave bit-identical outputs to a session "
+                        "compiled from the model.";
+                r.notes.push_back({"ep_context_recompilation_suggested", text,
+                                   std::string("/config/ep_context_cache")});
                 break;
             }
         }
@@ -1055,6 +1181,35 @@ void finish_result(BenchmarkResult& r) {
         }
     }
 
+    // The profiled pass: its accelerator time is part of an inference, so above the
+    // timed median latency something is wrong with one of the two.
+    if (t.profiled_pass) {
+        const ProfiledPassResult& p = *t.profiled_pass;
+        std::vector<double> acc = p.accelerator_ms();
+        if (static_cast<int>(acc.size()) != p.iterations) {
+            r.warnings.push_back({"profiled_pass_incomplete",
+                                  "The QNN profile of the profiled accelerator pass reports " +
+                                      std::to_string(acc.size()) +
+                                      " accelerator execute times for " +
+                                      std::to_string(p.iterations) + " profiled inferences.",
+                                  std::string("/timing/profiled_pass/accelerator_ms")});
+        }
+        if (!acc.empty() && t.aggregate) {
+            std::sort(acc.begin(), acc.end());
+            const double median = nearest_rank(acc, 50);
+            if (median > t.aggregate->stats.p50_ms) {
+                r.warnings.push_back(
+                    {"accelerator_time_exceeds_latency",
+                     "The median accelerator time of the profiled pass (" + fmt(median) +
+                         " ms) is above the median timed latency (" +
+                         fmt(t.aggregate->stats.p50_ms) +
+                         " ms), although it is one part of an inference; one of the two does not "
+                         "measure what it should.",
+                     std::string("/timing/profiled_pass/accelerator_ms")});
+            }
+        }
+    }
+
     // Batch equivalence, from the committed reference data (needs the batch size and
     // the compute precision; recorded for runs that created a session).
     if (r.known.session && r.batch_size > 0 && r.effective_precision) {
@@ -1146,13 +1301,26 @@ void finish_result(BenchmarkResult& r) {
                         "The device driver version could not be determined.");
     }
     if (r.known.provider && r.runtime.provider.qnn) {
-        add_unavailable(r, "/runtime/qnn/sdk_version",
-                        "The QNN SDK version is not read from the backend.");
-        add_unavailable(r, "/runtime/qnn/backend_build",
-                        "The QNN backend build is not read from the backend.");
-        add_unavailable(r, "/runtime/qnn/htp_arch",
-                        "The HTP architecture is not read from the backend.");
-        add_unavailable(r, "/runtime/qnn/soc_model", "The SoC model is not read from the backend.");
+        const QnnBackendInfo& q = *r.runtime.provider.qnn;
+        if (!q.sdk_version)
+            add_unavailable(r, "/runtime/qnn/sdk_version",
+                            "The QNN EP did not report its backend's build id, from which the "
+                            "SDK version is read.");
+        if (!q.backend_build)
+            add_unavailable(r, "/runtime/qnn/backend_build",
+                            "The QNN EP did not report its backend's build id.");
+        if (!q.htp_arch)
+            add_unavailable(r, "/runtime/qnn/htp_arch",
+                            config.uses_ep_context()
+                                ? "The HTP architecture was not found in the compatibility info "
+                                  "of this run's EP context."
+                                : "The QNN EP reports the HTP architecture only in the "
+                                  "compatibility info of an EP context it compiles; this run "
+                                  "used none (--ep-cache off, no --init-breakdown).");
+        if (!q.soc_model)
+            add_unavailable(r, "/runtime/qnn/soc_model",
+                            "The QNN EP does not report the device's SoC model: its "
+                            "compatibility info carries only its soc_model option (not set).");
         if (r.known.session && !r.runtime.qnn_backend_file_version)
             add_unavailable(r, "/runtime/qnn/backend_file_version",
                             "The version resource of the loaded QnnHtp.dll could not be read.");
@@ -1258,6 +1426,19 @@ std::string format_summary(const BenchmarkResult& r) {
     }
     out << "First run   " << (t.first_inference_ms ? fmt(*t.first_inference_ms, 3) + " ms" : "-")
         << " (first warm-up iteration of trial 1)\n";
+    if (p.qnn) {
+        out << "QNN         sdk " << p.qnn->sdk_version.value_or("-") << " (build "
+            << p.qnn->backend_build.value_or("-") << "), HTP arch " << p.qnn->htp_arch.value_or("-")
+            << ", SoC " << p.qnn->soc_model.value_or("-") << "\n";
+    }
+    if (t.profiled_pass) {
+        std::vector<double> acc = t.profiled_pass->accelerator_ms();
+        std::sort(acc.begin(), acc.end());
+        out << "Accelerator "
+            << (acc.empty() ? std::string("-") : fmt(nearest_rank(acc, 50)) + " ms median")
+            << " (profiled pass: " << acc.size()
+            << " inferences in a separate profiled session; not a latency)\n";
+    }
 
     if (r.system.power) {
         const PowerState& pw = *r.system.power;

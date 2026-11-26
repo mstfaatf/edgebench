@@ -53,8 +53,8 @@ The steady-state latency comes from the trial's timed session in every case,
 created as `--ep-cache` says: compiled from the model (`off`, the default) or
 from the cache (`build`, `use`). A context depends on more than the model, so
 the cache is keyed by everything it depends on: the model file's SHA256, the
-ONNX Runtime and QNN EP versions, the QNN SDK version as reported by the
-backend, the HTP backend file version, every EP option, every session config
+ONNX Runtime and QNN EP versions, the QNN SDK version the backend reports at run
+time, the HTP backend file version, every EP option, every session config
 entry that changes compilation (strict mode, embed mode), the graph
 optimization level, and the device's vendor and device id. A change to any of
 them gives a new key, so a stale context is never loaded; entries of the same
@@ -64,6 +64,35 @@ outputs must be bit-identical (`verified_equal_outputs`); a corrupt or
 unloadable context fails the run rather than being rebuilt behind the user's
 back. The rules and file layout are in
 [cli.md](cli.md#ep-context-cache-and-initialization).
+
+## Accelerator time
+
+The timed latency is what an application waits for: the host-side work of
+ONNX Runtime and the QNN EP, the RPC to the NPU and the NPU's own work. With
+`--profile-accelerator` a result also records the **accelerator time**: the
+QNN profile's "Accelerator (execute) time" per inference, the part of an
+inference the HTP itself spends, from a separate session with QNN profiling
+(`basic`) created after the timed trials (`timing.profiled_pass`).
+
+It is not a latency and is never compared with one as if it were:
+
+- it comes from another session than the timed ones (the same model or EP
+  context, the same options plus profiling), so nothing measured in it is part
+  of the trials, their statistics or the initialization times;
+- profiling adds host-side work to every inference of that session (QNN
+  basic profiling added about 12 ms of host time per inference in the
+  feasibility work), so the profiled session's own wall time is not usable;
+  the accelerator time is reported by the backend and is not affected;
+- the difference between the median timed latency and the median accelerator
+  time is the host and transfer share of an inference. If the accelerator time
+  is the larger one, something is wrong with one of the two numbers, and the
+  result gets an `accelerator_time_exceeds_latency` warning.
+
+The profile also lists the profiled session's graph finalization (or, from an
+EP context, the loading of the context binary). Those are a small part of
+session creation: about 0.34 s of a 2.2 s cold MobileNetV2 INT8 session, and
+30 to 60 ms of a 0.35 to 0.45 s cached one. Most of the roughly 2 s fixed cold
+cost (backend and device setup) does not appear in the profile.
 
 ## Trial structure
 

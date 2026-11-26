@@ -363,10 +363,20 @@ V1_2_RULES = {
     "cache_key_id_mismatch": ERROR,
     "profiled_pass_without_accelerator_ep": ERROR,
     "qnn_partition_count_mismatch": ERROR,
+    "qnn_value_source_mismatch": ERROR,
+    "qnn_sdk_version_mismatch": ERROR,
+    "qnn_backend_build_file_version_mismatch": WARNING,
+    "accelerator_exceeds_latency_unflagged": ERROR,
+    "accelerator_exceeds_latency_unfounded": ERROR,
+    "profiled_pass_count_mismatch": ERROR,
+    "cache_compatibility_without_cache": ERROR,
     "missing_1_2_0_key": WARNING,
 }
 
 BATCH_NOT_EQUIVALENT_WARNING = "batch_not_equivalent"
+ACCELERATOR_EXCEEDS_LATENCY_WARNING = "accelerator_time_exceeds_latency"
+PROFILED_PASS_INCOMPLETE_WARNING = "profiled_pass_incomplete"
+QNN_REPORTED_VALUES = ("sdk_version", "backend_build", "htp_arch", "soc_model")
 BATCH_ROUNDING_NOTE = "batch_rounding_only"
 STRICT_REFUSAL_KIND = "strict_mode_refusal"
 
@@ -703,9 +713,60 @@ def v1_2_issues(doc: dict[str, Any]) -> list[Issue]:
         report("/timing/profiled_pass", f"profiled accelerator pass recorded for a "
                                         f"{ep_name or device} run; it requires an accelerator "
                                         "execution provider", "profiled_pass_without_accelerator_ep")
+    codes = {w["code"] for w in doc["warnings"]}
+    accelerator = profiled.get("accelerator_ms") if profiled is not None else None
+    if profiled is not None and profiled["enabled"]:
+        # Every profiled inference has an accelerator time, unless the run says otherwise.
+        count = accelerator["count"] if accelerator is not None else 0
+        if count != profiled["iterations"] and PROFILED_PASS_INCOMPLETE_WARNING not in codes:
+            report("/timing/profiled_pass/accelerator_ms",
+                   f"{count} accelerator times for {profiled['iterations']} profiled inferences, "
+                   f"without a {PROFILED_PASS_INCOMPLETE_WARNING} warning",
+                   "profiled_pass_count_mismatch")
+    # Accelerator time is part of an inference: above the median latency it is flagged.
+    aggregate = timing.get("aggregate") if timing is not None else None
+    exceeds = (accelerator is not None and aggregate is not None
+               and accelerator["median_ms"] > aggregate["stats"]["p50_ms"])
+    flagged = ACCELERATOR_EXCEEDS_LATENCY_WARNING in codes
+    if exceeds and not flagged:
+        report("/timing/profiled_pass/accelerator_ms",
+               f"median accelerator time {accelerator['median_ms']} ms is above the median latency "
+               f"{aggregate['stats']['p50_ms']} ms without a {ACCELERATOR_EXCEEDS_LATENCY_WARNING} "
+               "warning", "accelerator_exceeds_latency_unflagged")
+    if flagged and not exceeds:
+        report("/warnings", f"{ACCELERATOR_EXCEEDS_LATENCY_WARNING} warning, but the median "
+                            "accelerator time is not above the median latency",
+               "accelerator_exceeds_latency_unfounded")
+
+    # The EP's compatibility verdict describes the context of a cache.
+    cache = config.get("ep_context_cache")
+    if cache is not None and cache.get("compatibility") is not None and cache.get("mode") == "off":
+        report("/config/ep_context_cache/compatibility",
+               "compatibility of an EP context recorded with the cache off",
+               "cache_compatibility_without_cache")
 
     # QNN partitions: the QNN EP's node count in the placement.
     qnn = runtime.get("qnn") if runtime is not None else None
+    sources = qnn.get("value_sources") if qnn is not None else None
+    if sources is not None:
+        for name in QNN_REPORTED_VALUES:
+            if (qnn.get(name) is None) != (sources[name] is None):
+                report(f"/runtime/qnn/value_sources/{name}",
+                       f"{name} is {qnn.get(name)!r} but its source is {sources[name]!r}; a value "
+                       "has a source and a null has none", "qnn_value_source_mismatch")
+    if qnn is not None and qnn.get("backend_build") is not None and qnn.get("sdk_version") is not None:
+        build = qnn["backend_build"]
+        parts = build[1:].split(".") if build.startswith("v") else []
+        if len(parts) == 4 and ".".join(parts[:3]) != qnn["sdk_version"]:
+            report("/runtime/qnn/sdk_version",
+                   f"{qnn['sdk_version']!r} is not the major.minor.patch of backend_build {build!r}",
+                   "qnn_sdk_version_mismatch")
+        file_version = qnn.get("backend_file_version")
+        product = file_version.get("product_version") if file_version is not None else None
+        if product is not None and build.startswith("v") and build[1:] != product:
+            report("/runtime/qnn/backend_build",
+                   f"the backend reports build {build!r}, but the loaded file's ProductVersion is "
+                   f"{product!r}", "qnn_backend_build_file_version_mismatch")
     assignment = execution.get("node_assignment")
     if qnn is not None and qnn.get("partition_count") is not None and assignment is not None:
         placed = assignment["nodes_by_ep"].get("QNNExecutionProvider", 0)

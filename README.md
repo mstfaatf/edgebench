@@ -28,6 +28,10 @@ and writes results as schema-validated JSON plus CSV.
   keyed by everything a compiled context depends on and verified against a
   compiled session, and a cold / context-build / cached initialization
   breakdown are available ([docs/cli.md](docs/cli.md#ep-context-cache-and-initialization)).
+  The QNN SDK version and HTP architecture are recorded as the QNN execution
+  provider reports them at run time, and an optional separate profiled pass
+  records the accelerator time per inference
+  ([docs/cli.md](docs/cli.md#accelerator-time---profile-accelerator)).
   No NPU latency results are published yet.
 - **Accuracy results are published**: every model variant on ImageNetV2,
   on the CPU and on the NPU (strict mode), with confidence intervals and paired

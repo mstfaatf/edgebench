@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <sstream>
 
+#include "edgebench/sha256.hpp"
+
 namespace edgebench {
 
 namespace {
@@ -146,7 +148,12 @@ json runtime_json(const BenchmarkResult& r) {
                {"soc_model", opt(p.qnn->soc_model)},
                {"partition_count", opt(qnn_partition_count(r))},
                {"unlisted_ep_options",
-                p.qnn->unlisted_options_default ? json("ep_default") : json(nullptr)}};
+                p.qnn->unlisted_options_default ? json("ep_default") : json(nullptr)},
+               {"value_sources",
+                {{"sdk_version", opt(p.qnn->sdk_version_source)},
+                 {"backend_build", opt(p.qnn->backend_build_source)},
+                 {"htp_arch", opt(p.qnn->htp_arch_source)},
+                 {"soc_model", opt(p.qnn->soc_model_source)}}}};
     }
     json modules = json::array();
     for (const LoadedModule& m : r.runtime.loaded_modules)
@@ -252,7 +259,12 @@ json ep_context_cache_json(const BenchmarkResult& r) {
             {"verified_equal_outputs", opt(c.verified_equal_outputs)},
             {"key", key},
             {"cache_dir", c.cache_dir ? json(path_to_utf8(*c.cache_dir)) : json(nullptr)},
-            {"embed_mode", c.cache_dir ? json(std::string(kEpContextEmbedMode)) : json(nullptr)}};
+            {"embed_mode", c.cache_dir ? json(std::string(kEpContextEmbedMode)) : json(nullptr)},
+            {"compatibility", c.compatibility
+                                  ? json{{"info", opt(c.compatibility->info)},
+                                         {"verdict", opt(c.compatibility->verdict)},
+                                         {"source", "ort_model_compatibility_for_ep_devices"}}
+                                  : json(nullptr)}};
 }
 
 json qnn_validation_json(const std::optional<QnnValidation>& v) {
@@ -378,7 +390,50 @@ json execution_json(const BenchmarkResult& r) {
     };
 }
 
-json timing_json(const BenchmarkResult& r) {
+json profiled_pass_json(const BenchmarkResult& r,
+                        const std::optional<std::vector<LinkedFile>>& linked) {
+    if (!r.timing.profiled_pass)
+        return nullptr;
+    const ProfiledPassResult& p = *r.timing.profiled_pass;
+    json events = json::object();
+    for (const auto& [id, values] : p.profile.execute_ms)
+        events[id] = init_summary_json(values);
+    json init = json::array();
+    for (const auto& [id, ms] : p.profile.init_ms)
+        init.push_back({{"event", id}, {"time_ms", ms}});
+    json files = json::array();
+    if (linked) {
+        for (const LinkedFile& f : *linked)
+            files.push_back({{"name", f.name},
+                             {"path", f.path},
+                             {"size_bytes", f.size_bytes},
+                             {"sha256", f.sha256}});
+    } else {
+        for (const std::filesystem::path& f : p.files) {
+            std::error_code ec;
+            const std::uintmax_t size = std::filesystem::file_size(f, ec);
+            Result<std::string> sha = sha256_file(f);
+            files.push_back({{"name", path_to_utf8(f.filename())},
+                             {"path", path_to_utf8(f)},
+                             {"size_bytes", ec ? json(nullptr) : json(size)},
+                             {"sha256", sha ? json(sha.value()) : json(nullptr)}});
+        }
+    }
+    return {{"enabled", true},
+            {"iterations", p.iterations},
+            {"accelerator_ms", init_summary_json(p.accelerator_ms())},
+            {"source", p.source},
+            {"note", std::string(kProfiledPassNote)},
+            {"level", p.level},
+            {"warmup_iterations", p.warmup_iterations},
+            {"inferences_in_profile", p.profile.inferences},
+            {"reported_unit", "us"},
+            {"execute_events_ms", events},
+            {"init_events", init},
+            {"files", files}};
+}
+
+json timing_json(const BenchmarkResult& r, const std::optional<std::vector<LinkedFile>>& linked) {
     const TimingResult& t = r.timing;
     if (t.trials.empty())
         return nullptr;
@@ -424,7 +479,7 @@ json timing_json(const BenchmarkResult& r) {
         {"aggregate", aggregate},
         {"scope", t.scope},
         {"accelerator", nullptr},
-        {"profiled_pass", nullptr},
+        {"profiled_pass", profiled_pass_json(r, linked)},
     };
 }
 
@@ -441,7 +496,8 @@ json memory_json(const BenchmarkResult& r) {
 
 }  // namespace
 
-json to_result_json(const BenchmarkResult& r, const std::optional<RawLatencyLink>& raw) {
+json to_result_json(const BenchmarkResult& r, const std::optional<RawLatencyLink>& raw,
+                    const std::optional<std::vector<LinkedFile>>& profile_files) {
     auto entries = [](const std::vector<ResultWarning>& list) {
         json out = json::array();
         for (const ResultWarning& w : list)
@@ -471,7 +527,7 @@ json to_result_json(const BenchmarkResult& r, const std::optional<RawLatencyLink
         {"model", model_json(r)},
         {"config", config_json(r)},
         {"execution", execution_json(r)},
-        {"timing", timing_json(r)},
+        {"timing", timing_json(r, profile_files)},
         {"memory", memory_json(r)},
         {"accuracy", nullptr},
         {"raw", raw ? json{{"latencies_file", raw->latencies_file},

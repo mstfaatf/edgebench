@@ -44,7 +44,9 @@ add_library(edgebench_core STATIC
   src/ort_loader.cpp
   src/placement.cpp
   src/qnn_ep.cpp
+  src/qnn_backend_info.cpp
   src/qnn_log.cpp
+  src/qnn_profile.cpp
   src/qnn_provider.cpp
   src/result.cpp
   src/result_files.cpp
@@ -115,6 +117,7 @@ if(EDGEBENCH_BUILD_TESTS)
     tests/module_paths_test.cpp
     tests/npu_options_test.cpp
     tests/npu_selection_test.cpp
+    tests/qnn_backend_info_test.cpp
     tests/result_files_test.cpp
     tests/run_config_test.cpp
     tests/system_state_test.cpp
@@ -151,6 +154,7 @@ if(EDGEBENCH_BUILD_TESTS)
     tests/qnn_ep_test.cpp
     tests/qnn_provider_test.cpp
     tests/ep_cache_npu_test.cpp
+    tests/backend_info_npu_test.cpp
     tests/reference_models_test.cpp
     tests/test_runtime.cpp
     tests/process_util.cpp

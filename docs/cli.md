@@ -50,6 +50,8 @@ one inference without measuring or writing anything.
 | `--ep-cache MODE` | `off` | NPU only: EP context cache. `off`: every session is compiled from the model. `build`: delete this key's cache entry, build it once before the trials, create every timed session from it. `use`: create the timed sessions from the entry whose key matches; build it first if there is none. See [EP context cache and initialization](#ep-context-cache-and-initialization) |
 | `--ep-cache-dir PATH` | `%LOCALAPPDATA%\EdgeBench\qnn-context` | NPU only: the cache directory (created if missing; must be writable, exit 6 otherwise), one subdirectory per cache key. Only with `--ep-cache build`/`use` or `--init-breakdown` |
 | `--init-breakdown` | off | NPU only: in every trial, also time a cold, a context-building and a cached session creation, each after the trial's idle period, before the timed session |
+| `--profile-accelerator` | off | NPU only: after the trials and the placement session, run one more session with QNN profiling and record the accelerator time per inference in `timing.profiled_pass`; never part of the timed results. See [Accelerator time](#accelerator-time---profile-accelerator) |
+| `--profile-iterations N` | `50` | 1 to 1,000,000. Inferences of the `--profile-accelerator` pass, after `--warmup` unrecorded ones. Only with `--profile-accelerator` |
 
 All validation problems are reported together, one per line, as
 `error: [usage_error] --<option>: <message>` (`[model_unreadable]` when the
@@ -121,8 +123,9 @@ sorted keys, no whitespace and UTF-8 text (Python:
 `json.dumps(key, sort_keys=True, separators=(",", ":"), ensure_ascii=False)`),
 recorded as `config.ep_context_cache.key` and `key_id` (the validator recomputes
 it). The fields: the model file's SHA256, the ONNX Runtime version, the QNN EP
-version, the QNN SDK version as reported by the backend (null until it is read),
-the HTP backend file's version (`QnnHtp.dll` ProductVersion), every EP option
+version, the QNN SDK version reported at run time (`runtime.qnn.sdk_version`,
+see [What the QNN EP reports](#what-the-qnn-ep-reports)), the HTP backend file's
+version (`QnnHtp.dll` ProductVersion), every EP option
 passed (including the backend path), every session config entry that affects
 compilation (all but `ep.context_enable` and `ep.context_file_path`: strict
 mode and the embed mode), the graph optimization level, and the device (type,
@@ -170,9 +173,33 @@ the timed sessions; `cold_ms` and `cached_ms` list every creation of that kind
 in order, and `context_build_ms` is the build of the shared cache entry before
 the trials (null if none was built).
 
-When ONNX Runtime reports that the QNN EP rates a context as "supported but
-suboptimal" (it suggests recompiling), the result gets an
-`ep_context_recompilation_suggested` note. The outputs were verified either way.
+The HTP architecture is not a key field: it is only known from a compiled
+context (below), after the key was needed. The device fields of the key and the
+EP's own compatibility check on every context load cover a change of hardware.
+
+**Compatibility.** The QNN EP stores compatibility info in every context model
+it compiles (`ep_compatibility_info.QNNExecutionProvider`, e.g.
+`v2:6:2.52.0:5.52.0:73:0:0:0`: format version, backend id, SDK version, backend
+API version, HTP arch, SoC model option, VTCM size option, user-driver flag).
+With `build`/`use` the result records it in `config.ep_context_cache.compatibility`
+with the EP's verdict for the selected NPU (`optimal`, `prefer_recompilation`,
+`unsupported`). The verdict is null when it was not asked for: the QNN EP 2.8.0
+crashes when ONNX Runtime asks it to rate compatibility info after any QNN
+session existed in the process, so it is only asked before the first session,
+which happens when the cache entry already exists (`hit` true).
+
+Every session from a context logs that the QNN EP rates it "supported but
+suboptimal" and suggests recompiling; the result gets an
+`ep_context_recompilation_suggested` note. The reason, read from the EP's
+source and confirmed with its verdict on varied compatibility strings: the EP
+rates a context optimal only if the VTCM size stored in it equals the device's,
+and without the `vtcm_mb` option it stores 0. Compiling with `vtcm_mb` set to
+the device's VTCM size (8 MB on the Snapdragon X Plus) makes the verdict
+`optimal`, with bit-identical outputs and the same cached initialization and
+latency, but the engine has no reported value to set it from (a larger value
+than the device's makes the context unusable), so it is not set. The note is
+harmless: the outputs of the context are verified bit-identical to a compiled
+session.
 
 ### What `run` measures
 
@@ -195,7 +222,8 @@ A run consists of `--trials` trials. Each trial:
 
 After the last trial, the process memory is read, node placement is recorded
 in a separate session with verbose logging (see [`--dry-run`](#--dry-run);
-doing it last means it cannot warm up any timed session), and the power state
+doing it last means it cannot warm up any timed session), the optional
+profiled accelerator pass runs (`--profile-accelerator`), and the power state
 is read again.
 
 **Why the first trial idles too.** Session creation is much slower right after
@@ -879,7 +907,12 @@ log reports failed nodes; not triggerable),
 `FailurePaths.BackgroundLoadDuringATrialIsAWarning`), `trial_spread_high`
 (`FailurePaths.TrialSpreadIsAWarningInTheResultAndSummary`, `TrialSpread.*`),
 `batch_not_equivalent` (`BatchEquivalence.LooksUpByShaProviderAndComputePrecision`; the warning itself: validator fixture `batch_not_equivalent_unflagged`),
-`power_state_changed`, `unknown_power_mode`, `value_unavailable`.
+`accelerator_time_exceeds_latency` and `profiled_pass_incomplete`
+(`--profile-accelerator`; checked in `ProfiledPassNpu.IsASeparateSessionThatLeavesTheTimedResultsAlone`,
+not triggered on this hardware; validator fixtures `accelerator_exceeds_latency_unflagged`,
+`profiled_pass_count_mismatch`),
+`power_state_changed`, `unknown_power_mode`, `value_unavailable` (for the QNN
+values: `QnnBackendInfoNpu.WithoutAContextTheHtpArchIsUnavailable`).
 
 `edgebench doctor`:
 

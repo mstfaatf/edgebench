@@ -34,14 +34,27 @@ struct SelectedEpDevice {
 
 /// The QNN backend a provider uses (results schema: runtime.qnn).
 struct QnnBackendInfo {
-    std::string backend;                     // "htp"
-    std::string backend_path;                // absolute, as passed in backend_path
-    std::optional<std::string> sdk_version;  // null: not read from the backend
-    std::optional<std::string> backend_build;
-    std::optional<std::string> htp_arch;   // null: not read from the backend
-    std::optional<std::string> soc_model;  // null: not read from the backend
+    std::string backend;       // "htp"
+    std::string backend_path;  // absolute, as passed in backend_path
+    // Values the QNN EP reported at run time (qnn_backend_info.hpp), each with the
+    // source it came from (runtime.qnn.value_sources); null: not reported.
+    std::optional<std::string> sdk_version;    // "2.52.0", from the backend build id
+    std::optional<std::string> backend_build;  // "v2.52.0.261104115025"
+    std::optional<std::string> htp_arch;       // "v73", from an EP context's compatibility info
+    std::optional<std::string> soc_model;      // never reported by the QNN EP
+    std::optional<std::string> sdk_version_source;
+    std::optional<std::string> backend_build_source;
+    std::optional<std::string> htp_arch_source;
+    std::optional<std::string> soc_model_source;
     /// Every QNN EP option not in ProviderDescription::ep_options is left at its default.
     bool unlisted_options_default = true;
+};
+
+/// An EP context model's compatibility info and the EP's verdict on it for the
+/// selected device (results schema: config.ep_context_cache.compatibility).
+struct ContextCompatibility {
+    std::optional<std::string> info;     // as stored in the model; null if none
+    std::optional<std::string> verdict;  // compatibility_verdict_name(); null if not rated
 };
 
 /// Everything the results schema records about the provider configuration.
@@ -82,6 +95,19 @@ public:
     virtual Result<std::unique_ptr<BenchSession>> create_context_building_session(
         const std::filesystem::path& model, const RunConfig& config,
         const std::filesystem::path& context_model);
+
+    /// Creates a session like create_session() with the EP's profiling on, writing
+    /// its profile to `profile_file` (timing.profiled_pass). Never used for timing.
+    /// Providers without accelerator profiling return internal_error
+    /// (profiling_unsupported).
+    virtual Result<std::unique_ptr<BenchSession>> create_profiling_session(
+        const std::filesystem::path& model, const RunConfig& config,
+        const std::filesystem::path& profile_file);
+
+    /// The compatibility info stored in the EP context model `context_model` and the
+    /// EP's verdict on it for the selected device. Providers without an EP context
+    /// return nulls.
+    virtual ContextCompatibility context_compatibility(const std::filesystem::path& context_model);
 
     /// Node placement for `model` with `config`'s session options, from a separate
     /// session created with verbose logging. Call it when no timed session follows

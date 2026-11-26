@@ -1,10 +1,14 @@
 #include "edgebench/qnn_provider.hpp"
 
+#include <atomic>
+#include <map>
+#include <mutex>
 #include <unordered_map>
 
 #include "edgebench/bundle_modules.hpp"
 #include "edgebench/npu_options.hpp"
 #include "edgebench/ort_bench_session.hpp"
+#include "edgebench/qnn_backend_info.hpp"
 #include "edgebench/qnn_ep.hpp"
 #include "edgebench/qnn_log.hpp"
 #include "edgebench/runtime.hpp"
@@ -53,6 +57,67 @@ Error backend_failure(const std::string& context, const std::vector<std::string>
     return e;
 }
 
+// Raises the environment's log level to verbose; restores WARNING when it goes
+// out of scope.
+class VerboseEnvLog {
+public:
+    explicit VerboseEnvLog(Ort::Env& env) : env_(env) {
+        env_.UpdateEnvWithCustomLogLevel(ORT_LOGGING_LEVEL_VERBOSE);
+    }
+    ~VerboseEnvLog() {
+        try {
+            env_.UpdateEnvWithCustomLogLevel(ORT_LOGGING_LEVEL_WARNING);
+        } catch (const Ort::Exception&) {
+            // keeps the verbose level; nothing else can be done here
+        }
+    }
+    VerboseEnvLog(const VerboseEnvLog&) = delete;
+    VerboseEnvLog& operator=(const VerboseEnvLog&) = delete;
+
+private:
+    Ort::Env& env_;
+};
+
+// The QNN EP (2.8.0) crashes with an access violation when ONNX Runtime asks it
+// to rate compatibility info (GetModelCompatibilityForEpDevices) after any QNN
+// session has existed in the process, compiled or loaded from a context, even
+// once it was released. So that call is only made before the first QNN session,
+// and the backend build id it yields is kept for the process.
+std::atomic<bool> g_qnn_session_created{false};
+std::mutex g_build_id_mutex;
+std::map<std::string, std::optional<std::string>> g_build_ids;  // by backend path
+
+void note_qnn_session() {
+    g_qnn_session_created = true;
+}
+
+// What the QNN EP logs while it sets up its backend to rate kQnnBackendProbeInfo.
+std::vector<std::string> backend_probe_messages(Runtime& runtime, Ort::ConstEpDevice device) {
+    Runtime::LogCapture capture(runtime);
+    try {
+        const VerboseEnvLog verbose(runtime.env());
+        (void)Ort::GetModelCompatibilityForEpDevices({device},
+                                                     std::string(kQnnBackendProbeInfo).c_str());
+    } catch (const Ort::Exception&) {
+        // no rating: whatever was logged before the failure is still used
+    }
+    return capture.messages();
+}
+
+// The backend build id for `backend_path`: probed once per process, before any
+// QNN session; null if it was not logged or can no longer be probed.
+std::optional<std::string> backend_build_id(Runtime& runtime, Ort::ConstEpDevice device,
+                                            const std::string& backend_path) {
+    const std::lock_guard<std::mutex> lock(g_build_id_mutex);
+    if (const auto it = g_build_ids.find(backend_path); it != g_build_ids.end())
+        return it->second;
+    if (g_qnn_session_created)
+        return std::nullopt;  // too late to ask (see above); not remembered
+    std::optional<std::string> id = find_backend_build_id(backend_probe_messages(runtime, device));
+    g_build_ids[backend_path] = id;
+    return id;
+}
+
 Error classify(Error e, const RunConfig& config, const std::vector<std::string>& logged) {
     if (e.exit_code != ExitCode::ort_runtime_error || !e.ort_error_code)
         return e;  // not an ONNX Runtime error, e.g. a model with dynamic shapes
@@ -94,7 +159,22 @@ Result<std::unique_ptr<QnnProvider>> QnnProvider::create(Runtime& runtime,
         SelectedEpDevice{device, std::nullopt, "by_device_type", selection.candidate_count};
     d.ep_options = qnn_ep_options(config, backend.value());
     d.session_config = qnn_session_config(config);
-    d.qnn = QnnBackendInfo{"htp", path_to_utf8(backend.value()), std::nullopt, std::nullopt};
+    QnnBackendInfo qnn;
+    qnn.backend = "htp";
+    qnn.backend_path = path_to_utf8(backend.value());
+    if (Result<Ort::ConstEpDevice> handle =
+            ep_device_handle(runtime.env(), *selection.index, device);
+        handle) {
+        if (std::optional<std::string> build =
+                backend_build_id(runtime, handle.value(), qnn.backend_path)) {
+            qnn.backend_build = *build;
+            qnn.backend_build_source = std::string(kSourceBackendBuildIdLog);
+            qnn.sdk_version = sdk_version_from_build_id(*build);
+            if (qnn.sdk_version)
+                qnn.sdk_version_source = std::string(kSourceBackendBuildIdLog);
+        }
+    }
+    d.qnn = std::move(qnn);
     return std::unique_ptr<QnnProvider>(
         new QnnProvider(runtime, *library.value(), *selection.index, std::move(d)));
 }
@@ -107,7 +187,8 @@ QnnProvider::QnnProvider(Runtime& runtime, EpLibrary& library, std::size_t devic
       description_(std::move(description)) {}
 
 Result<Ort::SessionOptions> QnnProvider::session_options(
-    const RunConfig& config, const std::map<std::string, std::string>& session_config) {
+    const RunConfig& config, const std::map<std::string, std::string>& session_config,
+    const std::map<std::string, std::string>& ep_options_map) {
     Result<Ort::ConstEpDevice> device =
         ep_device_handle(runtime_.env(), device_index_, description_.ep_device->device);
     if (!device)
@@ -119,8 +200,8 @@ Result<Ort::SessionOptions> QnnProvider::session_options(
         options.SetGraphOptimizationLevel(ort_graph_optimization_level(config.graph_opt));
         for (const auto& [key, value] : session_config)
             options.AddConfigEntry(key.c_str(), value.c_str());
-        const std::unordered_map<std::string, std::string> ep_options(
-            description_.ep_options.begin(), description_.ep_options.end());
+        const std::unordered_map<std::string, std::string> ep_options(ep_options_map.begin(),
+                                                                      ep_options_map.end());
         options.AppendExecutionProvider_V2(runtime_.env(), {device.value()}, ep_options);
         return options;
     } catch (const Ort::Exception& e) {
@@ -131,19 +212,57 @@ Result<Ort::SessionOptions> QnnProvider::session_options(
 
 Result<std::unique_ptr<BenchSession>> QnnProvider::create_session(const fs::path& model,
                                                                   const RunConfig& config) {
-    return create(model, config, description_.session_config);
+    return create(model, config, description_.session_config, description_.ep_options);
 }
 
 Result<std::unique_ptr<BenchSession>> QnnProvider::create_context_building_session(
     const fs::path& model, const RunConfig& config, const fs::path& context_model) {
-    return create(model, config, qnn_context_build_config(config, context_model));
+    return create(model, config, qnn_context_build_config(config, context_model),
+                  description_.ep_options);
+}
+
+Result<std::unique_ptr<BenchSession>> QnnProvider::create_profiling_session(
+    const fs::path& model, const RunConfig& config, const fs::path& profile_file) {
+    std::map<std::string, std::string> ep_options = description_.ep_options;
+    ep_options["profiling_level"] = "basic";
+    ep_options["profiling_file_path"] = path_to_utf8(profile_file);
+    return create(model, config, description_.session_config, ep_options);
+}
+
+ContextCompatibility QnnProvider::context_compatibility(const fs::path& context_model) {
+    ContextCompatibility c;
+    try {
+        Ort::AllocatorWithDefaultOptions allocator;
+        Ort::AllocatedStringPtr info = Ort::GetCompatibilityInfoFromModelAllocated(
+            context_model.c_str(), std::string(kQnnEpName).c_str(), allocator);
+        if (!info)
+            return c;
+        c.info = std::string(info.get());
+    } catch (const Ort::Exception&) {
+        return c;
+    }
+    if (g_qnn_session_created)
+        return c;  // the EP cannot rate it any more in this process (see above)
+    Result<Ort::ConstEpDevice> device =
+        ep_device_handle(runtime_.env(), device_index_, description_.ep_device->device);
+    if (!device)
+        return c;
+    try {
+        c.verdict = compatibility_verdict_name(static_cast<int>(
+            Ort::GetModelCompatibilityForEpDevices({device.value()}, c.info->c_str())));
+    } catch (const Ort::Exception&) {
+        // not rated
+    }
+    return c;
 }
 
 Result<std::unique_ptr<BenchSession>> QnnProvider::create(
     const fs::path& model, const RunConfig& config,
-    const std::map<std::string, std::string>& session_config) {
+    const std::map<std::string, std::string>& session_config,
+    const std::map<std::string, std::string>& ep_options) {
     EpLibrary::Lease lease = library_.lease();  // before the session exists
-    Result<Ort::SessionOptions> options = session_options(config, session_config);
+    Result<Ort::SessionOptions> options = session_options(config, session_config, ep_options);
+    note_qnn_session();
     if (!options)
         return options.error();
 
@@ -162,9 +281,11 @@ Result<std::unique_ptr<BenchSession>> QnnProvider::create(
 Result<NodeAssignment> QnnProvider::record_placement(const fs::path& model,
                                                      const RunConfig& config) {
     EpLibrary::Lease lease = library_.lease();
-    Result<Ort::SessionOptions> options = session_options(config, description_.session_config);
+    Result<Ort::SessionOptions> options =
+        session_options(config, description_.session_config, description_.ep_options);
     if (!options)
         return options.error();
+    note_qnn_session();
 
     const std::uint64_t log_start = runtime_.log_position();
     const fs::path bundle = runtime_.bundle_dir();

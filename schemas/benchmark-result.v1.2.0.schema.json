@@ -29,8 +29,9 @@
             "stage": {
               "enum": [
                 "configuration", "environment", "model_load", "ep_registration", "session_creation", "warmup",
-                "measurement", "accuracy", "output"
-              ]
+                "measurement", "accuracy", "output", "profiled_pass"
+              ],
+              "description": "profiled_pass (added in 1.2.0): the --profile-accelerator session after the timed trials."
             },
             "message": {"type": "string", "minLength": 1},
             "code": {
@@ -243,13 +244,13 @@
                   "properties": {
                     "sdk_version": {
                       "type": ["string", "null"],
-                      "description": "QNN SDK (QAIRT) version as reported by the loaded backend through the QNN API. Null if not queried; see backend_file_version for the version resource of the backend file."
+                      "description": "QNN SDK (QAIRT) version as reported at run time: major.minor.patch of the backend build id (backend_build), as the QNN EP reads it. Null if not reported; see value_sources for where it came from and backend_file_version for the version resource of the backend file."
                     },
                     "backend": {"enum": ["htp", "gpu", "cpu", "saver", "ir", null]},
                     "backend_path": {"type": ["string", "null"]},
                     "backend_build": {
                       "type": ["string", "null"],
-                      "description": "Build identifier reported by the backend, e.g. v2.52.0.261104115025."
+                      "description": "Build identifier reported by the backend (QnnBackend_getBuildId, as logged by the QNN EP while it sets up the backend), e.g. v2.52.0.261104115025. Null if not reported."
                     },
                     "backend_file_version": {
                       "description": "Version resource of the backend library actually loaded in the process (e.g. QnnHtp.dll), read from the loaded module's file. Null if the module was not loaded or has no version resource.",
@@ -279,11 +280,11 @@
                     },
                     "htp_arch": {
                       "type": ["string", "null"],
-                      "description": "HTP architecture as reported by the loaded backend, e.g. v73. Null if not queried."
+                      "description": "HTP architecture the QNN EP compiled an EP context of this run for, read from the device's platform info and stored in the context's compatibility info, e.g. v73. Null if the run built or loaded no EP context."
                     },
                     "soc_model": {
                       "type": ["string", "null"],
-                      "description": "SoC model as reported by the loaded backend. Null if not queried."
+                      "description": "SoC model as reported at run time. The QNN EP does not read it from the device (its compatibility info carries only its soc_model option), so it is null."
                     },
                     "partition_count": {
                       "$ref": "#/$defs/nullableNonNegativeInteger",
@@ -292,6 +293,18 @@
                     "unlisted_ep_options": {
                       "enum": ["ep_default", null],
                       "description": "ep_default: every QNN EP option not listed in config.ep_options was left at the EP's default value."
+                    },
+                    "value_sources": {
+                      "description": "Where sdk_version, backend_build, htp_arch and soc_model came from; null for a value that is null. qnn_ep_log_backend_build_id: the backend build id the QNN EP logs while it sets up its backend. ep_compatibility_info: the compatibility info the QNN EP stored in an EP context model of this run. Added in 1.2.0.",
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["sdk_version", "backend_build", "htp_arch", "soc_model"],
+                      "properties": {
+                        "sdk_version": {"$ref": "#/$defs/qnnValueSource"},
+                        "backend_build": {"$ref": "#/$defs/qnnValueSource"},
+                        "htp_arch": {"$ref": "#/$defs/qnnValueSource"},
+                        "soc_model": {"$ref": "#/$defs/qnnValueSource"}
+                      }
                     }
                   }
                 }
@@ -551,6 +564,25 @@
                   "enum": ["0", "1", null],
                   "description": "ep.context_embed_mode of the contexts the run built or used: 0, the context binary in its own file next to the context model. Null if the run used no EP context."
                 },
+                "compatibility": {
+                  "description": "The compatibility info the EP stored in the context model the timed sessions were created from, and the EP's verdict on it for the selected device. Null with mode off. Added in 1.2.0.",
+                  "oneOf": [
+                    {"type": "null"},
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["info", "verdict", "source"],
+                      "properties": {
+                        "info": {"type": ["string", "null"], "description": "The model's ep_compatibility_info.<EP> metadata, e.g. v2:6:2.52.0:5.52.0:73:0:0:0 for the QNN EP. Null if the model has none."},
+                        "verdict": {
+                          "enum": ["not_applicable", "optimal", "prefer_recompilation", "unsupported", null],
+                          "description": "OrtCompiledModelCompatibility for the selected device. prefer_recompilation: usable, but the EP would compile it differently now (ONNX Runtime then logs that recompiling is suggested). Null if not rated."
+                        },
+                        "source": {"enum": ["ort_model_compatibility_for_ep_devices"], "description": "ONNX Runtime's GetCompatibilityInfoFromModel and GetModelCompatibilityForEpDevices."}
+                      }
+                    }
+                  ]
+                },
                 "key": {
                   "oneOf": [
                     {"type": "null"},
@@ -678,7 +710,7 @@
                         "additionalProperties": false,
                         "required": ["stage", "trial_index", "modules_outside_bundle"],
                         "properties": {
-                          "stage": {"enum": ["after_provider_creation", "after_session_creation", "after_untimed_session", "placement_session"], "description": "after_untimed_session: after a session that is not timed (EP context build and the cached == compiled check before the trials; --init-breakdown sessions of a trial)."},
+                          "stage": {"enum": ["after_provider_creation", "after_session_creation", "after_untimed_session", "placement_session", "profiled_session"], "description": "after_untimed_session: after a session that is not timed (EP context build and the cached == compiled check before the trials; --init-breakdown sessions of a trial). profiled_session: after the --profile-accelerator session was created."},
                           "trial_index": {
                             "type": ["integer", "null"],
                             "minimum": 0,
@@ -1026,7 +1058,41 @@
                       "enum": ["qnn_profiling_basic", "qnn_profiling_detailed", null],
                       "description": "The QNN EP profiling level the times come from."
                     },
-                    "note": {"type": ["string", "null"]}
+                    "note": {"type": ["string", "null"]},
+                    "level": {"enum": ["basic", "detailed", null], "description": "The QNN EP option profiling_level of the profiled session. Added in 1.2.0."},
+                    "warmup_iterations": {"type": "integer", "minimum": 0, "description": "Inferences run before the profiled ones; their profile entries are not used. Added in 1.2.0."},
+                    "inferences_in_profile": {"type": "integer", "minimum": 0, "description": "Inferences the profile reports, warm-up included. Added in 1.2.0."},
+                    "reported_unit": {"enum": ["us", null], "description": "Unit of the times in the profile (they are recorded here in ms). Added in 1.2.0."},
+                    "execute_events_ms": {
+                      "type": "object",
+                      "additionalProperties": {"$ref": "#/$defs/initSummary"},
+                      "description": "Every per-inference execute event of the profile (e.g. RPC (execute) time, QNN (execute) time), summarized over the profiled inferences. accelerator_ms is its Accelerator (execute) time. Added in 1.2.0."
+                    },
+                    "init_events": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["event", "time_ms"],
+                        "properties": {"event": {"type": "string", "minLength": 1}, "time_ms": {"type": "number", "minimum": 0}}
+                      },
+                      "description": "Events of the profiled session's creation the profile reports (graph finalization), in order. Added in 1.2.0."
+                    },
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["name", "path", "size_bytes", "sha256"],
+                        "properties": {
+                          "name": {"type": "string", "minLength": 1},
+                          "path": {"type": "string", "minLength": 1, "description": "Relative to the result file once the result was written (in the run directory), else absolute."},
+                          "size_bytes": {"$ref": "#/$defs/nullableNonNegativeInteger"},
+                          "sha256": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]}
+                        }
+                      },
+                      "description": "The profiling output the EP wrote (CSV and its binary log). Added in 1.2.0."
+                    }
                   }
                 }
               ]
@@ -1180,6 +1246,9 @@
     "nullableNonNegativeNumber": {"type": ["number", "null"], "minimum": 0},
     "stringMap": {"type": "object", "additionalProperties": {"type": "string"}},
     "countMap": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+    "qnnValueSource": {
+      "enum": ["qnn_ep_log_backend_build_id", "ep_compatibility_info", null]
+    },
     "initSummary": {
       "oneOf": [
         {"type": "null"},

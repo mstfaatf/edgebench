@@ -109,7 +109,13 @@
       "htp_arch": null,
       "soc_model": null,
       "partition_count": 1,
-      "unlisted_ep_options": "ep_default"
+      "unlisted_ep_options": "ep_default",
+      "value_sources": {
+        "sdk_version": null,
+        "backend_build": null,
+        "htp_arch": null,
+        "soc_model": null
+      }
     },
     "ep_device": {
       "ep_name": "QNNExecutionProvider",
@@ -330,7 +336,8 @@
         "graph_optimization_level": "enable_all"
       },
       "cache_dir": "C:\\Users\\you\\AppData\\Local\\EdgeBench\\qnn-context",
-      "embed_mode": "0"
+      "embed_mode": "0",
+      "compatibility": null
     },
     "run_binding": "iobinding_preallocated",
     "profiling": {

@@ -1,0 +1,12 @@
+{
+  "description": "An SDK version that is not the one in the backend build id.",
+  "base": "docs/examples/v1.2.0/example-npu-int8-profiled-pass-cache-hit.json",
+  "set": {
+    "/runtime/qnn/sdk_version": "2.51.0"
+  },
+  "expect": {
+    "severity": "error",
+    "code": "qnn_sdk_version_mismatch",
+    "path": "/runtime/qnn/sdk_version"
+  }
+}

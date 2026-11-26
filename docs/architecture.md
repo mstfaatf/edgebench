@@ -74,6 +74,20 @@ backend libraries: the devices are listed even when `QnnHtp.dll` is missing. A
 selected NPU therefore says nothing about whether the HTP backend can be loaded;
 that is only known when a session is created.
 
+What the backend reports about itself is read without the QNN SDK headers,
+through ONNX Runtime and the QNN EP only (`qnn_backend_info.hpp`). When
+`QnnProvider` is created it raises the environment's log level to verbose and
+asks the EP to rate a compatibility string whose every field is 0
+(`GetModelCompatibilityForEpDevices`): the EP sets up its HTP backend for that
+and logs the backend's build id, which gives `runtime.qnn.backend_build` and
+`sdk_version`. The HTP arch is read from the compatibility info the EP stores
+in an EP context model (`GetCompatibilityInfoFromModel`). The QNN EP 2.8.0
+crashes with an access violation when it is asked to rate compatibility info
+after any QNN session has existed in the process, so the provider asks only
+before the first session: the build id is probed once per process and backend
+and kept, and the verdict on a context (`context_compatibility()`) is only
+requested on a cache hit, before any session.
+
 Device-selection failures are exit code 3 (`ort_runtime_error`), like the CPU
 provider's: ONNX Runtime and the plugin loaded correctly (that would be 4), but
 the runtime offers no single usable device for the request.

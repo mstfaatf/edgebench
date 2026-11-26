@@ -4,9 +4,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "edgebench/benchmark.hpp"
 
@@ -18,11 +20,22 @@ struct RawLatencyLink {
     std::string sha256;          // of the CSV file's bytes
 };
 
+/// A file written next to the result (timing.profiled_pass.files).
+struct LinkedFile {
+    std::string name;
+    std::string path;  // relative to the result file, '/' separators
+    std::uint64_t size_bytes = 0;
+    std::string sha256;
+};
+
 /// The results schema 1.2.0 document for `result`, in schema key order, with
 /// every key present (null when unknown). `raw` is null if no latency file was
-/// written. Numbers use nlohmann::json's shortest round-trip form.
-nlohmann::ordered_json to_result_json(const BenchmarkResult& result,
-                                      const std::optional<RawLatencyLink>& raw);
+/// written. `profile_files`: where the profiled pass's files were written; if
+/// null, they are listed where the EP wrote them (absolute paths). Numbers use
+/// nlohmann::json's shortest round-trip form.
+nlohmann::ordered_json to_result_json(
+    const BenchmarkResult& result, const std::optional<RawLatencyLink>& raw,
+    const std::optional<std::vector<LinkedFile>>& profile_files = std::nullopt);
 
 /// latencies.csv: header trial_index,iteration_index,latency_ms, then one row per
 /// measured iteration in trial and iteration order.

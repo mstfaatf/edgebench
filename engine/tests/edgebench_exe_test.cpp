@@ -725,6 +725,21 @@ TEST(Cli, RunNpuPrecisionRulesAreUsageErrors) {
     EXPECT_TRUE(fs::is_empty(out.path()));
 }
 
+// The CPU provider has no accelerator to profile: refused before ONNX Runtime loads.
+TEST(Cli, ProfileAcceleratorWithTheCpuProviderExits2) {
+    TempDir out;
+    const ProcessResult r = run_process(
+        kEdgebenchExe,
+        {L"run", L"--model", (kFixtureDir / "fixed_float32.onnx").native(), L"--provider", L"cpu",
+         L"--profile-accelerator", L"--output-dir", out.path().native()},
+        kSourceDir);
+    expect_no_crash(r);
+    EXPECT_EQ(r.exit_code, code(ExitCode::usage_error)) << describe(r);
+    EXPECT_TRUE(contains(r.err, "--profile-accelerator: is only allowed with --provider npu"))
+        << describe(r);
+    EXPECT_TRUE(fs::is_empty(out.path()));
+}
+
 // Like the probe test below: only reachable where the QNN EP offers no single NPU.
 TEST(Cli, RunNpuWithoutASingleNpuExits3) {
     if (!eb::qnn_ep_in_build())

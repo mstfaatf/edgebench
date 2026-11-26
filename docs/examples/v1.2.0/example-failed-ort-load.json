@@ -99,7 +99,8 @@
       "verified_equal_outputs": null,
       "key": null,
       "cache_dir": "C:\\Users\\you\\AppData\\Local\\EdgeBench\\qnn-context",
-      "embed_mode": "0"
+      "embed_mode": "0",
+      "compatibility": null
     },
     "run_binding": "run",
     "profiling": {

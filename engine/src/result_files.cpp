@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <fstream>
+#include <sstream>
 #include <system_error>
 
 #define WIN32_LEAN_AND_MEAN
@@ -137,6 +139,8 @@ Result<WrittenResult> write_result_files(
             continue;
 
         std::optional<RawLatencyLink> raw;
+        std::optional<std::vector<LinkedFile>> profile_links;
+        std::vector<fs::path> written_profile_files;
         if (with_latencies) {
             // The run directory is created exclusively: it reserves the stamp.
             if (!CreateDirectoryW(run_dir.c_str(), nullptr)) {
@@ -159,12 +163,39 @@ Result<WrittenResult> write_result_files(
                 return r.error();
             }
             raw = RawLatencyLink{base + "/latencies.csv", sha256_hex(std::string_view(latencies))};
+            // The profiled pass's files, copied from where the EP wrote them.
+            if (result.timing.profiled_pass) {
+                profile_links.emplace();
+                for (const fs::path& source : result.timing.profiled_pass->files) {
+                    std::ifstream in(source, std::ios::binary);
+                    std::ostringstream bytes;
+                    bytes << in.rdbuf();
+                    const std::string content = bytes.str();
+                    const std::string file_name = path_to_utf8(source.filename());
+                    const fs::path target = run_dir / source.filename();
+                    Result<void> r =
+                        in ? create_file_atomically(target, content)
+                           : Result<void>(Error{ExitCode::output_error, "write_failed",
+                                                "cannot read " + path_to_utf8(source)});
+                    if (!r) {
+                        for (const fs::path& f : written_profile_files)
+                            remove_quietly(f);
+                        undo_dir();
+                        return r.error();
+                    }
+                    written_profile_files.push_back(target);
+                    profile_links->push_back({file_name, base + "/" + file_name, content.size(),
+                                              sha256_hex(std::string_view(content))});
+                }
+            }
         }
 
         WrittenResult out;
-        out.document = to_result_json(result, raw);
+        out.document = to_result_json(result, raw, profile_links);
         const std::string text = out.document.dump(2) + "\n";
         if (Result<void> r = create_file_atomically(json_path, text); !r) {
+            for (const fs::path& f : written_profile_files)
+                remove_quietly(f);
             if (with_latencies) {
                 remove_quietly(run_dir / "latencies.csv");
                 remove_quietly(run_dir / "summary.csv");
@@ -179,6 +210,10 @@ Result<WrittenResult> write_result_files(
         out.stamp = stamp;
         if (with_latencies)
             out.run_dir = run_dir;
+        if (result.timing.profiled_pass && profile_links) {
+            std::error_code ignored;  // the EP's files are in the run directory now
+            fs::remove_all(result.timing.profiled_pass->staging_dir, ignored);
+        }
         if (Result<void> r = replace_file_atomically(out.latest_file, text); !r)
             return r.error();
         return out;

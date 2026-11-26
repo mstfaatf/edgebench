@@ -62,6 +62,7 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
     std::string label, name, format = "summary", output_dir = defaults.output_dir.string();
     std::string htp_mode(kDefaultHtpPerformanceMode);
     std::string ep_cache = "off", ep_cache_dir;
+    int profile_iterations = kDefaultProfileIterations;
     bool no_strict = false;
     std::uint64_t seed = 0;
     double constant_value = 0.0;
@@ -156,6 +157,16 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
     run->add_flag("--init-breakdown", cfg.init_breakdown,
                   "NPU: per trial, also time a cold, a context-building and a cached session "
                   "creation (each after the same idle period) before the timed session");
+    run->add_flag("--profile-accelerator", cfg.profile_accelerator,
+                  "NPU: after the trials, run a separate session with QNN profiling and record "
+                  "the accelerator time per inference; never part of the timed results");
+    CLI::Option* profile_iterations_opt =
+        run->add_option("--profile-iterations", profile_iterations,
+                        "NPU: inferences of the --profile-accelerator pass (after --warmup "
+                        "unrecorded ones)" +
+                            range(1, kMaxIterations))
+            ->type_name("N")
+            ->capture_default_str();
     run->add_flag("--dry-run", cfg.dry_run,
                   "Validate, create the session, run one inference, print the resolved "
                   "configuration as JSON");
@@ -225,6 +236,8 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
             cfg.ep_cache_dir =
                 std::filesystem::path(std::u8string(ep_cache_dir.begin(), ep_cache_dir.end()));
         cfg.output_dir = std::filesystem::path(std::u8string(output_dir.begin(), output_dir.end()));
+        if (profile_iterations_opt->count() > 0)
+            cfg.profile_iterations = profile_iterations;
 
         const std::vector<ConfigError> errors = validate(cfg);
         if (!errors.empty()) {

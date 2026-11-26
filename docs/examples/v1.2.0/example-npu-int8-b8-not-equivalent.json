@@ -115,7 +115,13 @@
       "htp_arch": null,
       "soc_model": null,
       "partition_count": 1,
-      "unlisted_ep_options": "ep_default"
+      "unlisted_ep_options": "ep_default",
+      "value_sources": {
+        "sdk_version": null,
+        "backend_build": null,
+        "htp_arch": null,
+        "soc_model": null
+      }
     },
     "ep_device": {
       "ep_name": "QNNExecutionProvider",
@@ -303,7 +309,8 @@
       "verified_equal_outputs": null,
       "key": null,
       "cache_dir": null,
-      "embed_mode": null
+      "embed_mode": null,
+      "compatibility": null
     },
     "run_binding": "iobinding_preallocated",
     "profiling": {

@@ -1,0 +1,16 @@
+{
+  "description": "The accelerator warning on a run whose accelerator time is below its latency.",
+  "base": "docs/examples/v1.2.0/example-npu-int8-profiled-pass-cache-hit.json",
+  "set": {
+    "/warnings/1": {
+      "code": "accelerator_time_exceeds_latency",
+      "message": "The median accelerator time of the profiled pass is above the median timed latency.",
+      "path": "/timing/profiled_pass/accelerator_ms"
+    }
+  },
+  "expect": {
+    "severity": "error",
+    "code": "accelerator_exceeds_latency_unfounded",
+    "path": "/warnings"
+  }
+}

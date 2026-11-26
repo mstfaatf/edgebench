@@ -23,6 +23,7 @@
 #include "edgebench/onnx_inspect.hpp"
 #include "edgebench/ort_loader.hpp"
 #include "edgebench/provider.hpp"
+#include "edgebench/qnn_profile.hpp"
 #include "edgebench/stats.hpp"
 #include "edgebench/system_info.hpp"
 #include "edgebench/tensor_info.hpp"
@@ -110,7 +111,26 @@ struct EpContextCacheResult {
     std::optional<bool> verified_equal_outputs;
     /// Files deleted because their key differed for the same model (stale).
     std::vector<std::filesystem::path> deleted_stale;
+    /// The context's compatibility info and the EP's verdict on it (build|use only).
+    std::optional<ContextCompatibility> compatibility;
     bool enabled() const { return mode != EpCacheMode::off; }
+};
+
+/// timing.profiled_pass: one separate session with QNN profiling, created after
+/// the trials and the placement session from the same model (or EP context) as
+/// the timed sessions. Nothing here is part of the timed results.
+struct ProfiledPassResult {
+    int warmup_iterations = 0;  // run first, their profile entries dropped
+    int iterations = 0;         // measured inferences requested
+    std::string level = "basic";
+    std::string source = "qnn_profiling_basic";
+    QnnProfileSummary profile;  // times from the profile, warm-up removed
+    /// Where the EP wrote its output (a temporary directory until the result files
+    /// are written, which copy the files into the run directory).
+    std::filesystem::path staging_dir;
+    std::vector<std::filesystem::path> files;  // in staging_dir, sorted by name
+    /// Accelerator execute time per measured inference, in order (may be empty).
+    const std::vector<double>& accelerator_ms() const;
 };
 
 struct TrialResult {
@@ -156,8 +176,8 @@ struct TimingResult {
     std::optional<double> first_inference_ms;  // trial 0's first warm-up iteration
     std::vector<TrialResult> trials;
     std::optional<AggregateResult> aggregate;
-    // timing.accelerator and timing.profiled_pass: always null here (no profiled
-    // accelerator pass).
+    /// --profile-accelerator only. timing.accelerator (superseded by it) stays null.
+    std::optional<ProfiledPassResult> profiled_pass;
 };
 
 /// Why a run failed (results schema: error).
@@ -228,6 +248,7 @@ enum class StopPoint {
     measured,          // before a measured iteration (outside the timed bracket)
     before_placement,  // before the node placement session
     after_placement,   // after it returned
+    profiled_pass,     // before each inference of the --profile-accelerator session
 };
 
 /// Called at every stop point, just before the stop flag is checked (tests use it
@@ -297,6 +318,13 @@ std::string generated_input_description(const RunConfig& config);
 /// Idle period before each trial: --cooldown-ms, or --load-sample-ms before the
 /// first trial if the cooldown is 0 (then none between trials).
 std::chrono::milliseconds idle_before_trial(const RunConfig& config, int sequence);
+
+/// The note of timing.profiled_pass.
+inline constexpr std::string_view kProfiledPassNote =
+    "Accelerator time from a separate session with QNN profiling (basic), created after the "
+    "timed trials; profiling adds host-side overhead to that session, so this is the "
+    "accelerator's share of an inference, not a latency, and must not be compared with the "
+    "timed wall-clock latency as if they measured the same thing.";
 
 /// Background CPU load above which a run gets a background_cpu_load_high warning.
 inline constexpr double kHighBackgroundLoad = 0.10;

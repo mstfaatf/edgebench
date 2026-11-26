@@ -1,0 +1,16 @@
+{
+  "description": "An EP context compatibility verdict on a run with the cache off.",
+  "base": "docs/examples/v1.2.0/example-npu-int8-b8-not-equivalent.json",
+  "set": {
+    "/config/ep_context_cache/compatibility": {
+      "info": "v2:6:2.52.0:5.52.0:73:0:0:0",
+      "verdict": "prefer_recompilation",
+      "source": "ort_model_compatibility_for_ep_devices"
+    }
+  },
+  "expect": {
+    "severity": "error",
+    "code": "cache_compatibility_without_cache",
+    "path": "/config/ep_context_cache/compatibility"
+  }
+}

@@ -1,0 +1,35 @@
+Msg Timestamp,Message,Time,Unit of Measurement,Timing Source,Event Level,Event Identifier
+0,BACKEND,18827,US,BACKEND,ROOT,RPC (finalize) time
+0,BACKEND,18445,US,BACKEND,ROOT,QNN accelerator (finalize) time
+0,BACKEND,18276,US,BACKEND,ROOT,Accelerator (finalize) time
+0,FINALIZE,70361,US,BACKEND,ROOT,QNN (finalize) time
+0,BACKEND,4,COUNT,BACKEND,ROOT,Number of HVX threads used
+0,BACKEND,1595,US,BACKEND,ROOT,RPC (execute) time
+0,BACKEND,448,US,BACKEND,ROOT,QNN accelerator (execute) time
+0,BACKEND,379,US,BACKEND,ROOT,Accelerator (execute) time
+0,BACKEND,86,US,BACKEND,ROOT,Accelerator (execute excluding wait) time
+0,EXECUTE,1689,US,BACKEND,ROOT,QNN (execute) time
+0,BACKEND,4,COUNT,BACKEND,ROOT,Number of HVX threads used
+0,BACKEND,57,US,BACKEND,ROOT,RPC (execute) time
+0,BACKEND,49,US,BACKEND,ROOT,QNN accelerator (execute) time
+0,BACKEND,34,US,BACKEND,ROOT,Accelerator (execute) time
+0,BACKEND,20,US,BACKEND,ROOT,Accelerator (execute excluding wait) time
+0,EXECUTE,120,US,BACKEND,ROOT,QNN (execute) time
+0,BACKEND,4,COUNT,BACKEND,ROOT,Number of HVX threads used
+0,BACKEND,58,US,BACKEND,ROOT,RPC (execute) time
+0,BACKEND,50,US,BACKEND,ROOT,QNN accelerator (execute) time
+0,BACKEND,34,US,BACKEND,ROOT,Accelerator (execute) time
+0,BACKEND,21,US,BACKEND,ROOT,Accelerator (execute excluding wait) time
+0,EXECUTE,106,US,BACKEND,ROOT,QNN (execute) time
+0,BACKEND,4,COUNT,BACKEND,ROOT,Number of HVX threads used
+0,BACKEND,56,US,BACKEND,ROOT,RPC (execute) time
+0,BACKEND,50,US,BACKEND,ROOT,QNN accelerator (execute) time
+0,BACKEND,34,US,BACKEND,ROOT,Accelerator (execute) time
+0,BACKEND,18,US,BACKEND,ROOT,Accelerator (execute excluding wait) time
+0,EXECUTE,100,US,BACKEND,ROOT,QNN (execute) time
+0,BACKEND,4,COUNT,BACKEND,ROOT,Number of HVX threads used
+0,BACKEND,57,US,BACKEND,ROOT,RPC (execute) time
+0,BACKEND,49,US,BACKEND,ROOT,QNN accelerator (execute) time
+0,BACKEND,33,US,BACKEND,ROOT,Accelerator (execute) time
+0,BACKEND,21,US,BACKEND,ROOT,Accelerator (execute excluding wait) time
+0,EXECUTE,104,US,BACKEND,ROOT,QNN (execute) time

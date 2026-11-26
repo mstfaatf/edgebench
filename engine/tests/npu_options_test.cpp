@@ -321,6 +321,44 @@ TEST(NpuCli, CacheOptionErrors) {
     }
 }
 
+TEST(NpuCli, ProfileAcceleratorOptions) {
+    const eb::test::TempModel model("m.onnx");
+    const eb::ParseResult d = parse({"--provider", "npu", "--profile-accelerator"}, model);
+    ASSERT_FALSE(d.exit) << d.err;
+    EXPECT_TRUE(d.run.profile_accelerator);
+    EXPECT_FALSE(d.run.profile_iterations);  // given explicitly only
+    EXPECT_EQ(d.run.effective_profile_iterations(), eb::kDefaultProfileIterations);
+    EXPECT_EQ(eb::kDefaultProfileIterations, 50);
+
+    const eb::ParseResult n =
+        parse({"--provider", "npu", "--profile-accelerator", "--profile-iterations", "7"}, model);
+    ASSERT_FALSE(n.exit) << n.err;
+    EXPECT_EQ(n.run.effective_profile_iterations(), 7);
+
+    const eb::ParseResult off = parse({"--provider", "npu"}, model);
+    ASSERT_FALSE(off.exit) << off.err;
+    EXPECT_FALSE(off.run.profile_accelerator);
+}
+
+TEST(NpuCli, ProfileAcceleratorErrors) {
+    const eb::test::TempModel model("m.onnx");
+    // The CPU provider has no accelerator to profile: a usage error (exit code 2).
+    const eb::ParseResult cpu = parse({"--profile-accelerator"}, model);
+    ASSERT_TRUE(cpu.exit);
+    EXPECT_EQ(*cpu.exit, ExitCode::usage_error);
+    EXPECT_TRUE(contains(cpu.err, "--profile-accelerator: is only allowed with --provider npu"))
+        << cpu.err;
+    const eb::ParseResult unused = parse({"--provider", "npu", "--profile-iterations", "5"}, model);
+    ASSERT_TRUE(unused.exit);
+    EXPECT_TRUE(
+        contains(unused.err, "--profile-iterations: is only used with --profile-accelerator"))
+        << unused.err;
+    const eb::ParseResult zero =
+        parse({"--provider", "npu", "--profile-accelerator", "--profile-iterations", "0"}, model);
+    ASSERT_TRUE(zero.exit);
+    EXPECT_TRUE(contains(zero.err, "must be between 1 and")) << zero.err;
+}
+
 TEST(NpuCli, UnknownPerformanceModeIsAUsageError) {
     const eb::test::TempModel model("m.onnx");
     const eb::ParseResult r =

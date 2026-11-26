@@ -21,6 +21,8 @@ inline constexpr int kMaxWarmup = 100'000;
 inline constexpr int kMaxCooldownMs = 600'000;
 inline constexpr int kMaxLoadSampleMs = 600'000;
 inline constexpr int kMaxThreads = 256;
+/// Inferences of the profiled accelerator pass unless --profile-iterations is given.
+inline constexpr int kDefaultProfileIterations = 50;
 enum class RunBinding { run, iobinding_preallocated };
 enum class InputKind { random, constant };
 enum class GraphOptLevel { disable_all, enable_basic, enable_extended, enable_all };
@@ -64,6 +66,17 @@ struct RunConfig {
     /// --init-breakdown: per trial, time a cold, a context-building and a cached
     /// session creation before the timed session.
     bool init_breakdown = false;
+    /// --profile-accelerator: after the trials and the placement session, run a
+    /// separate session with QNN profiling and record its accelerator time
+    /// (timing.profiled_pass). Nothing from it is part of the timed results.
+    bool profile_accelerator = false;
+    /// --profile-iterations: measured inferences of that pass (after --warmup
+    /// unrecorded ones); only set when given.
+    std::optional<int> profile_iterations;
+
+    int effective_profile_iterations() const {
+        return profile_iterations.value_or(kDefaultProfileIterations);
+    }
 
     /// Whether the run creates EP context files (and so needs the cache directory).
     bool uses_ep_context() const { return ep_cache != EpCacheMode::off || init_breakdown; }
