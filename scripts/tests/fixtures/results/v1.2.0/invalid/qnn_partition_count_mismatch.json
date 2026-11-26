@@ -1,0 +1,12 @@
+{
+  "description": "A QNN partition count that differs from the nodes placed on the QNN EP.",
+  "base": "docs/examples/v1.2.0/example-npu-int8-s8w-strict.json",
+  "set": {
+    "/runtime/qnn/partition_count": 2
+  },
+  "expect": {
+    "severity": "error",
+    "code": "qnn_partition_count_mismatch",
+    "path": "/runtime/qnn/partition_count"
+  }
+}

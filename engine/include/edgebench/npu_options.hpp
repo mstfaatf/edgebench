@@ -69,4 +69,21 @@ Result<std::optional<std::string>> requested_compute_precision(const RunConfig& 
 std::optional<std::string> precision_notes(const ModelPrecision& stored,
                                            const std::optional<std::string>& compute_precision);
 
+/// results schema: execution.effective_precision.
+struct EffectivePrecision {
+    std::string stored;   // model.stored_precision
+    std::string compute;  // fp32 | fp16 | int8
+    std::string source;   // model | enable_htp_fp16_precision
+
+    bool operator==(const EffectivePrecision&) const = default;
+};
+
+/// What the device computes in. CPU: the stored precision (nullopt for a mixed
+/// model, whose compute precision is not one value). NPU: `compute_precision`
+/// (requested_compute_precision()), from the model unless an FP32 model is
+/// computed in FP16; nullopt if it is unknown.
+std::optional<EffectivePrecision> effective_precision(
+    ProviderKind provider, const ModelPrecision& stored,
+    const std::optional<std::string>& compute_precision);
+
 }  // namespace edgebench

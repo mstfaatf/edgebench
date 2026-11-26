@@ -241,3 +241,92 @@ def test_cpu_references_are_reproducible(references):
                                 for i in r.inputs]).reshape(session.get_inputs()[0].shape)
             y = np.ascontiguousarray(session.run(None, {name: x})[0], dtype="<f4")
             assert hashlib.sha256(y.tobytes()).hexdigest() == r.sha256, r.file
+
+
+# --- batch equivalence ------------------------------------------------------------
+
+
+def _floats(*values: float) -> bytes:
+    from array import array
+
+    return array("f", values).tobytes()
+
+
+def batch_tree(tmp_path, b4_items: list[bytes]):
+    """Records for a b1 and a b4 file (cpu device) with 4 one-float image items."""
+    root = tmp_path / "references"
+    b1 = reg.ManifestFile("m/m_int8_b1.onnx", "1" * 64, 5, "m", "int8", "int8", "external", 1,
+                          True, "f" * 64)
+    b4 = reg.ManifestFile("m/m_int8_b4.onnx", "4" * 64, 5, "m", "int8", "int8", "external", 4,
+                          True, "e" * 64)
+    items = [_floats(float(i)) for i in range(4)]
+    outputs = []
+    for run, item in enumerate(items):
+        out = f"outputs/m/m_int8_b1/cpu/images-x-{run}.f32"
+        write(root / out, item)
+        outputs.append({"input_set": "images-x", "run": run, "file": out, "shape": [1, 1]})
+    ro.write_json(ro.record_path(b1.file, "cpu", root), {"model_sha256": b1.sha256, "outputs": outputs})
+    out = "outputs/m/m_int8_b4/cpu/images-x-0.f32"
+    write(root / out, b"".join(b4_items))
+    ro.write_json(ro.record_path(b4.file, "cpu", root), {
+        "model_sha256": b4.sha256,
+        "outputs": [{"input_set": "images-x", "run": 0, "file": out, "shape": [4, 1]},
+                    {"input_set": "splitmix64-seed0-4x1", "run": 0, "file": out, "shape": [4, 1]}]})
+    return root, [b1, b4], items
+
+
+def test_batch_equivalence_of_identical_items(tmp_path):
+    root, manifest, items = batch_tree(tmp_path, [_floats(float(i)) for i in range(4)])
+    entries = {e["file"]: e for e in ro.batch_equivalence(manifest, root)["entries"]}
+    assert entries["m/m_int8_b1.onnx"]["equivalent_to_b1"] is True
+    b4 = entries["m/m_int8_b4.onnx"]
+    assert (b4["equivalent_to_b1"], b4["items_compared"], b4["items_differing"]) == (True, 4, 0)
+    assert (b4["sha256"], b4["provider"], b4["compute_precision"]) == ("4" * 64, "cpu", "int8")
+
+
+def test_batch_equivalence_finds_one_differing_item(tmp_path):
+    root, manifest, _ = batch_tree(tmp_path, [_floats(0.0), _floats(1.0), _floats(2.5), _floats(3.0)])
+    b4 = next(e for e in ro.batch_equivalence(manifest, root)["entries"] if e["batch_size"] == 4)
+    assert (b4["equivalent_to_b1"], b4["items_differing"], b4["max_abs_diff"]) == (False, 1, 0.5)
+
+
+def test_batch_equivalence_problems_name_changed_entries(tmp_path):
+    root, manifest, _ = batch_tree(tmp_path, [_floats(float(i)) for i in range(4)])
+    path = tmp_path / "batch_equivalence.json"
+    doc = ro.batch_equivalence(manifest, root)
+    path.write_text(ro.format_batch_equivalence(doc), encoding="utf-8")
+    assert ro.batch_equivalence_problems(manifest, root, path) == []
+    doc["entries"][1]["equivalent_to_b1"] = False
+    path.write_text(ro.format_batch_equivalence(doc), encoding="utf-8")
+    assert any("m_int8_b4" in p and "differs" in p
+               for p in ro.batch_equivalence_problems(manifest, root, path))
+
+
+def test_npu_compute_precision_per_reference_device():
+    fp32 = reg.ManifestFile("m/m_fp32_b1.onnx", "1" * 64, 5, "m", "fp32", "fp32", "external", 1, None, None)
+    assert [ro.compute_precision(fp32, d) for d in ro.expected_devices(fp32)] == ["fp32", "fp16"]
+
+
+def test_committed_batch_equivalence_matches_the_manifest():
+    """The committed summary (runs in CI): well formed, one entry per file, provider and
+    compute precision, keyed by the manifest's SHA256, batch 1 always equivalent."""
+    doc = json.loads(ro.BATCH_EQUIVALENCE_JSON.read_text(encoding="utf-8"))
+    assert doc["batch_equivalence_version"] == ro.BATCH_EQUIVALENCE_VERSION
+    manifest = {f.file: f for f in reg.read_manifest()[0]}
+    keys = set()
+    for e in doc["entries"]:
+        f = manifest[e["file"]]
+        assert e["sha256"] == f.sha256 and e["batch_size"] == f.batch_size, e["file"]
+        assert e["b1_sha256"] == manifest[e["b1_file"]].sha256
+        key = (e["sha256"], e["provider"], e["compute_precision"])
+        assert key not in keys
+        keys.add(key)
+        if e["batch_size"] == 1:
+            assert e["equivalent_to_b1"] is True and e["items_differing"] == 0
+        assert e["equivalent_to_b1"] == (e["items_differing"] == 0)
+    assert len(keys) == sum(len(ro.expected_devices(f)) for f in manifest.values())
+    assert ro.BATCH_EQUIVALENCE_JSON.stat().st_size < 1 << 20
+
+
+def test_committed_batch_equivalence_matches_the_references(references):
+    assert ro.batch_equivalence_problems(reg.read_manifest()[0]) == []

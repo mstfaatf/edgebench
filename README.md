@@ -21,6 +21,10 @@ and writes results as schema-validated JSON plus CSV.
   strict mode by default, with the provider options and node placement recorded
   ([docs/cli.md](docs/cli.md#npu-runs)); its outputs are bit-identical to the
   Python ONNX Runtime references on the NPU ([docs/models.md](docs/models.md#what-the-c-tests-prove)).
+  Results (schema 1.2.0) record the effective compute precision, the nodes a
+  strict-mode refusal names, the loaded QNN backend's version and whether the
+  batch size computes the same per-item outputs as batch 1
+  ([docs/models.md](docs/models.md#batch-equivalence)).
   No NPU latency results are published yet.
 - **Accuracy results are published**: every model variant on ImageNetV2,
   on the CPU and on the NPU (strict mode), with confidence intervals and paired
@@ -102,7 +106,7 @@ Placement   55 nodes: CPUExecutionProvider 55 (all on the requested EP)
 ```
 
 Results land in `benchmarks\results\local\` (not committed):
-`<name>_<UTC stamp>.json` (results schema 1.1.0), a directory with
+`<name>_<UTC stamp>.json` (results schema 1.2.0), a directory with
 `latencies.csv` and `summary.csv`, and `<name>_latest.json`. Existing files
 are never overwritten. Check a result with:
 

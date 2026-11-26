@@ -26,6 +26,7 @@ cache/
 models/*
 !models/README.md
 !models/manifest.json
+!models/batch_equivalence.json
 # Model sources that cannot be re-created locally (committed, pinned by SHA256)
 !models/sources/
 

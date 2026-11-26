@@ -1,0 +1,12 @@
+{
+  "description": "A CPU run of an FP32 model recorded as computing in INT8.",
+  "base": "docs/examples/v1.2.0/example-cpu-fp32.json",
+  "set": {
+    "/execution/effective_precision/compute": "int8"
+  },
+  "expect": {
+    "severity": "error",
+    "code": "cpu_compute_not_stored",
+    "path": "/execution/effective_precision/compute"
+  }
+}

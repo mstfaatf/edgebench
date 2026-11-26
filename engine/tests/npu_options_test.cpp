@@ -8,6 +8,7 @@
 #include <onnxruntime_c_api.h>
 
 #include <fstream>
+#include <map>
 #include <regex>
 #include <string>
 #include <vector>
@@ -276,8 +277,20 @@ TEST(QnnLog, AllOnQnnValidationOfARealModel) {
     const auto v = eb::parse_qnn_validation(log_messages("s8w_all_on_qnn.log"));
     ASSERT_TRUE(v);
     ASSERT_EQ(v->passes.size(), 2u);
-    EXPECT_EQ(v->passes[0], (eb::QnnValidationPass{313, 0}));
-    EXPECT_EQ(v->passes[1], (eb::QnnValidationPass{319, 0}));
+    EXPECT_EQ(v->passes[0].passed_nodes, 313);
+    EXPECT_EQ(v->passes[0].failed_nodes, 0);
+    EXPECT_EQ(v->passes[1].passed_nodes, 319);
+    EXPECT_EQ(v->passes[1].failed_nodes, 0);
+    // Node units by operator type: the second pass adds the layout Transposes.
+    const std::map<std::string, int> units = {
+        {"Add", 10},          {"Conv", 52}, {"DequantizeLinear", 1},
+        {"Flatten", 1},       {"Gemm", 1},  {"GlobalAveragePool", 1},
+        {"QuantizeLinear", 1}};
+    EXPECT_EQ(v->passes[0].passed_units_by_op, units);
+    std::map<std::string, int> second = units;
+    second["Transpose"] = 2;
+    EXPECT_EQ(v->passes[1].passed_units_by_op, second);
+    EXPECT_TRUE(v->passes[0].failed_units_by_op.empty());
     EXPECT_TRUE(v->rejected_nodes.empty());
     EXPECT_EQ(v->failed_nodes(), 0);
     EXPECT_TRUE(eb::parse_qnn_unsupported_nodes(log_messages("s8w_all_on_qnn.log")).empty());
@@ -288,8 +301,12 @@ TEST(QnnLog, RejectedNodeWithItsReason) {
         const auto v = eb::parse_qnn_validation(log_messages(fixture));
         ASSERT_TRUE(v) << fixture;
         ASSERT_EQ(v->passes.size(), 2u);
-        EXPECT_EQ(v->passes[0], (eb::QnnValidationPass{2, 1}));
-        EXPECT_EQ(v->passes[1], (eb::QnnValidationPass{2, 1}));
+        for (const eb::QnnValidationPass& p : v->passes) {
+            EXPECT_EQ(p.passed_nodes, 2) << fixture;
+            EXPECT_EQ(p.failed_nodes, 1) << fixture;
+            EXPECT_EQ(p.passed_units_by_op, (std::map<std::string, int>{{"Relu", 2}})) << fixture;
+            EXPECT_EQ(p.failed_units_by_op, (std::map<std::string, int>{{"Det", 1}})) << fixture;
+        }
         ASSERT_EQ(v->rejected_nodes.size(), 1u) << fixture;  // the same node in both passes
         const eb::QnnRejectedNode& n = v->rejected_nodes.front();
         EXPECT_EQ(n.op_type, "Det");
@@ -322,6 +339,35 @@ TEST(QnnSessionFailure, StrictRefusalIsExit5WithTheUnsupportedNodes) {
     EXPECT_EQ(e.ort_error_name, "ORT_FAIL");
     EXPECT_TRUE(contains(e.message, kStrictRefusal)) << e.message;
     EXPECT_TRUE(contains(e.message, "Det node 'unsupported_det'")) << e.message;
+    ASSERT_TRUE(e.unsupported_nodes);
+    EXPECT_EQ(*e.unsupported_nodes, (std::vector<eb::NamedNode>{{"unsupported_det", "Det"}}));
+}
+
+TEST(QnnSessionFailure, StrictRefusalWithoutNamedNodesHasAnEmptyList) {
+    const eb::Error e = eb::classify_qnn_session_failure(ort_fail(kStrictRefusal), true, {});
+    EXPECT_EQ(e.kind, "strict_mode_refusal");
+    ASSERT_TRUE(e.unsupported_nodes);
+    EXPECT_TRUE(e.unsupported_nodes->empty());
+    // Other failures carry no list.
+    EXPECT_FALSE(
+        eb::classify_qnn_session_failure(ort_fail(kStrictRefusal), false, {}).unsupported_nodes);
+}
+
+TEST(EffectivePrecision, CpuComputesTheStoredPrecision) {
+    EXPECT_EQ(eb::effective_precision(eb::ProviderKind::cpu, fp32(), std::nullopt),
+              (eb::EffectivePrecision{"fp32", "fp32", "model"}));
+    EXPECT_EQ(eb::effective_precision(eb::ProviderKind::cpu, int8_qdq(), std::nullopt),
+              (eb::EffectivePrecision{"int8", "int8", "model"}));
+    const eb::ModelPrecision mixed{"mixed", "none", std::nullopt, std::nullopt, std::nullopt};
+    EXPECT_FALSE(eb::effective_precision(eb::ProviderKind::cpu, mixed, std::nullopt));
+}
+
+TEST(EffectivePrecision, NpuComputesWhatWasRequested) {
+    EXPECT_EQ(eb::effective_precision(eb::ProviderKind::npu, int8_qdq(), "int8"),
+              (eb::EffectivePrecision{"int8", "int8", "model"}));
+    EXPECT_EQ(eb::effective_precision(eb::ProviderKind::npu, fp32(), "fp16"),
+              (eb::EffectivePrecision{"fp32", "fp16", "enable_htp_fp16_precision"}));
+    EXPECT_FALSE(eb::effective_precision(eb::ProviderKind::npu, fp32(), std::nullopt));
 }
 
 TEST(QnnSessionFailure, OnlyStrictModeFailuresAreRefusals) {

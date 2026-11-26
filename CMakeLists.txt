@@ -36,7 +36,7 @@ message(STATUS "ONNX Runtime ${OnnxRuntime_VERSION}: ${OnnxRuntime_ROOT}")
 
 # Results schema version the engine writes (generated into engine/src/version_config.hpp).
 # Each version has its own schema file, schemas/benchmark-result.v<version>.schema.json.
-set(EDGEBENCH_RESULTS_SCHEMA_VERSION 1.1.0)
+set(EDGEBENCH_RESULTS_SCHEMA_VERSION 1.2.0)
 set(EDGEBENCH_RESULTS_SCHEMA_FILE
   "${CMAKE_CURRENT_SOURCE_DIR}/schemas/benchmark-result.v${EDGEBENCH_RESULTS_SCHEMA_VERSION}.schema.json")
 if(NOT EXISTS "${EDGEBENCH_RESULTS_SCHEMA_FILE}")

@@ -21,11 +21,19 @@ identical is recorded.
 The directory is replaced as a whole; the previous one is kept until the new one
 is complete. ``--check`` writes nothing and fails (exit 1) if a reference is
 missing, stale (recorded model SHA256 differs from the current file) or
-damaged (a tensor's SHA256 differs from the index).
+damaged (a tensor's SHA256 differs from the index), or if the committed
+batch-equivalence summary (``models/batch_equivalence.json``) differs from what
+the references give.
+
+Generating also writes that summary: for every file and device, whether each
+batch item's output equals the batch-1 file's output for the same reference image
+or window. ``--batch-equivalence`` rewrites only the summary, from the references
+already on disk.
 
 Usage:
     python scripts/make_references.py [--no-npu]
     python scripts/make_references.py --check
+    python scripts/make_references.py --batch-equivalence
 """
 
 from __future__ import annotations
@@ -267,14 +275,31 @@ def generate(npu: bool) -> int:
     print(f"wrote {sum(r.kind == 'output' for r in w.rows)} output and "
           f"{sum(r.kind == 'input' for r in w.rows)} input tensors to {ro.REFERENCE_DIR}")
     problems = ro.check_problems(read_manifest()[0]) if not failures else []
+    if not failures and not problems:
+        write_batch_equivalence()
     for p in problems:
         print(f"error: {p}", file=sys.stderr)
     return 1 if failures or problems else 0
 
 
+def write_batch_equivalence() -> int:
+    files, _ = read_manifest()
+    doc = ro.batch_equivalence(files)
+    ro.BATCH_EQUIVALENCE_JSON.write_text(ro.format_batch_equivalence(doc), encoding="utf-8",
+                                         newline="\n")
+    differ = [e for e in doc["entries"] if not e["equivalent_to_b1"]]
+    print(f"wrote {ro.BATCH_EQUIVALENCE_JSON.name}: {len(doc['entries'])} entries, "
+          f"{len(differ)} not equivalent to batch 1")
+    for e in differ:
+        print(f"  {e['file']} ({e['provider']}, {e['compute_precision']})")
+    return 0
+
+
 def check() -> int:
     files, _ = read_manifest()
     problems = ro.check_problems(files)
+    if not problems:
+        problems = ro.batch_equivalence_problems(files)
     for p in problems:
         print(f"error: {p}", file=sys.stderr)
     present = sum((MODELS_DIR / f.file).is_file() for f in files)
@@ -288,9 +313,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true",
                         help="check the references against the model files; write nothing")
     parser.add_argument("--no-npu", action="store_true", help="CPU references only")
+    parser.add_argument("--batch-equivalence", action="store_true",
+                        help="rewrite models/batch_equivalence.json from the references on disk")
     args = parser.parse_args(argv)
     if args.check:
         return check()
+    if args.batch_equivalence:
+        return write_batch_equivalence()
 
     from common.platform_guard import NonNativeInterpreterError, require_native_arm64
 

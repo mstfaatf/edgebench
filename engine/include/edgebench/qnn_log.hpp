@@ -13,6 +13,7 @@
 //   	REASON : Operators of type `Det` are not supported by QNN EP. ...
 #pragma once
 
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -36,6 +37,10 @@ struct QnnRejectedNode {
 struct QnnValidationPass {
     int passed_nodes = 0;
     int failed_nodes = 0;
+    /// Node units (OrtNodeUnit: a node with its QDQ neighbours) validated in the
+    /// pass, counted by operator type.
+    std::map<std::string, int> passed_units_by_op;
+    std::map<std::string, int> failed_units_by_op;
 
     bool operator==(const QnnValidationPass&) const = default;
 };
@@ -74,7 +79,8 @@ inline constexpr std::string_view kCpuFallbackDisabledText =
 ///   Checked first, because a backend that does not load makes the QNN EP claim
 ///   no node, so ONNX Runtime then reports a strict-mode refusal for the whole graph;
 /// - strict mode, ORT_FAIL, and the error carries kCpuFallbackDisabledText:
-///   strict_mode_refusal, exit code 5 (the unsupported nodes are appended if logged);
+///   strict_mode_refusal, exit code 5 (the unsupported nodes, if logged, are appended to the
+///   message and listed in Error::unsupported_nodes, which is set, possibly empty);
 /// - anything else: unchanged (ort_runtime_error, exit code 3).
 ///
 /// The ORT error code and name are kept in every case.

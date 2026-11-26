@@ -8,10 +8,20 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "edgebench/exit_codes.hpp"
 
 namespace edgebench {
+
+/// A graph node an execution provider named in an error (results schema:
+/// error.unsupported_nodes).
+struct NamedNode {
+    std::string name;
+    std::string op_type;
+
+    bool operator==(const NamedNode&) const = default;
+};
 
 struct Error {
     ExitCode exit_code = ExitCode::internal_error;
@@ -19,6 +29,9 @@ struct Error {
     std::string message;  // human-readable, complete sentence(s)
     std::optional<int> ort_error_code;  // OrtErrorCode value, if ONNX Runtime reported the error
     std::optional<std::string> ort_error_name;  // e.g. "ORT_INVALID_PROTOBUF"
+    /// Strict-mode refusals only: the nodes the execution provider said it cannot
+    /// run (empty if it named none). Null for every other error.
+    std::optional<std::vector<NamedNode>> unsupported_nodes;
 };
 
 /// Thrown by Result::value() / error() on the wrong alternative (a programming error).

@@ -255,6 +255,121 @@ def check_problems(manifest: list[ManifestFile], root: Path = REFERENCE_DIR,
     return problems
 
 
+# --- batch equivalence (standard library) ---------------------------------------
+#
+# Whether a model file at batch N computes, per item, exactly what the same
+# variant computes at batch 1 on the same device. Derived from the stored image /
+# window outputs (8 items, the same inputs at every batch size); the SplitMix64
+# input does not count, because its batch items differ from each other. The
+# summary is committed (models/batch_equivalence.json) so that the engine can
+# record, by model SHA256, whether a result at batch N may be compared with b1.
+
+BATCH_EQUIVALENCE_JSON = MODELS_DIR / "batch_equivalence.json"
+BATCH_EQUIVALENCE_VERSION = "1.0.0"
+DEVICE_PROVIDER = {"cpu": "cpu", "npu": "npu", "npu_fp16": "npu"}
+NPU_COMPUTE_PRECISION = {"npu": "int8", "npu_fp16": "fp16"}
+
+
+def compute_precision(entry: ManifestFile, device: str) -> str:
+    """What the device computes in: the stored precision on the CPU; INT8 or FP16 on the NPU."""
+    return NPU_COMPUTE_PRECISION.get(device, entry.precision)
+
+
+def _item_bytes(record: dict[str, Any], root: Path) -> list[bytes] | None:
+    """Per-item output bytes of the image / window runs of a record, in input order."""
+    runs = sorted((o for o in record.get("outputs", [])
+                   if o["input_set"].startswith((IMAGES, WINDOWS))), key=lambda o: o["run"])
+    if not runs:
+        return None
+    items: list[bytes] = []
+    for o in runs:
+        data = (root / o["file"]).read_bytes()
+        count = o["shape"][0]
+        size = len(data) // count
+        items += [data[i * size:(i + 1) * size] for i in range(count)]
+    return items
+
+
+def _max_abs_diff(a: bytes, b: bytes) -> float:
+    from array import array
+
+    x, y = array("f"), array("f")
+    x.frombytes(a)
+    y.frombytes(b)
+    return max((abs(p - q) for p, q in zip(x, y)), default=0.0)
+
+
+def batch_equivalence(manifest: list[ManifestFile], root: Path = REFERENCE_DIR) -> dict[str, Any]:
+    """The batch-equivalence summary of every file with references for it and its b1 sibling."""
+    by_key = {(e.model, e.variant, e.batch_size): e for e in manifest}
+    entries = []
+    for entry in sorted(manifest, key=lambda e: (e.model, e.variant, e.batch_size)):
+        b1 = by_key.get((entry.model, entry.variant, 1))
+        if b1 is None:
+            continue
+        for device in expected_devices(entry):
+            record_file, b1_file = record_path(entry.file, device, root), record_path(b1.file, device, root)
+            if not record_file.is_file() or not b1_file.is_file():
+                continue
+            record = json.loads(record_file.read_text(encoding="utf-8"))
+            b1_record = json.loads(b1_file.read_text(encoding="utf-8"))
+            items, b1_items = _item_bytes(record, root), _item_bytes(b1_record, root)
+            if items is None or b1_items is None or len(items) != len(b1_items):
+                continue
+            differing = [i for i, (a, b) in enumerate(zip(items, b1_items)) if a != b]
+            entries.append({
+                "file": entry.file,
+                "sha256": record["model_sha256"],
+                "model": entry.model,
+                "variant": entry.variant,
+                "batch_size": entry.batch_size,
+                "provider": DEVICE_PROVIDER[device],
+                "compute_precision": compute_precision(entry, device),
+                "reference_device": device,
+                "equivalent_to_b1": not differing,
+                "b1_file": b1.file,
+                "b1_sha256": b1_record["model_sha256"],
+                "items_compared": len(items),
+                "items_differing": len(differing),
+                "max_abs_diff": (max(_max_abs_diff(items[i], b1_items[i]) for i in differing)
+                                 if differing else 0.0),
+            })
+    return {
+        "batch_equivalence_version": BATCH_EQUIVALENCE_VERSION,
+        "description": "Whether each model file computes, per batch item, exactly the output its "
+                       "batch-1 sibling computes on the same provider: from the stored reference "
+                       "outputs on the 8 reference images or windows (models/references, written "
+                       "by scripts/make_references.py). Keyed by model SHA256, provider and "
+                       "compute precision.",
+        "entries": entries,
+    }
+
+
+def format_batch_equivalence(doc: dict[str, Any]) -> str:
+    return json.dumps(doc, indent=2) + "\n"
+
+
+def batch_equivalence_problems(manifest: list[ManifestFile], root: Path = REFERENCE_DIR,
+                               path: Path = BATCH_EQUIVALENCE_JSON) -> list[str]:
+    """Differences between the committed summary and the one the references give."""
+    if not path.is_file():
+        return [f"{path.name} is missing; run scripts/make_references.py --batch-equivalence"]
+    committed = json.loads(path.read_text(encoding="utf-8"))
+    current = batch_equivalence(manifest, root)
+    old = {(e["sha256"], e["provider"], e["compute_precision"]): e for e in committed.get("entries", [])}
+    new = {(e["sha256"], e["provider"], e["compute_precision"]): e for e in current["entries"]}
+    problems = []
+    for key in sorted(set(old) | set(new)):
+        name = (new.get(key) or old[key])["file"]
+        if key not in new:
+            problems.append(f"{path.name}: {name} ({key[1]}, {key[2]}) has no current references")
+        elif key not in old:
+            problems.append(f"{path.name}: {name} ({key[1]}, {key[2]}) is not listed")
+        elif old[key] != new[key]:
+            problems.append(f"{path.name}: {name} ({key[1]}, {key[2]}) differs from the references")
+    return problems
+
+
 def write_json(path: Path, doc: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8", newline="\n")

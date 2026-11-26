@@ -41,7 +41,7 @@ struct TempDirectory {
 // A small successful result with known latencies (no ONNX Runtime involved).
 eb::BenchmarkResult fake_result() {
     eb::BenchmarkResult r;
-    r.schema_version = "1.1.0";
+    r.schema_version = "1.2.0";
     r.run_id = eb::new_run_id();
     r.started_at = at(2026, 11, 21, 23, 52, 10, 123456);
     r.timestamp_utc = eb::utc_timestamp(r.started_at);

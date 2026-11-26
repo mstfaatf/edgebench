@@ -33,6 +33,20 @@ an `EpLibrary::Lease`; unregistering refuses while a lease is held, so a library
 is never pulled from under a live session, on error paths and after an
 interrupt included (the Runtime is released last, after every session).
 
+### Release the Runtime before `main()` returns
+
+The ONNX Runtime environment, every session and every EP registration must be
+released before `main()` returns. Never keep a `Runtime` (or anything holding
+sessions) in a static or function-static object: in a process that has created
+a QNN session, releasing the environment during static destruction after
+`main()` intermittently never returns, and the process hangs with no CPU use.
+`edgebench.exe` keeps its Runtime in a local of the command it runs. Test
+programs use the one Runtime of `test_runtime.hpp` (`shared_runtime()`), which a
+GoogleTest global environment releases when the tests finish, before `main()`
+returns; that environment also fails the test program if any other `Runtime`
+is still alive at that point (`Runtime::live_count()`), so a Runtime parked in
+a static is caught by the next test run rather than by a hang.
+
 ### The QNN execution provider and the NPU device
 
 `register_qnn_ep()` (`qnn_ep.hpp`) registers the bundled
@@ -159,7 +173,7 @@ first or always right after a particular other one. `run` uses it with one
 configuration; a suite of configurations uses the same scheduler. Each trial
 records its `trial_index` and its `sequence` in the overall order.
 
-`BenchmarkResult` mirrors the results schema 1.1.0 (tool, system, runtime,
+`BenchmarkResult` mirrors the results schema 1.2.0 (tool, system, runtime,
 model, config, execution, timing, warnings) and keeps every per-iteration
 latency, so exporters only translate it. `stats.hpp` holds the statistics as pure
 functions (nearest-rank percentiles, sample standard deviation, trial variation);
@@ -180,7 +194,7 @@ parts derived at the end (statistics of the completed trials, memory, power
 changes, warnings). A run whose ONNX Runtime cannot be loaded gets its result
 from `failed_load_result()`.
 
-`result_json.hpp` turns a result into the schema 1.1.0 document (every key, in
+`result_json.hpp` turns a result into the schema 1.2.0 document (every key, in
 schema order) and the two CSV files; `result_files.hpp` writes them without
 overwriting anything (exclusive creation through a temporary file and a
 no-replace rename, collision suffixes, atomic replacement of `<name>_latest.json`).

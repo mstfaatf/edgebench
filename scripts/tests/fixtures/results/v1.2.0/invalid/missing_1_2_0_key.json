@@ -1,0 +1,13 @@
+{
+  "description": "C++ engine result without a key the 1.2.0 schema adds.",
+  "base": "docs/examples/v1.2.0/example-cpu-fp32.json",
+  "set": {},
+  "remove": [
+    "/timing/profiled_pass"
+  ],
+  "expect": {
+    "severity": "warning",
+    "code": "missing_1_2_0_key",
+    "path": "/timing/profiled_pass"
+  }
+}

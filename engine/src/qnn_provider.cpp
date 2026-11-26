@@ -166,6 +166,7 @@ Result<NodeAssignment> QnnProvider::record_placement(const fs::path& model,
                                c.messages);
 
     NodeAssignment assignment = std::move(c.assignment);
+    assignment.modules_checked_while_alive = true;
     assignment.qnn_validation = parse_qnn_validation(c.messages);
     if (assignment.qnn_validation)
         assignment.verification_method = "combined";  // ORT placement + QNN validation log

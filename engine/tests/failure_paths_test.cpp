@@ -448,6 +448,8 @@ private:
 
 }  // namespace
 
+// A foreign module that is already loaded when the run starts is found by the
+// first check, right after the provider was created, before any session.
 TEST(FailurePaths, ModuleOutsideTheBundleStopsTheRun) {
     const eb::RunConfig c = short_run(2);
     const std::unique_ptr<eb::Provider> p = real_provider(c);
@@ -464,13 +466,17 @@ TEST(FailurePaths, ModuleOutsideTheBundleStopsTheRun) {
     ASSERT_TRUE(r.failure.has_value());
     EXPECT_EQ(r.failure->error.exit_code, eb::ExitCode::ort_load_failure);
     EXPECT_EQ(r.failure->error.kind, "module_outside_bundle");
-    EXPECT_EQ(r.failure->stage, "session_creation");
+    EXPECT_EQ(r.failure->stage, "ep_registration");
     const std::string& m = r.failure->error.message;
-    EXPECT_NE(m.find("trial 1 of 2"), std::string::npos) << m;
+    ASSERT_EQ(r.execution.module_checks.size(), 1u);
+    EXPECT_EQ(r.execution.module_checks[0].stage, "after_provider_creation");
+    ASSERT_EQ(r.execution.module_checks[0].outside.size(), 1u);
+    EXPECT_EQ(r.execution.module_checks[0].outside[0].name, "onnxruntime_foreign_test.dll");
     EXPECT_NE(m.find("onnxruntime_foreign_test.dll (" + resolved + ")"), std::string::npos) << m;
     if (loaded_as != resolved)  // loaded through a short path: never reported in that form
         EXPECT_EQ(m.find(loaded_as), std::string::npos) << m;
     EXPECT_TRUE(r.timing.trials.empty());
+    EXPECT_FALSE(r.known.session);
     EXPECT_FALSE(r.known.placement);
     EXPECT_TRUE(std::any_of(r.runtime.loaded_modules.begin(), r.runtime.loaded_modules.end(),
                             [&](const eb::LoadedModule& lm) {
@@ -481,7 +487,7 @@ TEST(FailurePaths, ModuleOutsideTheBundleStopsTheRun) {
     ASSERT_FALSE(doc.empty());
     EXPECT_EQ(doc.at("status"), "failed");
     EXPECT_EQ(doc.at("error").at("code"), "module_outside_bundle");
-    EXPECT_EQ(doc.at("error").at("stage"), "session_creation");
+    EXPECT_EQ(doc.at("error").at("stage"), "ep_registration");
 }
 
 // --------------------------------------------------------------------------- warnings from trial

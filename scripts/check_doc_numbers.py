@@ -2,8 +2,10 @@
 
 The published accuracy and anomaly-detection results
 (``benchmarks/results/published/accuracy/``), the model manifest
-(``models/manifest.json``), the NAB split manifest, the autoencoder's committed
-training record and the weights pinned in ``scripts/common/model_registry.py``
+(``models/manifest.json``), the batch-equivalence summary
+(``models/batch_equivalence.json``), the NAB split manifest, the autoencoder's
+committed training record and the weights pinned in
+``scripts/common/model_registry.py``
 are the sources of truth. This script finds the tables and sentences in
 README.md, docs/accuracy.md, docs/autoencoder.md and docs/models.md that quote
 them and checks every number:
@@ -41,6 +43,7 @@ ACCURACY_DIR = REPO_ROOT / "benchmarks" / "results" / "published" / "accuracy"
 ANOMALY_DIR = ACCURACY_DIR / "anomaly"
 SPLITS = REPO_ROOT / "datasets" / "nab-machine-temperature" / "splits.json"
 TRAINING_RECORD = REPO_ROOT / "models" / "sources" / "conv1d_autoencoder" / "training_record.json"
+BATCH_EQUIVALENCE = REPO_ROOT / "models" / "batch_equivalence.json"
 DOCS = ("README.md", "docs/accuracy.md", "docs/autoencoder.md", "docs/models.md")
 
 AE = "conv1d_autoencoder"
@@ -103,6 +106,7 @@ class Sources:
     manifest: dict[str, dict]
     splits: dict
     training_record: dict
+    batch_equivalence: list[dict] = field(default_factory=list)
     known_sha256: set[str] = field(default_factory=set)
 
 
@@ -129,8 +133,9 @@ def load_sources(root: Path = REPO_ROOT) -> Sources:
     manifest = {f["file"]: f for f in manifest_doc["files"]}
     splits = _json(root / SPLITS.relative_to(REPO_ROOT))
     record = _json(root / TRAINING_RECORD.relative_to(REPO_ROOT))
+    equivalence = _json(root / BATCH_EQUIVALENCE.relative_to(REPO_ROOT))["entries"]
     known = set()
-    for obj in (runs, anomaly_runs, manifest_doc, splits, record):
+    for obj in (runs, anomaly_runs, manifest_doc, splits, record, equivalence):
         known |= _sha256s(obj)
     for spec in reg.MODELS.values():
         known.add(spec.weights_sha256)
@@ -138,7 +143,7 @@ def load_sources(root: Path = REPO_ROOT) -> Sources:
         known |= {sha for _, sha in imported.source_sha256}
         known |= {imported.training_record_sha256, imported.sha256sums_sha256}
     return Sources(runs, comparisons, anomaly_runs, anomaly_comparisons, manifest, splits,
-                   record, known)
+                   record, equivalence, known)
 
 
 # ------------------------------------------------------------------- markdown helpers
@@ -499,6 +504,53 @@ def check_models(c: Checker) -> None:
                               f"the manifest")
 
 
+# Rows of the batch-equivalence table in models.md: (model, variants, label shown).
+BATCH_GROUPS = (
+    [(m, ("fp32", "fp32_folded"), "FP32, FP32 folded") for m in IMAGE_MODELS]
+    + [(m, ("int8", "int8_unpruned", "int8_folded", "int8_folded_unpruned"), "INT8 (all four)")
+       for m in IMAGE_MODELS]
+    + [(AE, ("fp32_imported",), "FP32 imported"), (AE, ("fp32",), "FP32"),
+       (AE, ("int8", "int8_unpruned"), "INT8, INT8 unpruned")]
+)
+PROVIDER_LABEL = {("cpu", "fp32"): "CPU, FP32", ("cpu", "int8"): "CPU, INT8",
+                  ("npu", "fp16"): "NPU, FP16", ("npu", "int8"): "NPU, INT8"}
+
+
+def batch_equivalence_rows(entries: list[dict]) -> list[tuple[str, str, str, str, str, float]]:
+    """(model, variants, provider, b4, b8, largest difference) per group and provider, in
+    table order. A cell is 'same' if every file of the group at that batch size computes
+    the batch-1 outputs exactly, 'differs' if none does, 'mixed' otherwise."""
+    rows = []
+    for model, variants, label in BATCH_GROUPS:
+        group = [e for e in entries if e["model"] == model and e["variant"] in variants
+                 and e["batch_size"] > 1]
+        for key in sorted({(e["provider"], e["compute_precision"]) for e in group}):
+            sel = [e for e in group if (e["provider"], e["compute_precision"]) == key]
+            cells = []
+            for batch in (4, 8):
+                same = [e["equivalent_to_b1"] for e in sel if e["batch_size"] == batch]
+                cells.append("same" if all(same) else "differs" if not any(same) else "mixed")
+            rows.append((model, label, PROVIDER_LABEL[key], cells[0], cells[1],
+                         max(e["max_abs_diff"] for e in sel)))
+    return rows
+
+
+def check_batch_equivalence(c: Checker) -> None:
+    doc = "docs/models.md"
+    expected = batch_equivalence_rows(c.src.batch_equivalence)
+    rows = c.rows(doc, "| Model | Variants | Provider, compute | b4 vs b1 | b8 vs b1 |", len(expected))
+    for shown, want in zip(rows, expected):
+        where = f"{doc}: batch equivalence row {shown[:3]}"
+        c.equal(where, [s.strip("`") for s in shown[:5]], list(want[:5]))
+        if want[5] == 0:
+            c.equal(where, shown[5], "0")
+        else:
+            c.number(where, shown[5], want[5])
+    entries = c.src.batch_equivalence
+    c.sentence(doc, r"summary lists (\d+) entries \(every model file on each of its reference devices\), (\d+) of them not equivalent",
+               len(entries), sum(1 for e in entries if not e["equivalent_to_b1"]))
+
+
 def check_hashes(c: Checker) -> None:
     """Every SHA256 a document quotes, in full or abbreviated, is a known one."""
     for doc, text in c.docs.items():
@@ -514,7 +566,7 @@ def check_hashes(c: Checker) -> None:
 
 
 CHECKS = (check_accuracy_tables, check_anomaly_tables, check_accuracy_sentences,
-          check_autoencoder_sentences, check_models, check_hashes)
+          check_autoencoder_sentences, check_models, check_batch_equivalence, check_hashes)
 
 
 def read_docs(root: Path = REPO_ROOT) -> dict[str, str]:

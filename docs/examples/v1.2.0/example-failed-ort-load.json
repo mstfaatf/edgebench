@@ -1,0 +1,112 @@
+{
+  "schema_version": "1.2.0",
+  "run_id": "00000000-0000-0000-0000-000000000000",
+  "timestamp_utc": "2026-11-21T03:05:10Z",
+  "label": "Failed run: onnxruntime.dll next to the executable is the wrong version",
+  "status": "failed",
+  "error": {
+    "stage": "environment",
+    "code": "version_mismatch",
+    "message": "C:\\edgebench\\onnxruntime.dll is ONNX Runtime 1.17.1, but EdgeBench requires ONNX Runtime 1.32.0. The build copies the bundled ONNX Runtime (third_party/onnxruntime/lib) next to the executable; rebuild, or copy onnxruntime.dll and onnxruntime_providers_shared.dll from there.",
+    "kind": "version_mismatch",
+    "unsupported_nodes": null
+  },
+  "warnings": [
+    {
+      "code": "illustrative_example",
+      "message": "Example document. The error message is the loader's output for a copy of C:\\Windows\\System32\\onnxruntime.dll placed next to edgebench.exe.",
+      "path": null
+    }
+  ],
+  "tool": {
+    "name": "edgebench",
+    "version": "0.1.0",
+    "git_commit": "2069ebaaa3a703a388864c7292883bf6ce802b17",
+    "git_dirty": false,
+    "build_type": "Release",
+    "compiler": "MSVC 19.42.34435",
+    "implementation": "cpp"
+  },
+  "system": {
+    "os": {
+      "name": "Windows 11 Home",
+      "version": "25H2",
+      "build": "26200.9974",
+      "architecture": "arm64"
+    },
+    "process_architecture": "arm64",
+    "cpu": {
+      "name": "Snapdragon(R) X 10-core X1P64100 @ 3.40 GHz",
+      "physical_cores": 10,
+      "logical_processors": 10
+    },
+    "memory_total_bytes": 16757260288,
+    "device": {
+      "manufacturer": "Microsoft Corporation",
+      "model": "Microsoft Surface Laptop, 7th Edition"
+    },
+    "power": {
+      "source": "ac",
+      "power_mode": "Balanced",
+      "power_plan": "Balanced",
+      "battery_percent": 80,
+      "battery_saver": false
+    },
+    "load": null
+  },
+  "runtime": null,
+  "model": null,
+  "config": {
+    "requested": {
+      "execution_provider": "QNNExecutionProvider",
+      "device_type": "NPU",
+      "compute_precision": null
+    },
+    "strict_mode": true,
+    "batch_size": null,
+    "input": {
+      "kind": "dataset",
+      "constant_value": null,
+      "seed": null,
+      "dataset": "imagenette2-320 eval split, first image (val/n01440764/ILSVRC2012_val_00046252.JPEG), the same input for every iteration",
+      "preprocessing": "Decoded with PIL, shorter side resized to 256 (bilinear), center-cropped to 224, scaled to [0, 1], normalized with the ImageNet mean/std, NCHW float32. Done once before timing (scripts/common/preprocess.py); not part of the timed region."
+    },
+    "warmup_iterations": 20,
+    "measured_iterations": 200,
+    "trials": 3,
+    "run_api": "sync",
+    "ort_execution_mode": "sequential",
+    "intra_op_threads": 4,
+    "inter_op_threads": null,
+    "graph_optimization_level": "enable_all",
+    "ep_options": {
+      "backend_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtp.dll",
+      "htp_performance_mode": "burst"
+    },
+    "session_config": {
+      "session.disable_cpu_ep_fallback": "1"
+    },
+    "ep_context_cache": {
+      "enabled": true,
+      "cache_file": "overhead_s8w_ctx.onnx",
+      "state": null,
+      "files": [],
+      "mode": "build",
+      "key_id": null,
+      "context_path": null,
+      "hit": false,
+      "verified_equal_outputs": null,
+      "key": null
+    },
+    "run_binding": "run",
+    "profiling": {
+      "ort": false,
+      "qnn_level": "off"
+    }
+  },
+  "execution": null,
+  "timing": null,
+  "memory": null,
+  "accuracy": null,
+  "raw": null
+}

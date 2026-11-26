@@ -1,4 +1,4 @@
-// Serialization of a BenchmarkResult: the results schema 1.1.0 JSON document and
+// Serialization of a BenchmarkResult: the results schema 1.2.0 JSON document and
 // the two CSV files that go with it (docs/results-schema.md, docs/cli.md).
 #pragma once
 
@@ -18,7 +18,7 @@ struct RawLatencyLink {
     std::string sha256;          // of the CSV file's bytes
 };
 
-/// The results schema 1.1.0 document for `result`, in schema key order, with
+/// The results schema 1.2.0 document for `result`, in schema key order, with
 /// every key present (null when unknown). `raw` is null if no latency file was
 /// written. Numbers use nlohmann::json's shortest round-trip form.
 nlohmann::ordered_json to_result_json(const BenchmarkResult& result,

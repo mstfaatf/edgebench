@@ -1,0 +1,12 @@
+{
+  "description": "Effective stored precision that differs from model.stored_precision.",
+  "base": "docs/examples/v1.2.0/example-npu-int8-s8w-strict.json",
+  "set": {
+    "/execution/effective_precision/stored": "fp32"
+  },
+  "expect": {
+    "severity": "error",
+    "code": "effective_precision_stored_mismatch",
+    "path": "/execution/effective_precision/stored"
+  }
+}

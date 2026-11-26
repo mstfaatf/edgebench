@@ -3,6 +3,13 @@
 // Create it only after load_onnxruntime() succeeded. Every session, provider and
 // Ort object created from it must be released before the Runtime.
 //
+// Release the Runtime before main() returns: own it in a local (as edgebench.exe
+// does) or reset it explicitly, never in a static or function-static object. In
+// a process that has created a QNN session, releasing the ONNX Runtime
+// environment and its EP registrations during static destruction after main()
+// can hang the process forever. live_count() lets test programs check that no
+// Runtime is left when they finish (engine/tests/test_runtime.cpp).
+//
 // The Runtime also owns the execution-provider plugin libraries registered with
 // its environment (register_ep_library()). They are unregistered before the
 // environment is released, and never while a session still holds a lease on
@@ -36,6 +43,9 @@ public:
     ~Runtime();
     Runtime(const Runtime&) = delete;
     Runtime& operator=(const Runtime&) = delete;
+
+    /// Runtime objects alive in this process.
+    static int live_count();
 
     Ort::Env& env() { return env_; }
     const OrtLoadResult& load_result() const { return load_; }

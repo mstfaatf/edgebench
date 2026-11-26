@@ -1,0 +1,12 @@
+{
+  "description": "An NPU result recorded as computing in FP32.",
+  "base": "docs/examples/v1.2.0/example-npu-int8-s8w-strict.json",
+  "set": {
+    "/execution/effective_precision/compute": "fp32"
+  },
+  "expect": {
+    "severity": "error",
+    "code": "npu_compute_fp32",
+    "path": "/execution/effective_precision/compute"
+  }
+}

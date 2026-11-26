@@ -82,8 +82,10 @@ std::optional<QnnValidation> parse_qnn_validation(const std::vector<std::string>
             const int n = std::stoi(m[2].str());
             if (m[1].str() == "PASSED") {
                 v.passes.back().passed_nodes += n;
+                ++v.passes.back().passed_units_by_op[m[3].str()];
             } else {
                 v.passes.back().failed_nodes += n;
+                ++v.passes.back().failed_units_by_op[m[3].str()];
                 failed = QnnRejectedNode{m[3].str(), "", std::nullopt, std::nullopt};
             }
             continue;
@@ -164,8 +166,11 @@ Error classify_qnn_session_failure(Error error, bool strict,
         error.message.find(kCpuFallbackDisabledText) != std::string::npos) {
         error.exit_code = ExitCode::strict_mode_refusal;
         error.kind = "strict_mode_refusal";
-        if (const std::vector<QnnRejectedNode> nodes = parse_qnn_unsupported_nodes(logged);
-            !nodes.empty())
+        const std::vector<QnnRejectedNode> nodes = parse_qnn_unsupported_nodes(logged);
+        error.unsupported_nodes.emplace();
+        for (const QnnRejectedNode& n : nodes)
+            error.unsupported_nodes->push_back({n.node_name, n.op_type});
+        if (!nodes.empty())
             error.message += " Nodes the QNN EP does not support: " + describe_nodes(nodes) + ".";
     }
     return error;

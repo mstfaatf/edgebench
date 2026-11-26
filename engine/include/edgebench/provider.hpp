@@ -38,6 +38,10 @@ struct QnnBackendInfo {
     std::string backend_path;                // absolute, as passed in backend_path
     std::optional<std::string> sdk_version;  // null: not read from the backend
     std::optional<std::string> backend_build;
+    std::optional<std::string> htp_arch;   // null: not read from the backend
+    std::optional<std::string> soc_model;  // null: not read from the backend
+    /// Every QNN EP option not in ProviderDescription::ep_options is left at its default.
+    bool unlisted_options_default = true;
 };
 
 /// Everything the results schema records about the provider configuration.

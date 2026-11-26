@@ -144,7 +144,7 @@ TEST(Benchmark, ShortRunOnFixture) {
               (std::vector<std::string>{"create_session", "create_session", "record_placement"}));
     EXPECT_EQ(progress.back(), "recording node placement");
 
-    EXPECT_EQ(r.schema_version, "1.1.0");
+    EXPECT_EQ(r.schema_version, "1.2.0");
     EXPECT_EQ(r.batch_size, 1);
     const eb::TimingResult& t = r.timing;
     ASSERT_EQ(t.trials.size(), 2u);
@@ -176,6 +176,24 @@ TEST(Benchmark, ShortRunOnFixture) {
     EXPECT_EQ(r.model.opset, 17);
     EXPECT_FALSE(r.runtime.loaded_modules.empty());
     EXPECT_EQ(r.input_preprocessing, eb::generated_input_description(c));
+
+    // Module checks: after the provider, after each trial's session, during placement.
+    std::vector<std::pair<std::string, std::optional<int>>> checks;
+    for (const eb::ModuleCheckpoint& m : r.execution.module_checks) {
+        checks.emplace_back(m.stage, m.trial_index);
+        EXPECT_TRUE(m.outside.empty()) << m.stage;
+    }
+    EXPECT_EQ(checks, (std::vector<std::pair<std::string, std::optional<int>>>{
+                          {"after_provider_creation", std::nullopt},
+                          {"after_session_creation", 0},
+                          {"after_session_creation", 1},
+                          {"placement_session", std::nullopt}}));
+    // The CPU computes in the stored precision; batch 1 is equivalent to itself.
+    ASSERT_TRUE(r.effective_precision);
+    EXPECT_EQ(*r.effective_precision, (eb::EffectivePrecision{"fp32", "fp32", "model"}));
+    ASSERT_TRUE(r.batch_equivalence);
+    EXPECT_EQ(r.batch_equivalence->equivalent_to_b1, true);
+    EXPECT_EQ(r.batch_equivalence->basis, "batch_size_1");
 
     const std::string summary = eb::format_summary(r);
     EXPECT_NE(summary.find("aggregate"), std::string::npos) << summary;
@@ -314,6 +332,14 @@ TEST(ResultFiles, RealRunWritesValidatedFiles) {
     const json doc = json::parse(read_file(w.result_file));
     EXPECT_EQ(doc, w.document);
     EXPECT_EQ(doc.at("status"), "success");
+    EXPECT_EQ(doc.at("schema_version"), "1.2.0");
+    EXPECT_EQ(doc.at("execution").at("verification_details").at("module_checks").size(), 4u);
+    EXPECT_TRUE(doc.at("runtime").at("qnn").is_null());  // CPU run
+    EXPECT_TRUE(doc.at("timing").at("profiled_pass").is_null());
+    for (std::size_t i = 0; i < 2; ++i)
+        EXPECT_EQ(doc.at("timing").at("trials").at(i).at("session_init").at("cold_ms"),
+                  r.timing.trials[i].session_create_ms);
+    EXPECT_EQ(doc.at("timing").at("session_init").at("summary").at("cold_ms").at("count"), 2);
     EXPECT_EQ(doc.at("raw").at("latencies_file"), "fixture_" + w.stamp + "/latencies.csv");
     EXPECT_EQ(doc.at("raw").at("sha256").get<std::string>(),
               eb::sha256_file(*w.run_dir / "latencies.csv").value());
@@ -368,6 +394,8 @@ TEST(ResultFiles, RealRunWritesValidatedFiles) {
             EXPECT_TRUE(warn.path == "/runtime/ep_device/driver_version" ||
                         warn.path == "/system/load")  // --load-sample-ms 0
                 << warn.message;
+        else if (warn.code == "batch_not_equivalent")
+            ADD_FAILURE() << "a batch-1 fixture is equivalent to batch 1: " << warn.message;
         else  // the machine's state may legitimately trigger these (short trials vary)
             EXPECT_TRUE(warn.code == "background_cpu_load_high" ||
                         warn.code == "power_state_changed" || warn.code == "trial_spread_high")
@@ -426,9 +454,11 @@ TEST(ResultFiles, FailedLoadResultHasNoRuntime) {
     const auto written = eb::write_result_files(r, dir.path(), "load");
     ASSERT_TRUE(written.ok()) << written.error().message;
     const json& doc = written.value().document;
-    EXPECT_EQ(
-        doc.at("error"),
-        (json{{"stage", "environment"}, {"message", load.message}, {"code", "version_mismatch"}}));
+    EXPECT_EQ(doc.at("error"), (json{{"stage", "environment"},
+                                     {"message", load.message},
+                                     {"code", "version_mismatch"},
+                                     {"kind", "version_mismatch"},
+                                     {"unsupported_nodes", nullptr}}));
     EXPECT_TRUE(doc.at("runtime").is_null());
     EXPECT_EQ(doc.at("model").at("inputs").at(0).at("shape"), (json{1, 4}));  // from the file
     EXPECT_EQ(doc.at("config").at("batch_size"), 1);
@@ -532,6 +562,33 @@ TEST(OnnxInspectModels, FoldedModelsReportFoldedNormalization) {
     }
     if (found == 0)
         GTEST_SKIP() << "no folded models (run scripts/fold_models.py, see docs/models.md)";
+}
+
+// Batch equivalence from models/batch_equivalence.json: on the CPU, the FP32
+// MobileNetV2 at batch 4 differs from batch 1 in the last bits (different
+// kernels), the INT8 file does not.
+TEST(BenchmarkModels, BatchEquivalenceComesFromTheReferenceSummary) {
+    const fs::path models = kSourceDir / "models";
+    const fs::path fp32 = models / "mobilenetv2" / "mobilenetv2_fp32_b4.onnx";
+    const fs::path int8 = models / "mobilenetv2" / "mobilenetv2_int8_b4.onnx";
+    if (!fs::is_regular_file(fp32) || !fs::is_regular_file(int8))
+        GTEST_SKIP() << "model files not present; run the model pipeline (docs/setup.md)";
+    for (const auto& [model, equivalent] : {std::pair{fp32, false}, std::pair{int8, true}}) {
+        eb::RunConfig c = short_run(model);
+        c.trials = 1;
+        c.iterations = 2;
+        const eb::BenchmarkResult r = run(c);
+        ASSERT_FALSE(r.failure) << r.failure->error.message;
+        ASSERT_TRUE(r.batch_equivalence) << model;
+        EXPECT_EQ(r.batch_equivalence->basis, "reference_outputs") << r.batch_equivalence->reason;
+        EXPECT_EQ(r.batch_equivalence->equivalent_to_b1, equivalent) << model;
+        const bool warned = std::any_of(
+            r.warnings.begin(), r.warnings.end(),
+            [](const eb::ResultWarning& w) { return w.code == "batch_not_equivalent"; });
+        EXPECT_EQ(warned, !equivalent) << model;
+        const json doc = eb::to_result_json(r, std::nullopt);
+        EXPECT_EQ(doc.at("execution").at("batch_equivalence").at("equivalent_to_b1"), equivalent);
+    }
 }
 
 TEST(OnnxInspectModels, MobileNetV2) {

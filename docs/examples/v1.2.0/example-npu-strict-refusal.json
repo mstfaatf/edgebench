@@ -1,0 +1,307 @@
+{
+  "schema_version": "1.2.0",
+  "run_id": "00000000-0000-0000-0000-000000000000",
+  "timestamp_utc": "2026-11-26T00:22:40.869Z",
+  "label": null,
+  "status": "failed",
+  "error": {
+    "stage": "session_creation",
+    "message": "trial 1 of 1: creating a session for c:\\dev\\edgebench\\engine\\tests\\fixtures\\models\\npu_unsupported_op.onnx: ONNX Runtime error ORT_FAIL (code 1): This session contains graph nodes that are assigned to the default CPU EP, but fallback to CPU EP has been explicitly disabled by the user. Nodes the QNN EP does not support: Det node 'unsupported_det'.",
+    "code": "ORT_FAIL",
+    "kind": "strict_mode_refusal",
+    "unsupported_nodes": [
+      {
+        "name": "unsupported_det",
+        "op_type": "Det"
+      }
+    ]
+  },
+  "warnings": [
+    {
+      "code": "illustrative_example",
+      "message": "Example document: a real strict-mode refusal of the test fixture npu_unsupported_op.onnx (Relu, Det, Relu) on the NPU; run_id replaced by the nil UUID.",
+      "path": null
+    },
+    {
+      "code": "value_unavailable",
+      "message": "Background CPU load was not sampled (--load-sample-ms 0).",
+      "path": "/system/load"
+    },
+    {
+      "code": "value_unavailable",
+      "message": "No trial completed.",
+      "path": "/memory/session_create_working_set_delta_bytes"
+    },
+    {
+      "code": "value_unavailable",
+      "message": "The device driver version could not be determined.",
+      "path": "/runtime/ep_device/driver_version"
+    },
+    {
+      "code": "value_unavailable",
+      "message": "The QNN SDK version is not read from the backend.",
+      "path": "/runtime/qnn/sdk_version"
+    },
+    {
+      "code": "value_unavailable",
+      "message": "The QNN backend build is not read from the backend.",
+      "path": "/runtime/qnn/backend_build"
+    },
+    {
+      "code": "value_unavailable",
+      "message": "The HTP architecture is not read from the backend.",
+      "path": "/runtime/qnn/htp_arch"
+    },
+    {
+      "code": "value_unavailable",
+      "message": "The SoC model is not read from the backend.",
+      "path": "/runtime/qnn/soc_model"
+    }
+  ],
+  "tool": {
+    "name": "edgebench",
+    "version": "0.1.0",
+    "git_commit": "6815b055119f40b2d9ba0073a595062f22172f6c",
+    "git_dirty": true,
+    "build_type": "Release",
+    "compiler": "MSVC 19.42.34435.0",
+    "implementation": "cpp"
+  },
+  "system": {
+    "os": {
+      "name": "Windows 11 Home",
+      "version": "25H2",
+      "build": "26200.9974",
+      "architecture": "arm64"
+    },
+    "process_architecture": "arm64",
+    "cpu": {
+      "name": "Snapdragon(R) X 10-core X1P64100 @ 3.40 GHz",
+      "physical_cores": 10,
+      "logical_processors": 10
+    },
+    "memory_total_bytes": 16757260288,
+    "device": {
+      "manufacturer": "Microsoft Corporation",
+      "model": "Microsoft Surface Laptop, 7th Edition"
+    },
+    "power": {
+      "source": "ac",
+      "power_mode": "Balanced",
+      "power_plan": "Balanced",
+      "battery_percent": 80,
+      "battery_saver": false
+    },
+    "load": null
+  },
+  "runtime": {
+    "onnxruntime": {
+      "version": "1.32.0",
+      "library_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime.dll",
+      "api_version": 32,
+      "load_check": "full_path_verified"
+    },
+    "execution_provider": {
+      "name": "QNNExecutionProvider",
+      "version": "2.8.0",
+      "library_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll"
+    },
+    "qnn": {
+      "sdk_version": null,
+      "backend": "htp",
+      "backend_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtp.dll",
+      "backend_build": null,
+      "backend_file_version": null,
+      "htp_arch": null,
+      "soc_model": null,
+      "partition_count": null,
+      "unlisted_ep_options": "ep_default"
+    },
+    "ep_device": {
+      "ep_name": "QNNExecutionProvider",
+      "ep_vendor": "Qualcomm",
+      "device_type": "NPU",
+      "vendor": "",
+      "vendor_id": 1297040209,
+      "device_id": 1093682224,
+      "driver_version": null,
+      "metadata": {
+        "LUID": "78645"
+      },
+      "selection": {
+        "method": "by_device_type",
+        "candidate_count": 1
+      }
+    },
+    "loaded_modules": [
+      {
+        "name": "onnxruntime.dll",
+        "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime.dll"
+      },
+      {
+        "name": "onnxruntime_providers_qnn.dll",
+        "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll"
+      },
+      {
+        "name": "onnxruntime_providers_shared.dll",
+        "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_shared.dll"
+      }
+    ],
+    "ep_devices": [
+      {
+        "ep_name": "CPUExecutionProvider",
+        "ep_vendor": "Microsoft",
+        "device_type": "CPU",
+        "vendor": "Qualcomm",
+        "vendor_id": 1297040209,
+        "device_id": 7,
+        "metadata": {
+          "Description": "Snapdragon(R) X 10-core X1P64100 @ 3.42 GHz"
+        },
+        "ep_metadata": {
+          "version": "1.32.0"
+        }
+      },
+      {
+        "ep_name": "QNNExecutionProvider",
+        "ep_vendor": "Qualcomm",
+        "device_type": "NPU",
+        "vendor": "",
+        "vendor_id": 1297040209,
+        "device_id": 1093682224,
+        "metadata": {
+          "LUID": "78645"
+        },
+        "ep_metadata": {
+          "library_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll",
+          "version": "2.8.0"
+        }
+      },
+      {
+        "ep_name": "QNNExecutionProvider",
+        "ep_vendor": "Qualcomm",
+        "device_type": "GPU",
+        "vendor": "",
+        "vendor_id": 1297040209,
+        "device_id": 909329200,
+        "metadata": {
+          "Description": "Qualcomm(R) Adreno(TM) X1-85 GPU",
+          "Discrete": "0",
+          "DxgiAdapterNumber": "0",
+          "DxgiHighPerformanceIndex": "0",
+          "DxgiVideoMemory": "128 MB",
+          "LUID": "77477"
+        },
+        "ep_metadata": {
+          "library_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll",
+          "version": "2.8.0"
+        }
+      }
+    ]
+  },
+  "model": {
+    "name": "npu_unsupported_op",
+    "file_name": "npu_unsupported_op.onnx",
+    "sha256": "4f0f60e306c73c051b87ef9b402ce20ac95c5cc281220ca2ef84fe64fa95867c",
+    "size_bytes": 193,
+    "opset": 17,
+    "ir_version": 8,
+    "stored_precision": "fp32",
+    "inputs": [
+      {
+        "name": "x",
+        "dtype": "float32",
+        "shape": [
+          1,
+          4,
+          4
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "y",
+        "dtype": "float32",
+        "shape": [
+          1
+        ]
+      }
+    ],
+    "source": {
+      "library": null,
+      "identifier": null,
+      "export_tool": "edgebench-test-fixtures"
+    },
+    "quantization": {
+      "method": "none",
+      "format": null,
+      "activation_dtype": null,
+      "weight_dtype": null,
+      "calibration": null,
+      "tool": null
+    },
+    "precision_notes": "Stored as FP32; the QNN HTP backend computes in FP16 (enable_htp_fp16_precision = 1). The NPU has no FP32 compute.",
+    "normalization": null
+  },
+  "config": {
+    "requested": {
+      "execution_provider": "QNNExecutionProvider",
+      "device_type": "NPU",
+      "compute_precision": "fp16"
+    },
+    "strict_mode": true,
+    "batch_size": 1,
+    "input": {
+      "kind": "random",
+      "constant_value": null,
+      "seed": 0,
+      "dataset": null,
+      "preprocessing": "No preprocessing: inputs are generated (random values in [0, 1) from SplitMix64 (seed 0)) once per session, before timing, and reused for every iteration."
+    },
+    "warmup_iterations": 1,
+    "measured_iterations": 5,
+    "trials": 1,
+    "run_api": "sync",
+    "ort_execution_mode": "sequential",
+    "intra_op_threads": 4,
+    "inter_op_threads": null,
+    "graph_optimization_level": "enable_all",
+    "ep_options": {
+      "backend_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtp.dll",
+      "enable_htp_fp16_precision": "1",
+      "htp_performance_mode": "burst"
+    },
+    "session_config": {
+      "ep.context_enable": "0",
+      "session.disable_cpu_ep_fallback": "1"
+    },
+    "ep_context_cache": {
+      "enabled": false,
+      "cache_file": null,
+      "state": "disabled",
+      "files": [],
+      "mode": "off",
+      "key_id": null,
+      "context_path": null,
+      "hit": null,
+      "verified_equal_outputs": null,
+      "key": null
+    },
+    "run_binding": "iobinding_preallocated",
+    "profiling": {
+      "ort": false,
+      "qnn_level": "off"
+    }
+  },
+  "execution": null,
+  "timing": null,
+  "memory": {
+    "scope": "process",
+    "peak_working_set_bytes": 219299840,
+    "peak_private_bytes": 212635648,
+    "source": "GetProcessMemoryInfo",
+    "session_create_working_set_delta_bytes": null
+  },
+  "accuracy": null,
+  "raw": null
+}

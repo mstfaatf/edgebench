@@ -1,6 +1,6 @@
 // The benchmark trial loop and its in-memory result.
 //
-// BenchmarkResult mirrors the results schema 1.1.0 (docs/results-schema.md):
+// BenchmarkResult mirrors the results schema 1.2.0 (docs/results-schema.md):
 // each member corresponds to a schema block, and every value that the schema
 // records is kept here, including the raw per-iteration latencies and the
 // per-trial idle samples. Accuracy is not measured by `run` (null).
@@ -14,7 +14,10 @@
 #include <string_view>
 #include <vector>
 
+#include "edgebench/batch_equivalence.hpp"
+#include "edgebench/bundle_modules.hpp"
 #include "edgebench/model_info.hpp"
+#include "edgebench/npu_options.hpp"
 #include "edgebench/onnx_inspect.hpp"
 #include "edgebench/ort_loader.hpp"
 #include "edgebench/provider.hpp"
@@ -40,6 +43,9 @@ struct RuntimeResult {
     ProviderDescription provider;  // execution_provider, ep_device, ep_options, session_config
     std::vector<LoadedModule> loaded_modules;  // captured while the first session was alive
     std::optional<std::vector<EpDeviceInfo>> ep_devices;  // null if not enumerated
+    /// runtime.qnn.backend_file_version: the loaded QnnHtp.dll, read while the first
+    /// session was alive (QNN runs only).
+    std::optional<ModuleFileVersion> qnn_backend_file_version;
 };
 
 struct ModelResult {
@@ -58,6 +64,8 @@ struct ExecutionResult {
     bool full_device_execution_verified = false;
     std::string verification_details;
     NodeAssignment node_assignment;  // verification_method is node_assignment.verification_method
+    /// Every bundle module check of the run, in order (verification_details.module_checks).
+    std::vector<ModuleCheckpoint> module_checks;
 };
 
 struct SessionInitResult {
@@ -110,7 +118,8 @@ struct TimingResult {
     std::optional<double> first_inference_ms;  // trial 0's first warm-up iteration
     std::vector<TrialResult> trials;
     std::optional<AggregateResult> aggregate;
-    // timing.accelerator: always null here (no profiled accelerator pass).
+    // timing.accelerator and timing.profiled_pass: always null here (no profiled
+    // accelerator pass); per trial only cold_ms is measured (no EP context cache).
 };
 
 /// Why a run failed (results schema: error).
@@ -154,6 +163,10 @@ struct BenchmarkResult {
     /// config.requested.compute_precision: null for CPU runs; "int8" or "fp16" on the
     /// NPU (requested_compute_precision()).
     std::optional<std::string> compute_precision;
+    /// execution.effective_precision (effective_precision()); null if unknown.
+    std::optional<EffectivePrecision> effective_precision;
+    /// execution.batch_equivalence, looked up once the batch size is known.
+    std::optional<BatchEquivalence> batch_equivalence;
     std::int64_t batch_size = 0;      // 0: unknown (written as null; failed results only)
     std::string input_preprocessing;  // config.input.preprocessing
 

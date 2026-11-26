@@ -38,6 +38,9 @@ struct NodeAssignment {
     /// The QNN EP's node validation from the same session log (QNN sessions only;
     /// results schema: execution.qnn_validation).
     std::optional<QnnValidation> qnn_validation;
+    /// True if the provider checked, while the placement session was alive, that every
+    /// ONNX Runtime / QNN module came from the bundle (a failed check fails the call).
+    bool modules_checked_while_alive = false;
 
     /// True if every node is on `ep` (and there is at least one node).
     bool all_on(std::string_view ep) const;

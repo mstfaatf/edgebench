@@ -2,10 +2,19 @@
 
 #include "edgebench/diagnostics.hpp"
 
+#include <atomic>
 #include <cstdio>
 #include <stdexcept>
 
 namespace edgebench {
+
+namespace {
+std::atomic<int> g_live_runtimes{0};
+}  // namespace
+
+int Runtime::live_count() {
+    return g_live_runtimes.load();
+}
 
 Result<std::unique_ptr<Runtime>> Runtime::create(const OrtLoadResult& load) {
     if (!load.ok()) {
@@ -21,12 +30,15 @@ Result<std::unique_ptr<Runtime>> Runtime::create(const OrtLoadResult& load) {
 }
 
 Runtime::Runtime(const OrtLoadResult& load)
-    : load_(load), env_(ORT_LOGGING_LEVEL_WARNING, "edgebench", &Runtime::log_callback, this) {}
+    : load_(load), env_(ORT_LOGGING_LEVEL_WARNING, "edgebench", &Runtime::log_callback, this) {
+    ++g_live_runtimes;
+}
 
 Runtime::~Runtime() {
     // Most recently registered first; each EpLibrary unregisters itself.
     while (!ep_libraries_.empty())
         ep_libraries_.pop_back();
+    --g_live_runtimes;
 }
 
 std::vector<EpDeviceInfo> Runtime::ep_devices() {

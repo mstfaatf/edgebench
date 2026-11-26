@@ -5,11 +5,18 @@ contract between the C++ engine that writes them, the Python analysis scripts,
 and the dashboard that reads them.
 
 - Machine-readable schemas (JSON Schema draft 2020-12), one file per version:
-  - [`schemas/benchmark-result.v1.1.0.schema.json`](../schemas/benchmark-result.v1.1.0.schema.json) (current)
+  - [`schemas/benchmark-result.v1.2.0.schema.json`](../schemas/benchmark-result.v1.2.0.schema.json) (current)
+  - [`schemas/benchmark-result.v1.1.0.schema.json`](../schemas/benchmark-result.v1.1.0.schema.json)
   - [`schemas/benchmark-result.v1.0.0.schema.json`](../schemas/benchmark-result.v1.0.0.schema.json)
-- Current version: **1.1.0** (see the [changelog](#changelog)). The C++ engine's
+- Current version: **1.2.0** (see the [changelog](#changelog)). The C++ engine's
   version is `EDGEBENCH_RESULTS_SCHEMA_VERSION` in `CMakeLists.txt`.
 - Examples:
+  - [`docs/examples/v1.2.0/`](examples/v1.2.0/): the four 1.1.0 examples with
+    every 1.2.0 key added, plus two real runs of the C++ engine: a strict-mode
+    refusal of the test fixture `npu_unsupported_op.onnx` (with
+    `error.unsupported_nodes`) and a short NPU run of `mobilenetv2_int8_b8.onnx`,
+    whose batch-8 outputs differ from batch 1 (`batch_not_equivalent`). Their
+    `run_id` is the nil UUID.
   - [`docs/examples/v1.1.0/`](examples/v1.1.0/): CPU FP32, CPU INT8, NPU INT8 (strict,
     cached EP context, accelerator time from a profiled pass) and a run that failed
     to load ONNX Runtime. Values come from the C++ measurements in
@@ -82,7 +89,7 @@ is always present.
 
 | Field | Type | Nullable | Meaning |
 |---|---|---|---|
-| `schema_version` | string | no | Schema version, `"1.0.0"` or `"1.1.0"`; selects the schema file |
+| `schema_version` | string | no | Schema version, `"1.0.0"`, `"1.1.0"` or `"1.2.0"`; selects the schema file |
 | `run_id` | string (UUID) | no | Unique ID of this run |
 | `timestamp_utc` | string (RFC 3339, UTC) | no | Start time of the run |
 | `label` | string | yes | Optional human-readable name |
@@ -254,7 +261,7 @@ When `method` is `none`, all other quantization fields must be `null`.
 |---|---|---|---|
 | `full_device_execution_verified` | boolean | yes | `true`: verified that the whole graph ran on the requested device. `false`: verified that it did not (some nodes fell back). `null`: not verified |
 | `verification_method` | enum | yes | How it was established. Required (non-null) when the flag is `true` or `false`, and `null` when the flag is `null` |
-| `verification_details` | string | yes | Free-text explanation |
+| `verification_details` | string or object | yes | Free-text explanation; from 1.2.0 an object with that text and the evidence (see [Verification evidence](#verification-evidence)) |
 | `node_assignment` | object | yes | `{total_nodes, nodes_by_ep: {ep_name: count}}`, if available |
 
 `verification_method` values:
@@ -477,6 +484,118 @@ node in an ONNX Runtime profile) and `combined` (more than one method agreed;
 | `system.load.sample_window_s` | number | yes | Sampling window |
 | `memory.session_create_working_set_delta_bytes` | integer | yes | Change of the **process working set** across session creation (may be negative). Like every `memory` field it covers the edgebench process only: memory on the NPU or in drivers outside the process is not included |
 
+## Fields added in 1.2.0
+
+All of these are optional keys in 1.2.0, so a 1.0.0 or 1.1.0 document stays
+valid after changing only its `schema_version`. Within each new object every
+key is required. They describe NPU runs more completely; a CPU result has
+`runtime.qnn` and the cache `null`.
+
+### QNN runtime details
+
+`runtime.qnn` (null when the QNN EP is not used) gains:
+
+| Field | Meaning |
+|---|---|
+| `backend_file_version` | The version resource of the backend library actually loaded (`QnnHtp.dll`), read from the file of the loaded module while a session was alive: `{module_path, product_version, file_version, source}`. `product_version` is the resource's ProductVersion string (`2.52.0.261104115025` for QNN SDK 2.52), `file_version` the numeric file version (`2.52.0.0`), `source` `loaded_module_version_resource`. Null if the module was not loaded or has no version resource |
+| `sdk_version`, `backend_build` (1.1.0), `htp_arch`, `soc_model` | As reported by the loaded backend through the QNN API. The C++ engine does not query the backend yet: `null` with a `value_unavailable` warning. The file version above is a different fact (the file's resource, not an API answer) |
+| `partition_count` | Graph partitions (fused nodes) ONNX Runtime assigned to the QNN EP in the node placement session; equals `execution.node_assignment.nodes_by_ep.QNNExecutionProvider`. Also named in `verification_details.summary` |
+| `unlisted_ep_options` | `ep_default`: every QNN EP option not listed in `config.ep_options` was left at the EP's default value |
+
+### Effective precision
+
+`execution.effective_precision` = `{stored, compute, source}`: the stored
+precision (equal to `model.stored_precision`), the precision the device
+computed in, and why. `source` is `model` (the device computes the stored
+precision: every CPU run, INT8 QDQ models on the NPU) or
+`enable_htp_fp16_precision` (an FP32 model computed in FP16 on the HTP backend
+because that EP option was set). `model.precision_notes` stays as free text.
+
+### Unsupported nodes and error kinds
+
+`error.kind` is the writer's own stable failure identifier (the C++ engine's
+error kinds: `strict_mode_refusal`, `qnn_backend_load_failed`,
+`module_outside_bundle`, `interrupted`, ...), next to `error.code`, which
+keeps the failing component's code (e.g. `ORT_FAIL`). `error.unsupported_nodes`
+lists `{name, op_type}` for each node the QNN EP said it cannot run when a
+strict-mode session was refused (from the EP's "Unsupported nodes" error log;
+an empty list if it named none), and is `null` for every other failure.
+
+### Batch equivalence
+
+`execution.batch_equivalence` = `{equivalent_to_b1, basis, reference_batch}`
+records whether the model file, on this provider and compute precision,
+computes for every batch item exactly the output its batch-1 sibling computes
+for that item. A result that is not equivalent measures a different
+computation: it must not be averaged or compared with batch-1 results as if it
+were the same one, and it carries a `batch_not_equivalent` warning.
+
+The answer comes from the committed reference data, not from a check at run
+time. `scripts/make_references.py` compares the stored reference outputs of
+every model file with those of its batch-1 file, item by item, on the 8
+reference images or windows (the SplitMix64 input does not count: its batch
+items differ from each other) and writes `models/batch_equivalence.json`, keyed
+by model SHA256, provider (`cpu`, `npu`) and compute precision (see
+[models.md](models.md#batch-equivalence)). The engine finds that file in the
+model's directory or the nearest parent directory that has one and looks the
+model up by its SHA256. `basis` is `batch_size_1` (a batch-1 model:
+`equivalent_to_b1` is `true` by definition), `reference_outputs` (found), or
+`not_available` (not listed, or no summary file: `equivalent_to_b1` is `null`
+and a `value_unavailable` warning says why). `reference_batch` is always 1.
+
+### Session initialization per trial
+
+Each `timing.trials[]` entry gains `session_init` = `{cold_ms,
+context_build_ms, cached_init_ms}`: that trial's session creation from the
+ONNX model, creation of the session that wrote the EP context cache, and
+creation from the EP context model; each `null` when not measured in the
+trial. `timing.session_init.summary` holds `{count, median_ms, min_ms,
+max_ms}` (nearest-rank median) of each over the trials that measured it, or
+`null`. The 1.1.0 arrays (`session_init.cold_ms`, `cached_ms`) and
+`context_build_ms` stay as they are. The C++ engine measures only `cold_ms`
+so far (no EP context cache).
+
+### EP context cache
+
+`config.ep_context_cache` gains:
+
+| Field | Meaning |
+|---|---|
+| `mode` | `off` (no cache; `enabled` must be `false`), `build` (a missing or stale cache was built and used), `use` (an existing cache whose key matched was used) |
+| `key_id` | The cache key as one string: SHA256 of the 1.1.0 `key` object (the key fields: model SHA256, ONNX Runtime, EP and QNN SDK versions, EP options digest, device) serialized as JSON with sorted keys and no whitespace |
+| `context_path` | Absolute path of the EP context model the timed sessions were created from |
+| `hit` | Whether a cache with a matching key existed before the run; `null` when the cache is off |
+| `verified_equal_outputs` | Whether a session created from the cache gave bit-identical outputs to one compiled from the ONNX model on the same input; required when `mode` is `use` |
+
+The C++ engine records NPU runs with the cache off (`enabled` false, `state`
+`disabled`, `mode` `off`, the rest `null`).
+
+### Profiled accelerator pass
+
+`timing.profiled_pass` (null when not run) = `{enabled, iterations,
+accelerator_ms, source, note}`: accelerator execute time per inference
+(`{count, median_ms, min_ms, max_ms}`) from a **separate profiled session**
+created after the timed trials, with `source` the QNN profiling level. Nothing
+measured in that pass is part of the timed latency fields (`timing.trials`,
+`timing.aggregate`, `session_init`). It supersedes the 1.1.0
+`timing.accelerator`, which 1.2.0 writers leave `null`.
+
+### Verification evidence
+
+`execution.verification_details` may be an object (it was a string):
+`{summary, qnn_validation_passes, module_checks}`. `summary` is the text the
+string held. `qnn_validation_passes` has one entry per QNN EP capability pass,
+in the order of `execution.qnn_validation.passes`, counting the validated node
+units (an `OrtNodeUnit` is a node with its QDQ neighbours) by operator type:
+`{passed_units_by_op, failed_units_by_op}`. `module_checks` lists every check
+that the ONNX Runtime and QNN modules in the process came from the bundle
+directory, in order, as `{stage, trial_index, modules_outside_bundle}`:
+`after_provider_creation` (the EP library is registered), one
+`after_session_creation` per trial, and `placement_session` (while the node
+placement session was alive). A failed check stops the run, so in a
+successful result every list is empty. `execution.qnn_validation.rejected_nodes[]`
+entries gain `node_index`.
+
 ## Consistency rules
 
 `scripts/validate_results.py` reads `schema_version`, validates the document
@@ -520,6 +639,29 @@ The code is printed with each problem:
 | `qnn_validation_missing` | error | `verification_method` is `qnn_validation_log` but `execution.qnn_validation` is `null` |
 | `rejected_nodes_but_verified` | error | `full_device_execution_verified` is `true` although `qnn_validation` lists rejected or failed nodes |
 | `missing_1_1_0_key` | warning | `tool.implementation` is `cpp` and a key defined by the 1.1.0 schema is absent (reported once per key, with its path). Other writers may omit keys added in 1.1.0 (absent means null), but the C++ engine writes every key; the check descends into nested objects and arrays but not into blocks that are `null` |
+
+Rules for 1.2.0 documents (all errors unless stated), checked only when the
+fields involved are present:
+
+| Code | Severity | Rule |
+|---|---|---|
+| `npu_compute_fp32` | error | NPU result whose `effective_precision.compute` is `fp32`: the NPU has no FP32 compute |
+| `fp16_compute_without_option` | error | `compute` `fp16` with `stored` `fp32`, but `source` is not `enable_htp_fp16_precision` or `ep_options.enable_htp_fp16_precision` is not `"1"` |
+| `cpu_compute_not_stored` | error | CPU result whose `compute` differs from `stored` |
+| `effective_precision_stored_mismatch` | error | `effective_precision.stored` differs from `model.stored_precision` |
+| `unsupported_nodes_mismatch` | error | `error.kind` is `strict_mode_refusal` but `error.unsupported_nodes` is `null` or absent, or `unsupported_nodes` is set for any other failure |
+| `batch_not_equivalent_unflagged` | error | `batch_equivalence.equivalent_to_b1` is `false` without a `batch_not_equivalent` warning |
+| `cache_hit_without_cache` | error | `ep_context_cache.hit` is `true` while `enabled` is `false` |
+| `cache_outputs_not_verified` | error | `ep_context_cache.mode` is `use` but `verified_equal_outputs` is `null` |
+| `profiled_pass_without_accelerator_ep` | error | An enabled `timing.profiled_pass` on a CPU run |
+| `qnn_partition_count_mismatch` | error | `runtime.qnn.partition_count` differs from the nodes `execution.node_assignment` places on `QNNExecutionProvider` |
+| `missing_1_2_0_key` | warning | `tool.implementation` is `cpp` and a key added in 1.2.0 is absent. Keys added in 1.1.0 that are absent from a 1.2.0 document are still reported as `missing_1_1_0_key` |
+
+The schema itself also requires: `mode` `off` only with `enabled` `false`;
+`basis` `not_available` exactly when `equivalent_to_b1` is `null`; `basis`
+`batch_size_1` only with `equivalent_to_b1` `true`. The 1.1.0 rule
+`session_init_not_applicable` also covers the per-trial `context_build_ms` and
+`cached_init_ms`.
 
 Statistics are not recomputed from the latency file; the engine is responsible
 for computing them from the same data.
@@ -623,6 +765,31 @@ them in a patch release). The validator picks the schema from the document's
 of a newer minor version fails against an older schema.
 
 ## Changelog
+
+### 1.2.0
+
+Additive; every 1.0.0 and 1.1.0 document is valid 1.2.0 after changing
+`schema_version`. See [Fields added in 1.2.0](#fields-added-in-120).
+
+- QNN: `runtime.qnn.backend_file_version`, `htp_arch`, `soc_model`,
+  `partition_count`, `unlisted_ep_options`.
+- Precision: `execution.effective_precision`.
+- Errors: `error.kind`, `error.unsupported_nodes`.
+- Batch equivalence: `execution.batch_equivalence` (from
+  `models/batch_equivalence.json`).
+- Initialization: `timing.trials[].session_init`, `timing.session_init.summary`.
+- EP context cache: `config.ep_context_cache.mode`, `key_id`, `context_path`,
+  `hit`, `verified_equal_outputs`.
+- Accelerator time: `timing.profiled_pass` (supersedes `timing.accelerator`).
+- Verification: `execution.verification_details` may be an object with
+  `summary`, `qnn_validation_passes` and `module_checks`;
+  `execution.qnn_validation.rejected_nodes[].node_index`.
+- Validator: the 1.2.0 rules above and `missing_1_2_0_key`.
+
+No latency results have been published yet. Until the first one is, 1.2.0 may
+still be amended in place (as 1.1.0 was) while the EP context cache,
+initialization breakdown, backend-reported versions and the profiled pass are
+filled in; amendments will be listed here.
 
 ### 1.1.0
 

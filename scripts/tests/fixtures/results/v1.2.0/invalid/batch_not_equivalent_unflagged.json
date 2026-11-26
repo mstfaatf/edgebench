@@ -1,0 +1,53 @@
+{
+  "description": "A batch-8 result that is not equivalent to batch 1, without the batch_not_equivalent warning.",
+  "base": "docs/examples/v1.2.0/example-npu-int8-b8-not-equivalent.json",
+  "set": {
+    "/warnings": [
+      {
+        "code": "illustrative_example",
+        "message": "Example document: a real short NPU run (2 x 20 iterations, not a benchmark) of mobilenetv2_int8_b8.onnx, whose batch-8 outputs differ from the batch-1 file's on the NPU; run_id replaced by the nil UUID and the raw latency file omitted.",
+        "path": null
+      },
+      {
+        "code": "background_cpu_load_high",
+        "message": "Background CPU load from other processes reached 10.7% during trial 1 of 2 (this process's own CPU time excluded); other processes may have distorted the measurement.",
+        "path": null
+      },
+      {
+        "code": "value_unavailable",
+        "message": "Background CPU load was not sampled (--load-sample-ms 0).",
+        "path": "/system/load"
+      },
+      {
+        "code": "value_unavailable",
+        "message": "The device driver version could not be determined.",
+        "path": "/runtime/ep_device/driver_version"
+      },
+      {
+        "code": "value_unavailable",
+        "message": "The QNN SDK version is not read from the backend.",
+        "path": "/runtime/qnn/sdk_version"
+      },
+      {
+        "code": "value_unavailable",
+        "message": "The QNN backend build is not read from the backend.",
+        "path": "/runtime/qnn/backend_build"
+      },
+      {
+        "code": "value_unavailable",
+        "message": "The HTP architecture is not read from the backend.",
+        "path": "/runtime/qnn/htp_arch"
+      },
+      {
+        "code": "value_unavailable",
+        "message": "The SoC model is not read from the backend.",
+        "path": "/runtime/qnn/soc_model"
+      }
+    ]
+  },
+  "expect": {
+    "severity": "error",
+    "code": "batch_not_equivalent_unflagged",
+    "path": "/execution/batch_equivalence/equivalent_to_b1"
+  }
+}

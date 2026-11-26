@@ -724,3 +724,64 @@ sessions and both run bindings give identical outputs. NPU and CPU outputs of
 the same INT8 file differ (different kernels and accumulation), with top-1
 agreement on the 8 images of 8/8 for every INT8 file except EfficientNet-Lite0's
 folded ones (7/8).
+
+### Batch equivalence
+
+Whether a file at batch 4 or 8 computes, for every item, exactly the output its
+batch-1 file computes for the same item follows from the references above: the
+8 images (or windows) are the same at every batch size, so item *i* of a batch-4
+or batch-8 run is compared byte for byte with run *i* of the batch-1 file, on
+the same device. The SplitMix64 input does not count, because its batch items
+differ from each other. `scripts/make_references.py` writes the result to
+`models/batch_equivalence.json` (committed, about 80 KB) whenever it writes the
+references, and `--check` fails if the committed file no longer matches them:
+
+```powershell
+# rewrite only the summary, from the references on disk
+.\.venv\Scripts\python.exe scripts\make_references.py --batch-equivalence
+```
+
+Each entry is keyed by the model file's SHA256, the provider (`cpu`, `npu`)
+and the compute precision (the stored precision on the CPU; `int8` or `fp16`
+on the NPU), and records `equivalent_to_b1`, the items compared and differing,
+and the largest absolute difference. `edgebench run` looks every model up there
+and records the answer in its result (`execution.batch_equivalence`; a model
+that is not equivalent gets a `batch_not_equivalent` warning, see
+[cli.md](cli.md#batch-equivalence)). The summary lists 132 entries (every model
+file on each of its reference devices), 22 of them not equivalent. By group
+("same": every file of the group computes the batch-1 outputs exactly;
+"differs": none does):
+
+| Model | Variants | Provider, compute | b4 vs b1 | b8 vs b1 | Largest difference |
+|---|---|---|---|---|---|
+| `mobilenetv2` | FP32, FP32 folded | CPU, FP32 | differs | differs | 3.8e-06 |
+| `mobilenetv2` | FP32, FP32 folded | NPU, FP16 | same | same | 0 |
+| `resnet18` | FP32, FP32 folded | CPU, FP32 | same | same | 0 |
+| `resnet18` | FP32, FP32 folded | NPU, FP16 | same | same | 0 |
+| `efficientnet_lite0` | FP32, FP32 folded | CPU, FP32 | differs | differs | 5.2e-06 |
+| `efficientnet_lite0` | FP32, FP32 folded | NPU, FP16 | same | same | 0 |
+| `mobilenetv2` | INT8 (all four) | CPU, INT8 | same | same | 0 |
+| `mobilenetv2` | INT8 (all four) | NPU, INT8 | same | differs | 0.059 |
+| `resnet18` | INT8 (all four) | CPU, INT8 | same | same | 0 |
+| `resnet18` | INT8 (all four) | NPU, INT8 | same | differs | 0.17 |
+| `efficientnet_lite0` | INT8 (all four) | CPU, INT8 | same | same | 0 |
+| `efficientnet_lite0` | INT8 (all four) | NPU, INT8 | same | differs | 0.085 |
+| `conv1d_autoencoder` | FP32 imported | CPU, FP32 | same | same | 0 |
+| `conv1d_autoencoder` | FP32 imported | NPU, FP16 | differs | differs | 0.0078 |
+| `conv1d_autoencoder` | FP32 | CPU, FP32 | same | same | 0 |
+| `conv1d_autoencoder` | FP32 | NPU, FP16 | same | same | 0 |
+| `conv1d_autoencoder` | INT8, INT8 unpruned | CPU, INT8 | same | same | 0 |
+| `conv1d_autoencoder` | INT8, INT8 unpruned | NPU, INT8 | same | same | 0 |
+
+The CPU differences of the FP32 MobileNetV2 and EfficientNet-Lite0 files are in
+the last bits of the logits (largest 3.8e-06 and 5.2e-06; every item differs).
+Both models use depthwise convolutions and ResNet-18 does not, so a different
+accumulation order in ONNX Runtime's CPU kernels for a batch is the likely
+cause (not verified). ResNet-18 and every INT8 file are exact on the CPU. On the NPU, the INT8 image files at batch 8 compute
+different outputs on every image (the HTP runs the batch-8 graph differently;
+batch 4 is exact), and the raw tf2onnx graph of the autoencoder
+(`fp32_imported`) differs at batch 4 and 8 in FP16, while its cleaned graph does
+not. A difference is a fact about the computation, not an error: the
+published accuracy evaluation uses the largest batch whose top-5 predictions
+match batch 1 ([accuracy.md](accuracy.md)), and latency results at a batch size
+that is not equivalent say so.

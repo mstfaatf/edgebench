@@ -2,6 +2,7 @@
 
 #include <onnxruntime_cxx_api.h>
 
+#include "edgebench/bundle_modules.hpp"
 #include "edgebench/ort_bench_session.hpp"
 #include "edgebench/qnn_provider.hpp"
 #include "edgebench/runtime.hpp"
@@ -69,7 +70,15 @@ Result<NodeAssignment> CpuProvider::record_placement(const std::filesystem::path
                                                      const RunConfig& config) {
     try {
         Ort::SessionOptions options = session_options(config);
-        return record_node_placement(runtime_, model, options);
+        const std::filesystem::path bundle = runtime_.bundle_dir();
+        Result<PlacementCapture> captured =
+            capture_node_placement(runtime_, model, options,
+                                   [&bundle]() { return check_bundle_modules(bundle).result(); });
+        if (!captured)
+            return captured.error();
+        NodeAssignment assignment = std::move(captured.value().assignment);
+        assignment.modules_checked_while_alive = true;
+        return assignment;
     } catch (const Ort::Exception& e) {
         return ort_error("session_options_failed", "setting session options", e.GetOrtErrorCode(),
                          e.what());

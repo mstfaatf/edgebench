@@ -1,0 +1,23 @@
+{
+  "description": "A profiled accelerator pass recorded for a CPU run.",
+  "base": "docs/examples/v1.2.0/example-cpu-fp32.json",
+  "set": {
+    "/timing/profiled_pass": {
+      "enabled": true,
+      "iterations": 100,
+      "accelerator_ms": {
+        "count": 100,
+        "median_ms": 0.3,
+        "min_ms": 0.29,
+        "max_ms": 0.35
+      },
+      "source": "qnn_profiling_basic",
+      "note": null
+    }
+  },
+  "expect": {
+    "severity": "error",
+    "code": "profiled_pass_without_accelerator_ep",
+    "path": "/timing/profiled_pass"
+  }
+}

@@ -155,6 +155,8 @@ TEST(CpuUtilization, LiveSampleIsARatio) {
     const eb::LoadSample s = eb::sample_cpu_load(std::chrono::milliseconds(50));
     EXPECT_GE(s.cpu_utilization_ratio, 0.0);
     EXPECT_LE(s.cpu_utilization_ratio, 1.0);
+    // A lower bound only: the sample never ends early, but a loaded machine can make
+    // it end late by any amount.
     EXPECT_GE(s.sample_window_s, 0.045);
 }
 

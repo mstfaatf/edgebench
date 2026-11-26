@@ -20,10 +20,20 @@ std::unique_ptr<Runtime>& runtime_slot() {
 // Releases the shared Runtime (its EP registrations and the ONNX Runtime
 // environment) when the test program finishes, before main() returns, as
 // edgebench.exe does. Left to static destruction after main(), the release
-// intermittently never returned in processes that had used the QNN EP.
+// intermittently never returned in processes that had used the QNN EP. Every
+// test program that links this file gets the release, and fails if any other
+// Runtime is still alive at that point (one kept in a static would be released
+// during static destruction).
 class ReleaseSharedRuntime : public ::testing::Environment {
 public:
-    void TearDown() override { runtime_slot().reset(); }
+    void TearDown() override {
+        runtime_slot().reset();
+        if (const int alive = Runtime::live_count(); alive != 0) {
+            ADD_FAILURE() << alive
+                          << " Runtime object(s) still alive after the tests: a Runtime must be "
+                             "released before main() returns (see edgebench/runtime.hpp)";
+        }
+    }
 };
 
 [[maybe_unused]] ::testing::Environment* const kReleaseSharedRuntime =

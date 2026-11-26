@@ -1,0 +1,12 @@
+{
+  "description": "A run that uses an existing EP context cache without recording whether its outputs match.",
+  "base": "docs/examples/v1.2.0/example-npu-int8-s8w-strict.json",
+  "set": {
+    "/config/ep_context_cache/verified_equal_outputs": null
+  },
+  "expect": {
+    "severity": "error",
+    "code": "cache_outputs_not_verified",
+    "path": "/config/ep_context_cache/verified_equal_outputs"
+  }
+}

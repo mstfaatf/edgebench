@@ -21,6 +21,7 @@ add_custom_target(edgebench_build_info
 
 add_library(edgebench_core STATIC
   src/benchmark.cpp
+  src/batch_equivalence.cpp
   src/bundle_modules.cpp
   src/cli.cpp
   src/cpu_provider.cpp
@@ -67,7 +68,7 @@ target_compile_definitions(edgebench_core PRIVATE EDGEBENCH_BUILD_TYPE="$<CONFIG
 # nlohmann/json appears in public headers; CLI11 is used only inside cli.cpp.
 target_link_libraries(edgebench_core
   PUBLIC OnnxRuntime::OnnxRuntime nlohmann_json::nlohmann_json
-  PRIVATE CLI11::CLI11 bcrypt powrprof)
+  PRIVATE CLI11::CLI11 bcrypt powrprof version)
 edgebench_set_warnings(edgebench_core)
 
 # --- CLI --------------------------------------------------------------------
@@ -104,6 +105,7 @@ endfunction()
 
 if(EDGEBENCH_BUILD_TESTS)
   add_executable(edgebench_tests
+    tests/batch_equivalence_test.cpp
     tests/cli_test.cpp
     tests/core_types_test.cpp
     tests/exit_codes_test.cpp

@@ -20,7 +20,7 @@ edgebench <command> --help
 ## `edgebench run`
 
 Benchmarks one model with one configuration, prints a summary, and writes the
-result as a results-schema 1.1.0 JSON document plus CSV files (see
+result as a results-schema 1.2.0 JSON document plus CSV files (see
 [Result files](#result-files)). Only the CPU provider is available in this
 version. `--dry-run` creates the real session and checks one inference without
 measuring or writing anything.
@@ -152,11 +152,16 @@ If the trial means are spread out, i.e. their coefficient of variation is above
 gets a `trial_spread_high` warning (path `/timing/aggregate/trial_variation`):
 the trials disagree, so the aggregate statistics alone do not describe the run.
 
-After every session is created, the run checks that each ONNX Runtime and QNN
-module in the process comes from the bundle directory (the directory of the
-loaded `onnxruntime.dll`). A module from anywhere else stops the run with exit
-code 4 and a failed result (`error.code` `module_outside_bundle`, stage
-`session_creation`) that names the module and its path.
+Right after the provider is created (for the NPU: after the QNN EP library is
+registered), after every session is created, and while the node placement
+session is alive, the run checks that each ONNX Runtime and QNN module in the
+process comes from the bundle directory (the directory of the loaded
+`onnxruntime.dll`). Every check is recorded in
+`execution.verification_details.module_checks`. A module from anywhere else
+stops the run with exit code 4 and a failed result (`error.code`
+`module_outside_bundle`; stage `ep_registration` for the first check,
+`session_creation` for the others) that names the module and its path.
+
 The working set is read just before and just after each session's constructor
 (outside the timed bracket) for `memory.session_create_working_set_delta_bytes`,
 the median over trials; `memory.peak_working_set_bytes` and
@@ -189,6 +194,24 @@ Stops with an error:
 Trial order comes from a scheduler that rotates the starting configuration
 every round; with the single configuration of `run` the order is simply trial
 1, 2, 3, … (see [architecture.md](architecture.md#trial-loop-and-scheduling)).
+
+### Batch equivalence
+
+A model with batch size N > 1 does not always compute, per item, what the
+batch-1 file of the same model computes: on the NPU the INT8 image models at
+batch 8 give different outputs, and on the CPU the FP32 MobileNetV2 and
+EfficientNet-Lite0 files at batch 4 and 8 differ in the last bits. `run` looks
+the model up by its SHA256, the provider and the compute precision in
+`batch_equivalence.json` (the file in the model's directory or the nearest
+parent directory that has one: `models/batch_equivalence.json`, written by
+`scripts/make_references.py` from the reference outputs; see
+[models.md](models.md#batch-equivalence)) and records the answer in
+`execution.batch_equivalence`. A model that is not equivalent gets a
+`batch_not_equivalent` warning: its latency is that of a different
+computation and must not be averaged or compared with batch-1 results as the
+same one. The summary prints a `Batch` line for batch sizes above 1. A model
+that is not listed is recorded as `not_available` with a `value_unavailable`
+warning.
 
 ### Output
 
@@ -271,7 +294,7 @@ first Ctrl+C or Ctrl+Break exits 130 at once.
 Every run that gets past argument validation writes, in `--output-dir`:
 
 ```text
-<name>_<stamp>.json            the result document (results schema 1.1.0)
+<name>_<stamp>.json            the result document (results schema 1.2.0)
 <name>_<stamp>/latencies.csv   one row per measured iteration
 <name>_<stamp>/summary.csv     one row per trial, plus the aggregate row
 <name>_latest.json             a copy of the newest result for <name>
@@ -368,7 +391,7 @@ Output for the FP32 MobileNetV2 model (`run --model models\mobilenetv2\mobilenet
   "command": "run",
   "dry_run": true,
   "edgebench_version": "0.1.0",
-  "results_schema_version": "1.1.0",
+  "results_schema_version": "1.2.0",
   "model": {
     "path": "C:\\dev\\edgebench\\models\\mobilenetv2\\mobilenetv2_fp32_b1.onnx",
     "file_name": "mobilenetv2_fp32_b1.onnx",
@@ -592,7 +615,7 @@ Build
   git commit         ee9fffbb54e7e9574f513f4a4737c5c18555dd91 (dirty)
   build type         Release
   compiler           MSVC 19.42.34435.0
-  results schema     1.1.0
+  results schema     1.2.0
 
 System
   OS                 Windows 11 Home
@@ -714,7 +737,7 @@ to fail internally and that a test cannot provoke.
 | Session options rejected | `session_options_failed` | 3 | yes, `session_creation` | not triggerable |
 | Model is not a valid ONNX file | `session_creation_failed` (code e.g. `ORT_INVALID_PROTOBUF`) | 3 | yes, `session_creation` | `ExitPaths.InvalidModelExits3AndWritesAFailedResult`, `Cli.RunDryRunInvalidModelExits3WithOrtCode` |
 | Session creation fails on a later trial | as reported by ONNX Runtime | 3 | yes, `session_creation`, earlier trials kept | `FailurePaths.SessionCreationFailsOnTheSecondTrial` |
-| After a session is created, an ONNX Runtime/QNN module is loaded from outside the bundle directory (the directory of the loaded `onnxruntime.dll`) | `module_outside_bundle` | 4 | yes, `session_creation`, names each module and its path; `runtime.loaded_modules` lists it | `FailurePaths.ModuleOutsideTheBundleStopsTheRun` |
+| An ONNX Runtime/QNN module from outside the bundle directory (the directory of the loaded `onnxruntime.dll`) is loaded when the provider has been created, or after a session is created | `module_outside_bundle` | 4 | yes, `ep_registration` (already loaded when the run starts) or `session_creation`, names each module and its path; `runtime.loaded_modules` lists it | `FailurePaths.ModuleOutsideTheBundleStopsTheRun` (`ep_registration`), `QnnProviderNpu.ModulesAreCheckedAfterEveryQnnSessionCreation` (`session_creation`) |
 | Dynamic dimension, non-float32 input, output without fixed size | `dynamic_shape`, `unsupported_input_dtype`, `unsupported_output_dtype` | 2 | no | `Cli.RunUsageErrorFromTheModelWritesNothing`, `Cli.RunDryRunRejectsDynamicAndInt64Models` |
 | Model without inputs | `no_inputs` | 2 | no | not tested (no fixture) |
 | Model inputs/outputs cannot be read, buffers cannot be bound | `session_metadata_failed`, `binding_failed` | 3 | yes, `session_creation` | not triggerable |
@@ -754,6 +777,7 @@ log reports failed nodes; not triggerable),
 `background_cpu_load_high` (idle and during-trial samples;
 `FailurePaths.BackgroundLoadDuringATrialIsAWarning`), `trial_spread_high`
 (`FailurePaths.TrialSpreadIsAWarningInTheResultAndSummary`, `TrialSpread.*`),
+`batch_not_equivalent` (`BenchmarkModels.BatchEquivalenceComesFromTheReferenceSummary`),
 `power_state_changed`, `unknown_power_mode`, `value_unavailable`.
 
 `edgebench doctor`:

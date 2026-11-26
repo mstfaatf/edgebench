@@ -79,18 +79,25 @@ bool should_stop(const StopHook& hook, StopPoint point, int trial, int iteration
 }
 
 // Every ONNX Runtime / QNN module in the process must come from the directory of
-// the onnxruntime.dll that was loaded (the bundle). Checked after each session is
-// created, when execution providers have pulled in their libraries. On failure
-// the full module list goes into the result, so the foreign module is recorded.
-Result<void> check_loaded_modules(BenchmarkResult& result) {
+// the onnxruntime.dll that was loaded (the bundle). Checked after the provider was
+// created (its EP library registered) and after each session is created, when
+// execution providers have pulled in their libraries; every check is recorded
+// (verification_details.module_checks). On failure the full module list goes into
+// the result, so the foreign module is recorded.
+Result<void> check_loaded_modules(BenchmarkResult& result, const char* stage,
+                                  std::optional<int> trial_index) {
     const std::filesystem::path& dll = result.runtime.onnxruntime.dll_path;
     const std::filesystem::path bundle = dll.empty() ? executable_dir() : dll.parent_path();
     BundleModuleCheck check = check_bundle_modules(bundle);
+    result.execution.module_checks.push_back({stage, trial_index, check.outside});
     if (check.ok())
         return {};
     result.runtime.loaded_modules = std::move(check.modules);
     return check.result();
 }
+
+// The HTP backend library of the QNN EP, whose version resource is recorded.
+constexpr std::string_view kQnnHtpBackendFile = "QnnHtp.dll";
 
 // One trial: fresh session, warm-up, measured iterations. Stop requests are
 // honoured before and after session creation and between iterations (never
@@ -107,7 +114,9 @@ Result<TrialResult> run_trial(Provider& provider, const RunConfig& config, const
         return with_context(created.error(), where);
     std::unique_ptr<BenchSession> session = std::move(created).value();
     result.known.session = true;
-    if (Result<void> modules = check_loaded_modules(result); !modules)
+    if (Result<void> modules =
+            check_loaded_modules(result, "after_session_creation", st.trial_index);
+        !modules)
         return with_context(modules.error(), where);
     if (should_stop(hook, StopPoint::after_session, st.trial_index, 0)) {
         out.discarded_iterations = 0;
@@ -124,6 +133,11 @@ Result<TrialResult> run_trial(Provider& provider, const RunConfig& config, const
     if (st.sequence == 0) {
         // Snapshot while a session is alive: EP libraries can be unloaded with it.
         result.runtime.loaded_modules = list_ort_modules();
+        if (result.runtime.provider.qnn) {
+            if (const LoadedModule* htp =
+                    find_loaded_module(result.runtime.loaded_modules, kQnnHtpBackendFile))
+                result.runtime.qnn_backend_file_version = read_module_file_version(htp->path);
+        }
         result.batch_size = session->batch_size();
         result.model.inputs = session->inputs();
         result.model.outputs = session->outputs();
@@ -390,6 +404,11 @@ BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunCon
     if (r.runtime.provider.qnn)
         r.timing.session_init.ep_context_state = "cold";  // compiled from the graph, no cache
     if (!r.failure) {
+        if (Result<void> modules = check_loaded_modules(r, "after_provider_creation", std::nullopt);
+            !modules)
+            set_failure(r, modules.error(), "ep_registration");
+    }
+    if (!r.failure) {
         if (!r.graph && config.provider == ProviderKind::npu) {
             set_failure(r,
                         Error{ExitCode::usage_error, "invalid_onnx",
@@ -405,6 +424,8 @@ BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunCon
             } else {
                 r.compute_precision = precision.value();
                 r.model.precision_notes = precision_notes(r.model.precision, r.compute_precision);
+                r.effective_precision =
+                    effective_precision(config.provider, r.model.precision, r.compute_precision);
             }
         }
     }
@@ -509,6 +530,8 @@ BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunCon
             const std::string requested_ep(execution_provider_name(config.provider));
             r.execution.node_assignment = std::move(placement).value();
             r.known.placement = true;
+            if (r.execution.node_assignment.modules_checked_while_alive)
+                r.execution.module_checks.push_back({"placement_session", std::nullopt, {}});
             const NodeAssignment& p = r.execution.node_assignment;
             const bool all_on = p.all_on(requested_ep);
             const std::optional<QnnValidation>& qv = p.qnn_validation;
@@ -667,6 +690,35 @@ void finish_result(BenchmarkResult& r) {
         }
     }
 
+    // Batch equivalence, from the committed reference data (needs the batch size and
+    // the compute precision; recorded for runs that created a session).
+    if (r.known.session && r.batch_size > 0 && r.effective_precision) {
+        r.batch_equivalence =
+            lookup_batch_equivalence(r.model.file.path, r.model.file.sha256,
+                                     config.provider == ProviderKind::npu ? "npu" : "cpu",
+                                     r.effective_precision->compute, r.batch_size);
+        const BatchEquivalence& be = *r.batch_equivalence;
+        if (be.equivalent_to_b1 == false) {
+            r.warnings.push_back(
+                {"batch_not_equivalent",
+                 "At batch size " + std::to_string(r.batch_size) +
+                     " this model computes outputs "
+                     "that differ from its batch-1 file's on " +
+                     std::string(config.provider == ProviderKind::npu ? "the NPU" : "the CPU") +
+                     " (" + r.effective_precision->compute +
+                     " compute; from the reference outputs): this result measures a different "
+                     "computation and must not be averaged or compared with batch-1 results as "
+                     "the same one.",
+                 std::string("/execution/batch_equivalence/equivalent_to_b1")});
+        } else if (!be.equivalent_to_b1) {
+            r.warnings.push_back(
+                {"value_unavailable",
+                 "Whether batch size " + std::to_string(r.batch_size) +
+                     " computes the same outputs as batch 1 is unknown: " + be.reason + ".",
+                 std::string("/execution/batch_equivalence/equivalent_to_b1")});
+        }
+    }
+
     // Values that could not be determined.
     if (!power_at_start.source)
         add_unavailable(r, "/system/power/source", "The power source could not be determined.");
@@ -705,6 +757,12 @@ void finish_result(BenchmarkResult& r) {
                         "The QNN SDK version is not read from the backend.");
         add_unavailable(r, "/runtime/qnn/backend_build",
                         "The QNN backend build is not read from the backend.");
+        add_unavailable(r, "/runtime/qnn/htp_arch",
+                        "The HTP architecture is not read from the backend.");
+        add_unavailable(r, "/runtime/qnn/soc_model", "The SoC model is not read from the backend.");
+        if (r.known.session && !r.runtime.qnn_backend_file_version)
+            add_unavailable(r, "/runtime/qnn/backend_file_version",
+                            "The version resource of the loaded QnnHtp.dll could not be read.");
     }
     if (!t.trials.empty() && !t.first_inference_ms) {
         add_unavailable(r, "/timing/first_inference_ms",
@@ -746,6 +804,15 @@ std::string format_summary(const BenchmarkResult& r) {
         << c.warmup << " warm-up, " << c.cooldown_ms << " ms cooldown), batch size " << r.batch_size
         << "\n";
     out << "Input       " << schema_name(c.input) << "\n";
+    if (r.batch_equivalence && r.batch_size > 1) {
+        const BatchEquivalence& be = *r.batch_equivalence;
+        out << "Batch       " << r.batch_size << " vs 1: "
+            << (!be.equivalent_to_b1 ? std::string("unknown (no reference data)")
+                : *be.equivalent_to_b1
+                    ? std::string("same per-item outputs (reference outputs)")
+                    : std::string("DIFFERENT per-item outputs (reference outputs)"))
+            << "\n";
+    }
 
     const TimingResult& t = r.timing;
     out << "Session     create ms:";

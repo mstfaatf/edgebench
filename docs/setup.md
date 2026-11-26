@@ -115,8 +115,8 @@ benchmark result files against the [results schema](results-schema.md):
 `benchmarks/results/published/` holds no benchmark result files yet; the
 accuracy and anomaly-detection results in `published/accuracy/` have their own
 schemas, so this lists them as skipped (exit code 0); they are checked with
-`scripts\validate_accuracy.py`. `docs\examples\v1.0.0` and
-`docs\examples\v1.1.0` hold example results that validate. The validator picks
+`scripts\validate_accuracy.py`. `docs\examples\v1.0.0`, `docs\examples\v1.1.0`
+and `docs\examples\v1.2.0` hold example results that validate. The validator picks
 the schema from each file's `schema_version`, reports errors and warnings
 separately, and with `--strict` also fails on warnings. Its tests need only
 `jsonschema` and `pytest` and run on any platform:
@@ -293,8 +293,10 @@ See [autoencoder.md](autoencoder.md).
 entry, and the lineage ([models.md](models.md#recipes-and-the-manifest)).
 `make_references.py` writes the reference outputs of all 66 files (CPU, and NPU
 for the INT8 files) to `models/references/`, used by the C++ `ReferenceModels`
-tests (label `models`); `make_references.py --check` checks them against the
-model files. See [models.md](models.md#reference-outputs).
+tests (label `models`), and the committed batch-equivalence summary
+`models/batch_equivalence.json` (`--batch-equivalence` rewrites only the
+summary); `make_references.py --check` checks both against the model files.
+See [models.md](models.md#reference-outputs).
 
 ### 7. Measure accuracy
 

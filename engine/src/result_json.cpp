@@ -1,5 +1,6 @@
 #include "edgebench/result_json.hpp"
 
+#include <algorithm>
 #include <sstream>
 
 namespace edgebench {
@@ -54,12 +55,39 @@ json error_json(const BenchmarkResult& r) {
     if (!r.failure)
         return nullptr;
     const Error& e = r.failure->error;
+    json unsupported = nullptr;
+    if (e.unsupported_nodes) {
+        unsupported = json::array();
+        for (const NamedNode& n : *e.unsupported_nodes)
+            unsupported.push_back({{"name", n.name}, {"op_type", n.op_type}});
+    }
     return {
         {"stage", r.failure->stage},
         {"message", e.message},
         {"code", e.ort_error_name ? json(*e.ort_error_name)
                                   : (e.kind.empty() ? json(nullptr) : json(e.kind))},
+        {"kind", e.kind.empty() ? json(nullptr) : json(e.kind)},
+        {"unsupported_nodes", unsupported},
     };
+}
+
+json init_summary_json(std::vector<double> values) {
+    if (values.empty())
+        return nullptr;
+    std::sort(values.begin(), values.end());
+    return {{"count", values.size()},
+            {"median_ms", nearest_rank(values, 50)},
+            {"min_ms", values.front()},
+            {"max_ms", values.back()}};
+}
+
+// Nodes ONNX Runtime places on the QNN EP: each one is a fused partition.
+std::optional<int> qnn_partition_count(const BenchmarkResult& r) {
+    if (!r.known.placement)
+        return std::nullopt;
+    const auto& by_ep = r.execution.node_assignment.nodes_by_ep;
+    const auto it = by_ep.find("QNNExecutionProvider");
+    return it == by_ep.end() ? 0 : it->second;
 }
 
 json runtime_json(const BenchmarkResult& r) {
@@ -92,10 +120,23 @@ json runtime_json(const BenchmarkResult& r) {
     }
     json qnn = nullptr;
     if (r.known.provider && p.qnn) {
+        json file_version = nullptr;
+        if (const std::optional<ModuleFileVersion>& v = r.runtime.qnn_backend_file_version) {
+            file_version = {{"module_path", path_to_utf8(v->module_path)},
+                            {"product_version", opt(v->product_version)},
+                            {"file_version", opt(v->file_version)},
+                            {"source", "loaded_module_version_resource"}};
+        }
         qnn = {{"sdk_version", opt(p.qnn->sdk_version)},
                {"backend", p.qnn->backend},
                {"backend_path", p.qnn->backend_path},
-               {"backend_build", opt(p.qnn->backend_build)}};
+               {"backend_build", opt(p.qnn->backend_build)},
+               {"backend_file_version", file_version},
+               {"htp_arch", opt(p.qnn->htp_arch)},
+               {"soc_model", opt(p.qnn->soc_model)},
+               {"partition_count", opt(qnn_partition_count(r))},
+               {"unlisted_ep_options",
+                p.qnn->unlisted_options_default ? json("ep_default") : json(nullptr)}};
     }
     json modules = json::array();
     for (const LoadedModule& m : r.runtime.loaded_modules)
@@ -162,15 +203,14 @@ json model_json(const BenchmarkResult& r) {
     };
 }
 
-// The NPU runs without an EP context cache for now: recorded as disabled. The
-// CPU EP has none (null).
+// The NPU runs without an EP context cache for now: recorded as disabled (mode
+// off). The CPU EP has none (null).
 json ep_context_cache_json(const RunConfig& c) {
     if (c.provider != ProviderKind::npu)
         return nullptr;
-    return {{"enabled", false},
-            {"cache_file", nullptr},
-            {"state", "disabled"},
-            {"files", json::array()},
+    return {{"enabled", false},        {"cache_file", nullptr}, {"state", "disabled"},
+            {"files", json::array()},  {"mode", "off"},         {"key_id", nullptr},
+            {"context_path", nullptr}, {"hit", nullptr},        {"verified_equal_outputs", nullptr},
             {"key", nullptr}};
 }
 
@@ -182,9 +222,46 @@ json qnn_validation_json(const std::optional<QnnValidation>& v) {
         passes.push_back({{"passed_nodes", p.passed_nodes}, {"failed_nodes", p.failed_nodes}});
     json rejected = json::array();
     for (const QnnRejectedNode& n : v->rejected_nodes)
-        rejected.push_back(
-            {{"op_type", n.op_type}, {"node_name", n.node_name}, {"reason", opt(n.reason)}});
+        rejected.push_back({{"op_type", n.op_type},
+                            {"node_name", n.node_name},
+                            {"reason", opt(n.reason)},
+                            {"node_index", opt(n.node_index)}});
     return {{"passes", passes}, {"rejected_nodes", rejected}};
+}
+
+json verification_details_json(const BenchmarkResult& r, const std::string& summary) {
+    json passes = nullptr;
+    if (r.known.placement && r.execution.node_assignment.qnn_validation) {
+        passes = json::array();
+        for (const QnnValidationPass& p : r.execution.node_assignment.qnn_validation->passes)
+            passes.push_back({{"passed_units_by_op", p.passed_units_by_op},
+                              {"failed_units_by_op", p.failed_units_by_op}});
+    }
+    json checks = json::array();
+    for (const ModuleCheckpoint& c : r.execution.module_checks) {
+        json outside = json::array();
+        for (const LoadedModule& m : c.outside)
+            outside.push_back({{"name", m.name}, {"path", path_to_utf8(m.path)}});
+        checks.push_back({{"stage", c.stage},
+                          {"trial_index", opt(c.trial_index)},
+                          {"modules_outside_bundle", outside}});
+    }
+    return {{"summary", summary}, {"qnn_validation_passes", passes}, {"module_checks", checks}};
+}
+
+json effective_precision_json(const BenchmarkResult& r) {
+    if (!r.effective_precision)
+        return nullptr;
+    const EffectivePrecision& p = *r.effective_precision;
+    return {{"stored", p.stored}, {"compute", p.compute}, {"source", p.source}};
+}
+
+json batch_equivalence_json(const BenchmarkResult& r) {
+    if (!r.batch_equivalence)
+        return nullptr;
+    const BatchEquivalence& b = *r.batch_equivalence;
+    return {
+        {"equivalent_to_b1", opt(b.equivalent_to_b1)}, {"basis", b.basis}, {"reference_batch", 1}};
 }
 
 json config_json(const BenchmarkResult& r) {
@@ -226,9 +303,12 @@ json execution_json(const BenchmarkResult& r) {
         return {
             {"full_device_execution_verified", r.execution.full_device_execution_verified},
             {"verification_method", na.verification_method},
-            {"verification_details", r.execution.verification_details},
+            {"verification_details",
+             verification_details_json(r, r.execution.verification_details)},
             {"node_assignment", {{"total_nodes", na.total_nodes}, {"nodes_by_ep", na.nodes_by_ep}}},
             {"qnn_validation", qnn_validation_json(na.qnn_validation)},
+            {"effective_precision", effective_precision_json(r)},
+            {"batch_equivalence", batch_equivalence_json(r)},
         };
     }
     if (!r.known.session)
@@ -236,9 +316,12 @@ json execution_json(const BenchmarkResult& r) {
     return {
         {"full_device_execution_verified", nullptr},
         {"verification_method", nullptr},
-        {"verification_details", "Node placement was not recorded because the run failed."},
+        {"verification_details",
+         verification_details_json(r, "Node placement was not recorded because the run failed.")},
         {"node_assignment", nullptr},
         {"qnn_validation", nullptr},
+        {"effective_precision", effective_precision_json(r)},
+        {"batch_equivalence", batch_equivalence_json(r)},
     };
 }
 
@@ -247,8 +330,14 @@ json timing_json(const BenchmarkResult& r) {
     if (t.trials.empty())
         return nullptr;
     json trials = json::array();
-    for (const TrialResult& trial : t.trials)
-        trials.push_back({{"trial_index", trial.trial_index}, {"stats", stats_json(trial.stats)}});
+    for (const TrialResult& trial : t.trials) {
+        trials.push_back({{"trial_index", trial.trial_index},
+                          {"stats", stats_json(trial.stats)},
+                          {"session_init",
+                           {{"cold_ms", trial.session_create_ms},
+                            {"context_build_ms", nullptr},
+                            {"cached_init_ms", nullptr}}}});
+    }
     json aggregate = nullptr;
     if (t.aggregate) {
         const TrialVariation& v = t.aggregate->trial_variation;
@@ -270,12 +359,17 @@ json timing_json(const BenchmarkResult& r) {
           {"ep_context_state", si.ep_context_state},
           {"cold_ms", si.cold_ms},
           {"context_build_ms", opt(si.context_build_ms)},
-          {"cached_ms", si.cached_ms ? json(*si.cached_ms) : json(nullptr)}}},
+          {"cached_ms", si.cached_ms ? json(*si.cached_ms) : json(nullptr)},
+          {"summary",
+           {{"cold_ms", init_summary_json(si.cold_ms)},
+            {"context_build_ms", nullptr},
+            {"cached_init_ms", nullptr}}}}},
         {"first_inference_ms", opt(t.first_inference_ms)},
         {"trials", trials},
         {"aggregate", aggregate},
         {"scope", t.scope},
         {"accelerator", nullptr},
+        {"profiled_pass", nullptr},
     };
 }
 

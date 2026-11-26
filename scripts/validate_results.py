@@ -4,8 +4,10 @@ Each file is checked against the schema of the version it declares in
 schema_version (schemas/benchmark-result.v<version>.schema.json), then against
 consistency rules that JSON Schema cannot express (percentile ordering,
 sample-count thresholds, throughput vs. mean latency, trial counts vs. the run
-configuration, the raw latency file, and for 1.1.0 the profiling, precision,
-EP context cache and loaded-module rules). See docs/results-schema.md.
+configuration, the raw latency file, for 1.1.0 the profiling, precision,
+EP context cache and loaded-module rules, and for 1.2.0 the effective precision,
+unsupported node, batch equivalence, cache and profiled-pass rules). See
+docs/results-schema.md.
 
 Problems are errors or warnings. A file with errors fails; a file with only
 warnings passes unless --strict is given.
@@ -342,6 +344,24 @@ V1_1_RULES = {
     "missing_1_1_0_key": WARNING,
 }
 
+# Consistency rules for schema 1.2.0 and later.
+V1_2_RULES = {
+    "npu_compute_fp32": ERROR,
+    "fp16_compute_without_option": ERROR,
+    "cpu_compute_not_stored": ERROR,
+    "effective_precision_stored_mismatch": ERROR,
+    "unsupported_nodes_mismatch": ERROR,
+    "batch_not_equivalent_unflagged": ERROR,
+    "cache_hit_without_cache": ERROR,
+    "cache_outputs_not_verified": ERROR,
+    "profiled_pass_without_accelerator_ep": ERROR,
+    "qnn_partition_count_mismatch": ERROR,
+    "missing_1_2_0_key": WARNING,
+}
+
+BATCH_NOT_EQUIVALENT_WARNING = "batch_not_equivalent"
+STRICT_REFUSAL_KIND = "strict_mode_refusal"
+
 
 def _resolve(node: dict[str, Any], root: dict[str, Any]) -> dict[str, Any]:
     while isinstance(node, dict) and "$ref" in node:
@@ -394,14 +414,33 @@ def missing_keys(doc: Any, schema: dict[str, Any], root: dict[str, Any],
     return found
 
 
+_SCHEMA_CACHE: dict[str, dict[str, Any]] = {}
+
+
+def _schema_of_version(version: str) -> dict[str, Any]:
+    if version not in _SCHEMA_CACHE:
+        _SCHEMA_CACHE[version] = load_schema(schema_path(version))
+    return _SCHEMA_CACHE[version]
+
+
 def missing_key_issues(doc: dict[str, Any], schema: dict[str, Any]) -> list[Issue]:
     """The C++ engine writes every key of the version it declares; other writers may
-    omit keys added in a minor version (they mean null)."""
+    omit keys added in a minor version (they mean null). Each missing key is reported
+    with the version that added it (missing_1_1_0_key, missing_1_2_0_key)."""
     if doc["tool"].get("implementation") != "cpp":
         return []
-    return [Issue(p, "key defined by the 1.1.0 schema is missing; the C++ engine writes every key",
-                  V1_1_RULES["missing_1_1_0_key"], "missing_1_1_0_key")
-            for p in missing_keys(doc, schema, schema)]
+    missing = missing_keys(doc, schema, schema)
+    from_1_1 = set(missing)
+    if version_key(doc["schema_version"]) >= (1, 2, 0):
+        older = _schema_of_version("1.1.0")
+        from_1_1 = set(missing_keys(doc, older, older))
+    issues = []
+    for p in missing:
+        version, code = ("1.1.0", "missing_1_1_0_key") if p in from_1_1 else ("1.2.0", "missing_1_2_0_key")
+        severity = V1_1_RULES.get(code) or V1_2_RULES[code]
+        issues.append(Issue(p, f"key defined by the {version} schema is missing; the C++ engine "
+                               "writes every key", severity, code))
+    return issues
 
 
 def v1_1_issues(doc: dict[str, Any]) -> list[Issue]:
@@ -498,6 +537,13 @@ def v1_1_issues(doc: dict[str, Any]) -> list[Issue]:
             if init.get(key) is not None and not cache_on:
                 report(f"/timing/session_init/{key}",
                       "must be null when no EP context cache is enabled", "session_init_not_applicable")
+        # Per-trial values (1.2.0) follow the same rule.
+        for i, trial in enumerate(timing["trials"]):
+            for key in ("context_build_ms", "cached_init_ms"):
+                if (trial.get("session_init") or {}).get(key) is not None and not cache_on:
+                    report(f"/timing/trials/{i}/session_init/{key}",
+                          "must be null when no EP context cache is enabled",
+                          "session_init_not_applicable")
         if init.get("context_build_ms") is not None and state == "loaded":
             report("/timing/session_init/context_build_ms",
                   "must be null when an existing cache was loaded (nothing was built)",
@@ -518,6 +564,96 @@ def v1_1_issues(doc: dict[str, Any]) -> list[Issue]:
     return issues
 
 
+def v1_2_issues(doc: dict[str, Any]) -> list[Issue]:
+    """Rules for fields added in schema 1.2.0. Fields that are absent are not checked."""
+    issues: list[Issue] = []
+
+    def report(path: str, message: str, code: str) -> None:
+        issues.append(Issue(path, message, V1_2_RULES[code], code))
+
+    config, timing, runtime, execution = doc["config"], doc["timing"], doc["runtime"], doc["execution"]
+    device = config["requested"]["device_type"]
+    provider = runtime.get("execution_provider") if runtime is not None else None
+    ep_name = provider["name"] if provider is not None else None
+    cpu_run = device == "CPU" or ep_name == "CPUExecutionProvider"
+    execution = execution or {}
+
+    # Effective precision.
+    precision = execution.get("effective_precision")
+    if precision is not None:
+        base = "/execution/effective_precision"
+        stored, compute, source = precision["stored"], precision["compute"], precision["source"]
+        if doc["model"] is not None and stored != doc["model"]["stored_precision"]:
+            report(f"{base}/stored", f"stored {stored!r} differs from model.stored_precision "
+                                     f"{doc['model']['stored_precision']!r}",
+                   "effective_precision_stored_mismatch")
+        if device == "NPU" and compute == "fp32":
+            report(f"{base}/compute", "the NPU has no FP32 compute; an FP32 model runs in FP16 "
+                                      "(enable_htp_fp16_precision) or not at all", "npu_compute_fp32")
+        if compute == "fp16" and stored == "fp32" and (
+                source != "enable_htp_fp16_precision"
+                or config["ep_options"].get("enable_htp_fp16_precision") != "1"):
+            report(f"{base}/source", "FP16 compute of an FP32 model requires source "
+                                     "'enable_htp_fp16_precision' and that EP option set to '1' "
+                                     f"(source {source!r}, option "
+                                     f"{config['ep_options'].get('enable_htp_fp16_precision')!r})",
+                   "fp16_compute_without_option")
+        if device == "CPU" and compute != stored:
+            report(f"{base}/compute", f"a CPU run computes in the stored precision ({stored!r}), "
+                                      f"not {compute!r}", "cpu_compute_not_stored")
+
+    # Unsupported nodes: exactly on strict-mode refusals.
+    error = doc.get("error")
+    if error is not None:
+        refusal = error.get("kind") == STRICT_REFUSAL_KIND
+        nodes = error.get("unsupported_nodes")
+        if refusal and nodes is None:
+            report("/error/unsupported_nodes", "a strict-mode refusal must list the unsupported "
+                                               "nodes (an empty list if none were named)",
+                   "unsupported_nodes_mismatch")
+        if not refusal and nodes is not None:
+            report("/error/unsupported_nodes", f"must be null unless error.kind is "
+                                               f"{STRICT_REFUSAL_KIND!r} (got {error.get('kind')!r})",
+                   "unsupported_nodes_mismatch")
+
+    # Batch equivalence.
+    equivalence = execution.get("batch_equivalence")
+    if equivalence is not None and equivalence["equivalent_to_b1"] is False and not any(
+            w["code"] == BATCH_NOT_EQUIVALENT_WARNING for w in doc["warnings"]):
+        report("/execution/batch_equivalence/equivalent_to_b1",
+              f"a result that is not equivalent to batch 1 needs a '{BATCH_NOT_EQUIVALENT_WARNING}' "
+              "warning", "batch_not_equivalent_unflagged")
+
+    # EP context cache.
+    cache = config["ep_context_cache"]
+    if cache is not None:
+        if cache.get("hit") is True and not cache["enabled"]:
+            report("/config/ep_context_cache/hit", "a cache hit requires an enabled cache",
+                   "cache_hit_without_cache")
+        if cache.get("mode") == "use" and cache.get("verified_equal_outputs") is None:
+            report("/config/ep_context_cache/verified_equal_outputs",
+                  "a run that uses an existing cache must record whether cached and uncached "
+                  "sessions give the same outputs", "cache_outputs_not_verified")
+
+    # The profiled pass measures an accelerator.
+    profiled = timing.get("profiled_pass") if timing is not None else None
+    if profiled is not None and profiled["enabled"] and cpu_run:
+        report("/timing/profiled_pass", f"profiled accelerator pass recorded for a "
+                                        f"{ep_name or device} run; it requires an accelerator "
+                                        "execution provider", "profiled_pass_without_accelerator_ep")
+
+    # QNN partitions: the QNN EP's node count in the placement.
+    qnn = runtime.get("qnn") if runtime is not None else None
+    assignment = execution.get("node_assignment")
+    if qnn is not None and qnn.get("partition_count") is not None and assignment is not None:
+        placed = assignment["nodes_by_ep"].get("QNNExecutionProvider", 0)
+        if qnn["partition_count"] != placed:
+            report("/runtime/qnn/partition_count",
+                  f"{qnn['partition_count']} partitions, but node_assignment places {placed} "
+                  "nodes on QNNExecutionProvider", "qnn_partition_count_mismatch")
+    return issues
+
+
 def consistency_issues(doc: dict[str, Any], result_path: Path | None = None,
                        schema: dict[str, Any] | None = None) -> list[Issue]:
     issues = []
@@ -527,6 +663,8 @@ def consistency_issues(doc: dict[str, Any], result_path: Path | None = None,
     issues += raw_issues(doc, result_path)
     if version_key(doc["schema_version"]) >= (1, 1, 0):
         issues += v1_1_issues(doc)
+        if version_key(doc["schema_version"]) >= (1, 2, 0):
+            issues += v1_2_issues(doc)
         if schema is not None:
             issues += missing_key_issues(doc, schema)
     return issues

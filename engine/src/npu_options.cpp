@@ -90,4 +90,20 @@ std::optional<std::string> precision_notes(const ModelPrecision& stored,
     return std::nullopt;
 }
 
+std::optional<EffectivePrecision> effective_precision(
+    ProviderKind provider, const ModelPrecision& stored,
+    const std::optional<std::string>& compute_precision) {
+    const std::string& s = stored.stored_precision;
+    if (provider == ProviderKind::cpu) {
+        if (s != "fp32" && s != "fp16" && s != "int8")
+            return std::nullopt;
+        return EffectivePrecision{s, s, "model"};
+    }
+    if (!compute_precision)
+        return std::nullopt;
+    const bool fp16_of_fp32 = *compute_precision == "fp16" && s == "fp32";
+    return EffectivePrecision{s, *compute_precision,
+                              fp16_of_fp32 ? "enable_htp_fp16_precision" : "model"};
+}
+
 }  // namespace edgebench

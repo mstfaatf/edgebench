@@ -1,0 +1,12 @@
+{
+  "description": "A cache hit recorded although the EP context cache is off.",
+  "base": "docs/examples/v1.2.0/example-npu-int8-b8-not-equivalent.json",
+  "set": {
+    "/config/ep_context_cache/hit": true
+  },
+  "expect": {
+    "severity": "error",
+    "code": "cache_hit_without_cache",
+    "path": "/config/ep_context_cache/hit"
+  }
+}

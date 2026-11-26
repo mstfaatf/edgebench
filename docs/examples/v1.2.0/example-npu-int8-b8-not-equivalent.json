@@ -1,0 +1,498 @@
+{
+  "schema_version": "1.2.0",
+  "run_id": "00000000-0000-0000-0000-000000000000",
+  "timestamp_utc": "2026-11-26T00:21:48.763Z",
+  "label": null,
+  "status": "success",
+  "error": null,
+  "warnings": [
+    {
+      "code": "illustrative_example",
+      "message": "Example document: a real short NPU run (2 x 20 iterations, not a benchmark) of mobilenetv2_int8_b8.onnx, whose batch-8 outputs differ from the batch-1 file's on the NPU; run_id replaced by the nil UUID and the raw latency file omitted.",
+      "path": null
+    },
+    {
+      "code": "background_cpu_load_high",
+      "message": "Background CPU load from other processes reached 10.7% during trial 1 of 2 (this process's own CPU time excluded); other processes may have distorted the measurement.",
+      "path": null
+    },
+    {
+      "code": "batch_not_equivalent",
+      "message": "At batch size 8 this model computes outputs that differ from its batch-1 file's on the NPU (int8 compute; from the reference outputs): this result measures a different computation and must not be averaged or compared with batch-1 results as the same one.",
+      "path": "/execution/batch_equivalence/equivalent_to_b1"
+    },
+    {
+      "code": "value_unavailable",
+      "message": "Background CPU load was not sampled (--load-sample-ms 0).",
+      "path": "/system/load"
+    },
+    {
+      "code": "value_unavailable",
+      "message": "The device driver version could not be determined.",
+      "path": "/runtime/ep_device/driver_version"
+    },
+    {
+      "code": "value_unavailable",
+      "message": "The QNN SDK version is not read from the backend.",
+      "path": "/runtime/qnn/sdk_version"
+    },
+    {
+      "code": "value_unavailable",
+      "message": "The QNN backend build is not read from the backend.",
+      "path": "/runtime/qnn/backend_build"
+    },
+    {
+      "code": "value_unavailable",
+      "message": "The HTP architecture is not read from the backend.",
+      "path": "/runtime/qnn/htp_arch"
+    },
+    {
+      "code": "value_unavailable",
+      "message": "The SoC model is not read from the backend.",
+      "path": "/runtime/qnn/soc_model"
+    }
+  ],
+  "tool": {
+    "name": "edgebench",
+    "version": "0.1.0",
+    "git_commit": "6815b055119f40b2d9ba0073a595062f22172f6c",
+    "git_dirty": true,
+    "build_type": "Release",
+    "compiler": "MSVC 19.42.34435.0",
+    "implementation": "cpp"
+  },
+  "system": {
+    "os": {
+      "name": "Windows 11 Home",
+      "version": "25H2",
+      "build": "26200.9974",
+      "architecture": "arm64"
+    },
+    "process_architecture": "arm64",
+    "cpu": {
+      "name": "Snapdragon(R) X 10-core X1P64100 @ 3.40 GHz",
+      "physical_cores": 10,
+      "logical_processors": 10
+    },
+    "memory_total_bytes": 16757260288,
+    "device": {
+      "manufacturer": "Microsoft Corporation",
+      "model": "Microsoft Surface Laptop, 7th Edition"
+    },
+    "power": {
+      "source": "ac",
+      "power_mode": "Balanced",
+      "power_plan": "Balanced",
+      "battery_percent": 80,
+      "battery_saver": false
+    },
+    "load": null
+  },
+  "runtime": {
+    "onnxruntime": {
+      "version": "1.32.0",
+      "library_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime.dll",
+      "api_version": 32,
+      "load_check": "full_path_verified"
+    },
+    "execution_provider": {
+      "name": "QNNExecutionProvider",
+      "version": "2.8.0",
+      "library_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll"
+    },
+    "qnn": {
+      "sdk_version": null,
+      "backend": "htp",
+      "backend_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtp.dll",
+      "backend_build": null,
+      "backend_file_version": {
+        "module_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtp.dll",
+        "product_version": "2.52.0.261104115025",
+        "file_version": "2.52.0.0",
+        "source": "loaded_module_version_resource"
+      },
+      "htp_arch": null,
+      "soc_model": null,
+      "partition_count": 1,
+      "unlisted_ep_options": "ep_default"
+    },
+    "ep_device": {
+      "ep_name": "QNNExecutionProvider",
+      "ep_vendor": "Qualcomm",
+      "device_type": "NPU",
+      "vendor": "",
+      "vendor_id": 1297040209,
+      "device_id": 1093682224,
+      "driver_version": null,
+      "metadata": {
+        "LUID": "78645"
+      },
+      "selection": {
+        "method": "by_device_type",
+        "candidate_count": 1
+      }
+    },
+    "loaded_modules": [
+      {
+        "name": "QnnHtp.dll",
+        "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtp.dll"
+      },
+      {
+        "name": "QnnHtpPrepare.dll",
+        "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtpPrepare.dll"
+      },
+      {
+        "name": "QnnHtpV73Stub.dll",
+        "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtpV73Stub.dll"
+      },
+      {
+        "name": "onnxruntime.dll",
+        "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime.dll"
+      },
+      {
+        "name": "onnxruntime_providers_qnn.dll",
+        "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll"
+      },
+      {
+        "name": "onnxruntime_providers_shared.dll",
+        "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_shared.dll"
+      }
+    ],
+    "ep_devices": [
+      {
+        "ep_name": "CPUExecutionProvider",
+        "ep_vendor": "Microsoft",
+        "device_type": "CPU",
+        "vendor": "Qualcomm",
+        "vendor_id": 1297040209,
+        "device_id": 7,
+        "metadata": {
+          "Description": "Snapdragon(R) X 10-core X1P64100 @ 3.42 GHz"
+        },
+        "ep_metadata": {
+          "version": "1.32.0"
+        }
+      },
+      {
+        "ep_name": "QNNExecutionProvider",
+        "ep_vendor": "Qualcomm",
+        "device_type": "NPU",
+        "vendor": "",
+        "vendor_id": 1297040209,
+        "device_id": 1093682224,
+        "metadata": {
+          "LUID": "78645"
+        },
+        "ep_metadata": {
+          "library_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll",
+          "version": "2.8.0"
+        }
+      },
+      {
+        "ep_name": "QNNExecutionProvider",
+        "ep_vendor": "Qualcomm",
+        "device_type": "GPU",
+        "vendor": "",
+        "vendor_id": 1297040209,
+        "device_id": 909329200,
+        "metadata": {
+          "Description": "Qualcomm(R) Adreno(TM) X1-85 GPU",
+          "Discrete": "0",
+          "DxgiAdapterNumber": "0",
+          "DxgiHighPerformanceIndex": "0",
+          "DxgiVideoMemory": "128 MB",
+          "LUID": "77477"
+        },
+        "ep_metadata": {
+          "library_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll",
+          "version": "2.8.0"
+        }
+      }
+    ]
+  },
+  "model": {
+    "name": "mobilenetv2_int8_b8",
+    "file_name": "mobilenetv2_int8_b8.onnx",
+    "sha256": "622f0adcba586dfa787a712bd59d1d17bf590fa56a5c1ce980cd61ee03504ec2",
+    "size_bytes": 3888242,
+    "opset": 17,
+    "ir_version": 8,
+    "stored_precision": "int8",
+    "inputs": [
+      {
+        "name": "input",
+        "dtype": "float32",
+        "shape": [
+          8,
+          3,
+          224,
+          224
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "logits",
+        "dtype": "float32",
+        "shape": [
+          8,
+          1000
+        ]
+      }
+    ],
+    "source": {
+      "library": null,
+      "identifier": null,
+      "export_tool": "onnx.quantize 0.1.0"
+    },
+    "quantization": {
+      "method": "static",
+      "format": "qdq",
+      "activation_dtype": "uint8",
+      "weight_dtype": "int8",
+      "calibration": {
+        "dataset": "Imagenette calibration split (datasets/imagenette/calibration.tsv)",
+        "sample_count": 200
+      },
+      "tool": "onnxruntime.quantization 1.32.0 (qnn_preprocess_model, get_qnn_qdq_config, quantize_static)"
+    },
+    "precision_notes": null,
+    "normalization": "external"
+  },
+  "config": {
+    "requested": {
+      "execution_provider": "QNNExecutionProvider",
+      "device_type": "NPU",
+      "compute_precision": "int8"
+    },
+    "strict_mode": true,
+    "batch_size": 8,
+    "input": {
+      "kind": "random",
+      "constant_value": null,
+      "seed": 0,
+      "dataset": null,
+      "preprocessing": "No preprocessing: inputs are generated (random values in [0, 1) from SplitMix64 (seed 0)) once per session, before timing, and reused for every iteration."
+    },
+    "warmup_iterations": 2,
+    "measured_iterations": 20,
+    "trials": 2,
+    "run_api": "sync",
+    "ort_execution_mode": "sequential",
+    "intra_op_threads": 4,
+    "inter_op_threads": null,
+    "graph_optimization_level": "enable_all",
+    "ep_options": {
+      "backend_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtp.dll",
+      "htp_performance_mode": "burst"
+    },
+    "session_config": {
+      "ep.context_enable": "0",
+      "session.disable_cpu_ep_fallback": "1"
+    },
+    "ep_context_cache": {
+      "enabled": false,
+      "cache_file": null,
+      "state": "disabled",
+      "files": [],
+      "mode": "off",
+      "key_id": null,
+      "context_path": null,
+      "hit": null,
+      "verified_equal_outputs": null,
+      "key": null
+    },
+    "run_binding": "iobinding_preallocated",
+    "profiling": {
+      "ort": false,
+      "qnn_level": "off"
+    }
+  },
+  "execution": {
+    "full_device_execution_verified": true,
+    "verification_method": "combined",
+    "verification_details": {
+      "summary": "Node placement from ONNX Runtime's verbose session log, and node validation from the QNN execution provider's log of the same session, recorded in a separate session with the same options after the timed trials. QNN partitions (fused nodes on QNNExecutionProvider): 1.",
+      "qnn_validation_passes": [
+        {
+          "passed_units_by_op": {
+            "Add": 10,
+            "Conv": 52,
+            "DequantizeLinear": 1,
+            "Flatten": 1,
+            "Gemm": 1,
+            "GlobalAveragePool": 1,
+            "QuantizeLinear": 1
+          },
+          "failed_units_by_op": {}
+        },
+        {
+          "passed_units_by_op": {
+            "Add": 10,
+            "Conv": 52,
+            "DequantizeLinear": 1,
+            "Flatten": 1,
+            "Gemm": 1,
+            "GlobalAveragePool": 1,
+            "QuantizeLinear": 1,
+            "Transpose": 2
+          },
+          "failed_units_by_op": {}
+        }
+      ],
+      "module_checks": [
+        {
+          "stage": "after_provider_creation",
+          "trial_index": null,
+          "modules_outside_bundle": []
+        },
+        {
+          "stage": "after_session_creation",
+          "trial_index": 0,
+          "modules_outside_bundle": []
+        },
+        {
+          "stage": "after_session_creation",
+          "trial_index": 1,
+          "modules_outside_bundle": []
+        },
+        {
+          "stage": "placement_session",
+          "trial_index": null,
+          "modules_outside_bundle": []
+        }
+      ]
+    },
+    "node_assignment": {
+      "total_nodes": 1,
+      "nodes_by_ep": {
+        "QNNExecutionProvider": 1
+      }
+    },
+    "qnn_validation": {
+      "passes": [
+        {
+          "passed_nodes": 313,
+          "failed_nodes": 0
+        },
+        {
+          "passed_nodes": 319,
+          "failed_nodes": 0
+        }
+      ],
+      "rejected_nodes": []
+    },
+    "effective_precision": {
+      "stored": "int8",
+      "compute": "int8",
+      "source": "model"
+    },
+    "batch_equivalence": {
+      "equivalent_to_b1": false,
+      "basis": "reference_outputs",
+      "reference_batch": 1
+    }
+  },
+  "timing": {
+    "timer": {
+      "source": "std::chrono::steady_clock",
+      "resolution_ns": 100.0
+    },
+    "percentile_method": "nearest_rank",
+    "session_init": {
+      "session_create_ms": 2831.2508,
+      "ep_context_state": "cold",
+      "cold_ms": [
+        2992.6827,
+        2831.2508
+      ],
+      "context_build_ms": null,
+      "cached_ms": null,
+      "summary": {
+        "cold_ms": {
+          "count": 2,
+          "median_ms": 2831.2508,
+          "min_ms": 2831.2508,
+          "max_ms": 2992.6827
+        },
+        "context_build_ms": null,
+        "cached_init_ms": null
+      }
+    },
+    "first_inference_ms": 9.585,
+    "trials": [
+      {
+        "trial_index": 0,
+        "stats": {
+          "count": 20,
+          "mean_ms": 1.9995349999999998,
+          "p50_ms": 1.9621,
+          "p95_ms": 2.1837,
+          "p99_ms": null,
+          "stddev_ms": 0.08791275744198124,
+          "min_ms": 1.9255,
+          "max_ms": 2.2363,
+          "inferences_per_sec": 500.11627703441053,
+          "items_per_sec": 4000.9302162752842
+        },
+        "session_init": {
+          "cold_ms": 2992.6827,
+          "context_build_ms": null,
+          "cached_init_ms": null
+        }
+      },
+      {
+        "trial_index": 1,
+        "stats": {
+          "count": 20,
+          "mean_ms": 2.0396150000000004,
+          "p50_ms": 2.0061,
+          "p95_ms": 2.3273,
+          "p99_ms": null,
+          "stddev_ms": 0.11022077497841369,
+          "min_ms": 1.9457,
+          "max_ms": 2.3402,
+          "inferences_per_sec": 490.28860838932826,
+          "items_per_sec": 3922.308867114626
+        },
+        "session_init": {
+          "cold_ms": 2831.2508,
+          "context_build_ms": null,
+          "cached_init_ms": null
+        }
+      }
+    ],
+    "aggregate": {
+      "stats": {
+        "count": 40,
+        "mean_ms": 2.0195749999999997,
+        "p50_ms": 1.9792,
+        "p95_ms": 2.2363,
+        "p99_ms": null,
+        "stddev_ms": 0.10047735234038231,
+        "min_ms": 1.9255,
+        "max_ms": 2.3402,
+        "inferences_per_sec": 495.1536833244619,
+        "items_per_sec": 3961.229466595695
+      },
+      "trial_variation": {
+        "trial_mean_min_ms": 1.9995349999999998,
+        "trial_mean_max_ms": 2.0396150000000004,
+        "trial_mean_stddev_ms": 0.02834083978995722,
+        "trial_mean_cv_ratio": 0.014033071210505784
+      }
+    },
+    "scope": "model_execution",
+    "accelerator": null,
+    "profiled_pass": null
+  },
+  "memory": {
+    "scope": "process",
+    "peak_working_set_bytes": 310763520,
+    "peak_private_bytes": 271872000,
+    "source": "GetProcessMemoryInfo",
+    "session_create_working_set_delta_bytes": 101498880
+  },
+  "accuracy": null,
+  "raw": null
+}

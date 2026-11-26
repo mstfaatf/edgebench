@@ -1,0 +1,17 @@
+{
+  "description": "An FP32 model computed in FP16 with the source left at 'model' and no FP16 EP option.",
+  "base": "docs/examples/v1.2.0/example-npu-int8-s8w-strict.json",
+  "set": {
+    "/model/stored_precision": "fp32",
+    "/execution/effective_precision": {
+      "stored": "fp32",
+      "compute": "fp16",
+      "source": "model"
+    }
+  },
+  "expect": {
+    "severity": "error",
+    "code": "fp16_compute_without_option",
+    "path": "/execution/effective_precision/source"
+  }
+}

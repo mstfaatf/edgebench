@@ -2,7 +2,7 @@
   "description": "A schema version without a schema file.",
   "base": "docs/examples/v1.1.0/example-npu-int8-s8w-strict.json",
   "set": {
-    "/schema_version": "1.2.0"
+    "/schema_version": "1.9.0"
   },
   "expect": {
     "severity": "error",

@@ -1,0 +1,388 @@
+{
+  "schema_version": "1.2.0",
+  "run_id": "00000000-0000-0000-0000-000000000000",
+  "timestamp_utc": "2026-11-21T02:47:32Z",
+  "label": "MobileNetV2 FP32, CPU EP, 4 intra-op threads",
+  "status": "success",
+  "error": null,
+  "warnings": [
+    {
+      "code": "illustrative_example",
+      "message": "Example document assembled from the C++ (ort_probe) measurements behind docs/feasibility.md section 7.3 (2026-11-21, three rounds, each round one trial in its own process). Per-trial count, mean, p50, p95, min, max and standard deviation, the session creation times and the QNN profile are measured values. p99_ms and the pooled aggregate percentiles were not recorded and are estimates.",
+      "path": null
+    },
+    {
+      "code": "value_unavailable",
+      "message": "Background CPU load was not sampled.",
+      "path": "/system/load"
+    },
+    {
+      "code": "value_unavailable",
+      "message": "The first inference was not timed separately.",
+      "path": "/timing/first_inference_ms"
+    },
+    {
+      "code": "value_unavailable",
+      "message": "Process memory was not recorded.",
+      "path": "/memory"
+    }
+  ],
+  "tool": {
+    "name": "edgebench",
+    "version": "0.1.0",
+    "git_commit": "2069ebaaa3a703a388864c7292883bf6ce802b17",
+    "git_dirty": false,
+    "build_type": "Release",
+    "compiler": "MSVC 19.42.34435",
+    "implementation": "cpp"
+  },
+  "system": {
+    "os": {
+      "name": "Windows 11 Home",
+      "version": "25H2",
+      "build": "26200.9974",
+      "architecture": "arm64"
+    },
+    "process_architecture": "arm64",
+    "cpu": {
+      "name": "Snapdragon(R) X 10-core X1P64100 @ 3.40 GHz",
+      "physical_cores": 10,
+      "logical_processors": 10
+    },
+    "memory_total_bytes": 16757260288,
+    "device": {
+      "manufacturer": "Microsoft Corporation",
+      "model": "Microsoft Surface Laptop, 7th Edition"
+    },
+    "power": {
+      "source": "ac",
+      "power_mode": "Balanced",
+      "power_plan": "Balanced",
+      "battery_percent": 80,
+      "battery_saver": false
+    },
+    "load": null
+  },
+  "runtime": {
+    "onnxruntime": {
+      "version": "1.32.0",
+      "library_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime.dll",
+      "api_version": 32,
+      "load_check": "full_path_verified"
+    },
+    "execution_provider": {
+      "name": "CPUExecutionProvider",
+      "version": null,
+      "library_path": null
+    },
+    "qnn": null,
+    "ep_device": null,
+    "loaded_modules": [
+      {
+        "name": "onnxruntime.dll",
+        "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime.dll"
+      },
+      {
+        "name": "onnxruntime_providers_qnn.dll",
+        "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll"
+      },
+      {
+        "name": "onnxruntime_providers_shared.dll",
+        "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_shared.dll"
+      }
+    ],
+    "ep_devices": [
+      {
+        "ep_name": "CPUExecutionProvider",
+        "ep_vendor": "Microsoft",
+        "device_type": "CPU",
+        "vendor": "Qualcomm",
+        "vendor_id": 1297040209,
+        "device_id": 7,
+        "metadata": {
+          "Description": "Snapdragon(R) X 10-core X1P64100 @ 3.42 GHz"
+        },
+        "ep_metadata": {
+          "version": "1.32.0"
+        }
+      },
+      {
+        "ep_name": "QNNExecutionProvider",
+        "ep_vendor": "Qualcomm",
+        "device_type": "NPU",
+        "vendor": "",
+        "vendor_id": 1297040209,
+        "device_id": 1093682224,
+        "metadata": {
+          "LUID": "70553"
+        },
+        "ep_metadata": {
+          "library_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll",
+          "version": "2.8.0"
+        }
+      },
+      {
+        "ep_name": "QNNExecutionProvider",
+        "ep_vendor": "Qualcomm",
+        "device_type": "GPU",
+        "vendor": "",
+        "vendor_id": 1297040209,
+        "device_id": 909329200,
+        "metadata": {
+          "Description": "Qualcomm(R) Adreno(TM) X1-85 GPU",
+          "Discrete": "0",
+          "DxgiAdapterNumber": "0",
+          "DxgiHighPerformanceIndex": "0",
+          "DxgiVideoMemory": "128 MB",
+          "LUID": "68962"
+        },
+        "ep_metadata": {
+          "library_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll",
+          "version": "2.8.0"
+        }
+      }
+    ]
+  },
+  "model": {
+    "name": "mobilenet_v2",
+    "file_name": "mobilenetv2_fp32_b1.onnx",
+    "sha256": "bcf75698a82b096f63ce9d2048b0f50cb152ba3ea60882cdac06be3c12b6b674",
+    "size_bytes": 13993244,
+    "opset": 17,
+    "ir_version": 8,
+    "stored_precision": "fp32",
+    "inputs": [
+      {
+        "name": "input",
+        "dtype": "float32",
+        "shape": [
+          1,
+          3,
+          224,
+          224
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "logits",
+        "dtype": "float32",
+        "shape": [
+          1,
+          1000
+        ]
+      }
+    ],
+    "source": {
+      "library": "torchvision",
+      "identifier": "mobilenet_v2/IMAGENET1K_V2",
+      "export_tool": "torch.onnx 2.13.0"
+    },
+    "quantization": {
+      "method": "none",
+      "format": null,
+      "activation_dtype": null,
+      "weight_dtype": null,
+      "calibration": null,
+      "tool": null
+    },
+    "precision_notes": null,
+    "normalization": "external"
+  },
+  "config": {
+    "requested": {
+      "execution_provider": "CPUExecutionProvider",
+      "device_type": "CPU",
+      "compute_precision": null
+    },
+    "strict_mode": false,
+    "batch_size": 1,
+    "input": {
+      "kind": "dataset",
+      "constant_value": null,
+      "seed": null,
+      "dataset": "imagenette2-320 eval split, first image (val/n01440764/ILSVRC2012_val_00046252.JPEG), the same input for every iteration",
+      "preprocessing": "Decoded with PIL, shorter side resized to 256 (bilinear), center-cropped to 224, scaled to [0, 1], normalized with the ImageNet mean/std, NCHW float32. Done once before timing (scripts/common/preprocess.py); not part of the timed region."
+    },
+    "warmup_iterations": 20,
+    "measured_iterations": 200,
+    "trials": 3,
+    "run_api": "sync",
+    "ort_execution_mode": "sequential",
+    "intra_op_threads": 4,
+    "inter_op_threads": null,
+    "graph_optimization_level": "enable_all",
+    "ep_options": {},
+    "session_config": {},
+    "ep_context_cache": null,
+    "run_binding": "run",
+    "profiling": {
+      "ort": false,
+      "qnn_level": "off"
+    }
+  },
+  "execution": {
+    "full_device_execution_verified": true,
+    "verification_method": "cpu_provider_only",
+    "verification_details": {
+      "summary": "Only the CPU EP was attached to the session.",
+      "qnn_validation_passes": null,
+      "module_checks": [
+        {
+          "stage": "after_provider_creation",
+          "trial_index": null,
+          "modules_outside_bundle": []
+        },
+        {
+          "stage": "after_session_creation",
+          "trial_index": 0,
+          "modules_outside_bundle": []
+        },
+        {
+          "stage": "after_session_creation",
+          "trial_index": 1,
+          "modules_outside_bundle": []
+        },
+        {
+          "stage": "after_session_creation",
+          "trial_index": 2,
+          "modules_outside_bundle": []
+        },
+        {
+          "stage": "placement_session",
+          "trial_index": null,
+          "modules_outside_bundle": []
+        }
+      ]
+    },
+    "node_assignment": null,
+    "qnn_validation": null,
+    "effective_precision": {
+      "stored": "fp32",
+      "compute": "fp32",
+      "source": "model"
+    },
+    "batch_equivalence": {
+      "equivalent_to_b1": true,
+      "basis": "batch_size_1",
+      "reference_batch": 1
+    }
+  },
+  "timing": {
+    "timer": {
+      "source": "std::chrono::steady_clock",
+      "resolution_ns": 100
+    },
+    "percentile_method": "nearest_rank",
+    "scope": "model_execution",
+    "session_init": {
+      "session_create_ms": 24.1522,
+      "ep_context_state": "not_used",
+      "cold_ms": [
+        24.1522,
+        26.4668,
+        22.0074
+      ],
+      "context_build_ms": null,
+      "cached_ms": null,
+      "summary": {
+        "cold_ms": {
+          "count": 3,
+          "median_ms": 24.1522,
+          "min_ms": 22.0074,
+          "max_ms": 26.4668
+        },
+        "context_build_ms": null,
+        "cached_init_ms": null
+      }
+    },
+    "first_inference_ms": null,
+    "trials": [
+      {
+        "trial_index": 0,
+        "stats": {
+          "count": 200,
+          "mean_ms": 4.196506,
+          "p50_ms": 3.9264,
+          "p95_ms": 5.3916,
+          "p99_ms": 6.0407,
+          "stddev_ms": 0.670934,
+          "min_ms": 3.5894,
+          "max_ms": 7.9881,
+          "inferences_per_sec": 238.293,
+          "items_per_sec": 238.293
+        },
+        "session_init": {
+          "cold_ms": 24.1522,
+          "context_build_ms": null,
+          "cached_init_ms": null
+        }
+      },
+      {
+        "trial_index": 1,
+        "stats": {
+          "count": 200,
+          "mean_ms": 4.206841,
+          "p50_ms": 3.9847,
+          "p95_ms": 5.485,
+          "p99_ms": 5.7997,
+          "stddev_ms": 0.590633,
+          "min_ms": 3.6222,
+          "max_ms": 6.7439,
+          "inferences_per_sec": 237.708,
+          "items_per_sec": 237.708
+        },
+        "session_init": {
+          "cold_ms": 26.4668,
+          "context_build_ms": null,
+          "cached_init_ms": null
+        }
+      },
+      {
+        "trial_index": 2,
+        "stats": {
+          "count": 200,
+          "mean_ms": 4.235574,
+          "p50_ms": 3.9577,
+          "p95_ms": 5.8176,
+          "p99_ms": 6.3449,
+          "stddev_ms": 0.7081,
+          "min_ms": 3.5953,
+          "max_ms": 7.9267,
+          "inferences_per_sec": 236.096,
+          "items_per_sec": 236.096
+        },
+        "session_init": {
+          "cold_ms": 22.0074,
+          "context_build_ms": null,
+          "cached_init_ms": null
+        }
+      }
+    ],
+    "aggregate": {
+      "stats": {
+        "count": 600,
+        "mean_ms": 4.212974,
+        "p50_ms": 3.9577,
+        "p95_ms": 5.485,
+        "p99_ms": 6.0407,
+        "stddev_ms": 0.657491,
+        "min_ms": 3.5894,
+        "max_ms": 7.9881,
+        "inferences_per_sec": 237.362,
+        "items_per_sec": 237.362
+      },
+      "trial_variation": {
+        "trial_mean_min_ms": 4.196506,
+        "trial_mean_max_ms": 4.235574,
+        "trial_mean_stddev_ms": 0.020243,
+        "trial_mean_cv_ratio": 0.004805
+      }
+    },
+    "accelerator": null,
+    "profiled_pass": null
+  },
+  "memory": null,
+  "accuracy": null,
+  "raw": null
+}

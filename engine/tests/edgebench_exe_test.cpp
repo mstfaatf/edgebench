@@ -148,9 +148,14 @@ TEST(Doctor, JsonOutputParses) {
         EXPECT_TRUE(power.contains(key)) << key;
     EXPECT_FALSE(power.at("power_mode").is_null());
     EXPECT_FALSE(power.at("power_plan").is_null());
+    // The structure of the load sample only: how long the sample took depends on
+    // the machine's load (CpuUtilization.LiveSampleIsARatio covers the window).
     const json& load = j.at("system").at("load");
-    EXPECT_NEAR(load.at("sample_window_s").get<double>(), 0.1, 0.05);
+    ASSERT_TRUE(load.at("sample_window_s").is_number()) << load.dump();
+    EXPECT_GT(load.at("sample_window_s").get<double>(), 0.0);
+    ASSERT_TRUE(load.at("cpu_utilization_ratio").is_number()) << load.dump();
     EXPECT_GE(load.at("cpu_utilization_ratio").get<double>(), 0.0);
+    EXPECT_LE(load.at("cpu_utilization_ratio").get<double>(), 1.0);
     EXPECT_FALSE(j.at("system").at("os").at("name").get<std::string>().empty());
 }
 
@@ -531,7 +536,7 @@ TEST(Cli, RunFormatJsonPrintsTheDocument) {
     ASSERT_EQ(r.exit_code, 0u) << describe(r);
     const json doc = json::parse(r.out);  // stdout is exactly the document
     EXPECT_EQ(doc.at("status"), "success");
-    EXPECT_EQ(doc.at("schema_version"), "1.1.0");
+    EXPECT_EQ(doc.at("schema_version"), "1.2.0");
     EXPECT_TRUE(contains(r.err, "result written to ")) << describe(r);
     EXPECT_TRUE(fs::is_regular_file(out.path() / "as-json_latest.json"));
     EXPECT_EQ(json::parse(std::ifstream(out.path() / "as-json_latest.json")), doc);

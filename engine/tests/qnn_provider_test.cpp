@@ -20,6 +20,7 @@
 #include "edgebench/benchmark.hpp"
 #include "edgebench/qnn_ep.hpp"
 #include "edgebench/result_files.hpp"
+#include "edgebench/result_json.hpp"
 #include "process_util.hpp"
 #include "test_runtime.hpp"
 #include "validator.hpp"
@@ -164,6 +165,16 @@ TEST_F(QnnProviderNpu, StrictRunIsAllOnQnnAndRecordsWhatWasPassed) {
                                                   {"session.disable_cpu_ep_fallback", "1"}}));
     ASSERT_TRUE(p.qnn);
     EXPECT_EQ(p.qnn->backend, "htp");
+    EXPECT_TRUE(p.qnn->unlisted_options_default);
+    // The version resource of the QnnHtp.dll that was loaded, from the bundle.
+    ASSERT_TRUE(r.runtime.qnn_backend_file_version);
+    EXPECT_TRUE(eb::is_same_path(r.runtime.qnn_backend_file_version->module_path.native(),
+                                 (shared_runtime().bundle_dir() / "QnnHtp.dll").native()));
+    ASSERT_TRUE(r.runtime.qnn_backend_file_version->product_version);
+    EXPECT_TRUE(contains(*r.runtime.qnn_backend_file_version->product_version, "."));
+    ASSERT_TRUE(r.effective_precision);
+    EXPECT_EQ(*r.effective_precision,
+              (eb::EffectivePrecision{"fp32", "fp16", "enable_htp_fp16_precision"}));
 
     // Precision: FP32 stored, FP16 computed.
     EXPECT_EQ(r.model.precision.stored_precision, "fp32");
@@ -224,7 +235,12 @@ TEST_F(QnnProviderNpu, StrictRefusalIsExit5WithTheOrtError) {
     EXPECT_EQ(e.ort_error_name, "ORT_FAIL");
     EXPECT_EQ(r.failure->stage, "session_creation");
     EXPECT_TRUE(contains(e.message, "Det node 'unsupported_det'")) << e.message;
+    ASSERT_TRUE(e.unsupported_nodes);
+    EXPECT_EQ(*e.unsupported_nodes, (std::vector<eb::NamedNode>{{"unsupported_det", "Det"}}));
     EXPECT_TRUE(r.timing.trials.empty());
+    const auto doc = eb::to_result_json(r, std::nullopt);
+    EXPECT_EQ(doc.at("error").at("kind"), "strict_mode_refusal");
+    EXPECT_EQ(doc.at("error").at("unsupported_nodes").size(), 1u);
 
     TempDir out;
     write_and_validate(r, out);
