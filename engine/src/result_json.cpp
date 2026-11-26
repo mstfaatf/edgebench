@@ -71,6 +71,16 @@ json error_json(const BenchmarkResult& r) {
     };
 }
 
+// The trials' values of one kind of initialization (timing.trials[].session_init).
+std::vector<double> per_trial(const TimingResult& t,
+                              std::optional<double> TrialSessionInit::*kind) {
+    std::vector<double> values;
+    for (const TrialResult& trial : t.trials)
+        if (const std::optional<double>& v = trial.session_init.*kind)
+            values.push_back(*v);
+    return values;
+}
+
 json init_summary_json(std::vector<double> values) {
     if (values.empty())
         return nullptr;
@@ -203,15 +213,46 @@ json model_json(const BenchmarkResult& r) {
     };
 }
 
-// The NPU runs without an EP context cache for now: recorded as disabled (mode
-// off). The CPU EP has none (null).
-json ep_context_cache_json(const RunConfig& c) {
-    if (c.provider != ProviderKind::npu)
+// config.ep_context_cache: null for the CPU EP (it has none).
+json ep_context_cache_json(const BenchmarkResult& r) {
+    if (r.config.provider != ProviderKind::npu)
         return nullptr;
-    return {{"enabled", false},        {"cache_file", nullptr}, {"state", "disabled"},
-            {"files", json::array()},  {"mode", "off"},         {"key_id", nullptr},
-            {"context_path", nullptr}, {"hit", nullptr},        {"verified_equal_outputs", nullptr},
-            {"key", nullptr}};
+    const EpContextCacheResult& c = r.ep_cache;
+    json files = json::array();
+    for (const CacheFile& f : c.files)
+        files.push_back({{"name", f.name}, {"size_bytes", f.size_bytes}, {"sha256", f.sha256}});
+    json key = nullptr;
+    if (c.key) {
+        // The key fields in the schema's key order (the key id hashes them sorted).
+        const json& k = *c.key;
+        key = {{"model_sha256", k.at("model_sha256")},
+               {"ort_version", k.at("ort_version")},
+               {"ep_version", k.at("ep_version")},
+               {"qnn_sdk_version", k.at("qnn_sdk_version")},
+               {"ep_options_sha256", k.at("ep_options_sha256")},
+               {"device", k.at("device")},
+               {"qnn_backend_file_version", k.at("qnn_backend_file_version")},
+               {"ep_options", k.at("ep_options")},
+               {"session_config", k.at("session_config")},
+               {"graph_optimization_level", k.at("graph_optimization_level")}};
+    }
+    // Before the cache was examined (a run that failed early) the state is unknown;
+    // with the cache off it is "disabled" from the start.
+    const std::optional<std::string> state =
+        c.state ? c.state : (c.enabled() ? std::nullopt : std::optional<std::string>("disabled"));
+    return {{"enabled", c.enabled()},
+            {"cache_file",
+             c.context_path ? json(path_to_utf8(c.context_path->filename())) : json(nullptr)},
+            {"state", opt(state)},
+            {"files", files},
+            {"mode", schema_name(c.mode)},
+            {"key_id", opt(c.key_id)},
+            {"context_path", c.context_path ? json(path_to_utf8(*c.context_path)) : json(nullptr)},
+            {"hit", opt(c.hit)},
+            {"verified_equal_outputs", opt(c.verified_equal_outputs)},
+            {"key", key},
+            {"cache_dir", c.cache_dir ? json(path_to_utf8(*c.cache_dir)) : json(nullptr)},
+            {"embed_mode", c.cache_dir ? json(std::string(kEpContextEmbedMode)) : json(nullptr)}};
 }
 
 json qnn_validation_json(const std::optional<QnnValidation>& v) {
@@ -246,7 +287,13 @@ json verification_details_json(const BenchmarkResult& r, const std::string& summ
                           {"trial_index", opt(c.trial_index)},
                           {"modules_outside_bundle", outside}});
     }
-    return {{"summary", summary}, {"qnn_validation_passes", passes}, {"module_checks", checks}};
+    json deleted = json::array();
+    for (const std::filesystem::path& p : r.ep_cache.deleted_stale)
+        deleted.push_back(path_to_utf8(p));
+    return {{"summary", summary},
+            {"qnn_validation_passes", passes},
+            {"module_checks", checks},
+            {"deleted_stale_cache_files", deleted}};
 }
 
 json effective_precision_json(const BenchmarkResult& r) {
@@ -260,8 +307,13 @@ json batch_equivalence_json(const BenchmarkResult& r) {
     if (!r.batch_equivalence)
         return nullptr;
     const BatchEquivalence& b = *r.batch_equivalence;
-    return {
-        {"equivalent_to_b1", opt(b.equivalent_to_b1)}, {"basis", b.basis}, {"reference_batch", 1}};
+    return {{"bitwise_equal_to_b1", opt(b.bitwise_equal_to_b1)},
+            {"bitwise_basis", b.bitwise_basis},
+            {"predictions_equal_to_b1", opt(b.predictions_equal_to_b1)},
+            {"predictions_basis", b.predictions_basis},
+            {"predictions_compared", opt(b.predictions_compared)},
+            {"predictions_differing", opt(b.predictions_differing)},
+            {"reference_batch", 1}};
 }
 
 json config_json(const BenchmarkResult& r) {
@@ -291,9 +343,10 @@ json config_json(const BenchmarkResult& r) {
         {"graph_optimization_level", schema_name(c.graph_opt)},
         {"ep_options", r.known.provider ? json(p.ep_options) : json::object()},
         {"session_config", r.known.provider ? json(p.session_config) : json::object()},
-        {"ep_context_cache", ep_context_cache_json(c)},
+        {"ep_context_cache", ep_context_cache_json(r)},
         {"run_binding", schema_name(c.binding)},
         {"profiling", {{"ort", false}, {"qnn_level", "off"}}},
+        {"init_breakdown", c.init_breakdown},
     };
 }
 
@@ -334,9 +387,9 @@ json timing_json(const BenchmarkResult& r) {
         trials.push_back({{"trial_index", trial.trial_index},
                           {"stats", stats_json(trial.stats)},
                           {"session_init",
-                           {{"cold_ms", trial.session_create_ms},
-                            {"context_build_ms", nullptr},
-                            {"cached_init_ms", nullptr}}}});
+                           {{"cold_ms", opt(trial.session_init.cold_ms)},
+                            {"context_build_ms", opt(trial.session_init.context_build_ms)},
+                            {"cached_init_ms", opt(trial.session_init.cached_init_ms)}}}});
     }
     json aggregate = nullptr;
     if (t.aggregate) {
@@ -357,13 +410,15 @@ json timing_json(const BenchmarkResult& r) {
         {"session_init",
          {{"session_create_ms", si.session_create_ms},
           {"ep_context_state", si.ep_context_state},
-          {"cold_ms", si.cold_ms},
+          {"cold_ms", si.cold_ms.empty() ? json(nullptr) : json(si.cold_ms)},
           {"context_build_ms", opt(si.context_build_ms)},
-          {"cached_ms", si.cached_ms ? json(*si.cached_ms) : json(nullptr)},
+          {"cached_ms", si.cached_ms.empty() ? json(nullptr) : json(si.cached_ms)},
           {"summary",
-           {{"cold_ms", init_summary_json(si.cold_ms)},
-            {"context_build_ms", nullptr},
-            {"cached_init_ms", nullptr}}}}},
+           {{"cold_ms", init_summary_json(per_trial(t, &TrialSessionInit::cold_ms))},
+            {"context_build_ms",
+             init_summary_json(per_trial(t, &TrialSessionInit::context_build_ms))},
+            {"cached_init_ms",
+             init_summary_json(per_trial(t, &TrialSessionInit::cached_init_ms))}}}}},
         {"first_inference_ms", opt(t.first_inference_ms)},
         {"trials", trials},
         {"aggregate", aggregate},
@@ -387,9 +442,12 @@ json memory_json(const BenchmarkResult& r) {
 }  // namespace
 
 json to_result_json(const BenchmarkResult& r, const std::optional<RawLatencyLink>& raw) {
-    json warnings = json::array();
-    for (const ResultWarning& w : r.warnings)
-        warnings.push_back({{"code", w.code}, {"message", w.message}, {"path", opt(w.path)}});
+    auto entries = [](const std::vector<ResultWarning>& list) {
+        json out = json::array();
+        for (const ResultWarning& w : list)
+            out.push_back({{"code", w.code}, {"message", w.message}, {"path", opt(w.path)}});
+        return out;
+    };
 
     return {
         {"schema_version", r.schema_version},
@@ -398,7 +456,8 @@ json to_result_json(const BenchmarkResult& r, const std::optional<RawLatencyLink
         {"label", opt(r.label)},
         {"status", r.status()},
         {"error", error_json(r)},
-        {"warnings", warnings},
+        {"warnings", entries(r.warnings)},
+        {"notes", entries(r.notes)},
         {"tool",
          {{"name", "edgebench"},
           {"version", r.tool_version},

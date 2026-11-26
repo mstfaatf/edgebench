@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "edgebench/cli.hpp"
+#include "edgebench/ep_context_cache.hpp"
 #include "edgebench/npu_options.hpp"
 #include "edgebench/qnn_ep.hpp"
 #include "edgebench/qnn_log.hpp"
@@ -118,6 +119,32 @@ TEST(QnnSessionConfig, StrictByDefaultAndNoContextCache) {
     EXPECT_FALSE(eb::strict_mode(eb::RunConfig{}));  // the CPU provider has no fallback
 }
 
+TEST(QnnSessionConfig, RunsWithEpContextsRecordTheEmbedMode) {
+    for (auto change : {+[](eb::RunConfig& c) { c.ep_cache = eb::EpCacheMode::use; },
+                        +[](eb::RunConfig& c) { c.ep_cache = eb::EpCacheMode::build; },
+                        +[](eb::RunConfig& c) { c.init_breakdown = true; }}) {
+        eb::RunConfig c = npu_config();
+        change(c);
+        EXPECT_EQ(eb::qnn_session_config(c),
+                  (std::map<std::string, std::string>{{"ep.context_embed_mode", "0"},
+                                                      {"ep.context_enable", "0"},
+                                                      {"session.disable_cpu_ep_fallback", "1"}}));
+    }
+}
+
+TEST(QnnSessionConfig, TheBuildingSessionWritesTheContextModel) {
+    eb::RunConfig c = npu_config();
+    c.ep_cache = eb::EpCacheMode::build;
+    const auto build = eb::qnn_context_build_config(c, "C:/cache/k/m_ctx.onnx");
+    EXPECT_EQ(build.at("ep.context_enable"), "1");
+    EXPECT_EQ(build.at("ep.context_embed_mode"), "0");
+    EXPECT_EQ(build.at("ep.context_file_path"), "C:/cache/k/m_ctx.onnx");
+    EXPECT_EQ(build.at("session.disable_cpu_ep_fallback"), "1");
+    // Building and loading the same context compile identically: same cache key.
+    EXPECT_EQ(eb::compile_session_config(build),
+              eb::compile_session_config(eb::qnn_session_config(c)));
+}
+
 TEST(HtpPerformanceMode, AcceptsTheModesTheEpDocuments) {
     for (std::string_view mode : eb::kHtpPerformanceModes)
         EXPECT_TRUE(eb::is_htp_performance_mode(mode)) << mode;
@@ -150,6 +177,15 @@ TEST(QnnHtpBackend, MissingFilesAreALoadFailureNamingThem) {
     EXPECT_EQ(ok.value().filename(), "QnnHtp.dll");
     EXPECT_FALSE(eb::qnn_ep_hint("qnn_backend_not_bundled").empty());
     EXPECT_FALSE(eb::qnn_ep_hint("strict_mode_refusal").empty());
+
+    // Runs that write or read EP contexts also need the QNN system library.
+    eb::Result<fs::path> context = eb::check_qnn_htp_backend(dir, /*ep_context=*/true);
+    ASSERT_FALSE(context.ok());
+    EXPECT_TRUE(contains(context.error().message, "QnnSystem.dll")) << context.error().message;
+    std::ofstream(dir / "QnnSystem.dll") << "x";
+    EXPECT_TRUE(eb::check_qnn_htp_backend(dir, true).ok());
+    for (const char* kind : {"ep_context_corrupt", "ep_context_load_failed"})
+        EXPECT_TRUE(contains(std::string(eb::qnn_ep_hint(kind)), "--ep-cache build")) << kind;
 }
 
 // --------------------------------------------------------------------------- precision
@@ -246,6 +282,43 @@ TEST(NpuCli, DefaultsAreStrictAndBurst) {
     EXPECT_EQ(j.at("config").at("requested").at("device_type"), "NPU");
     EXPECT_EQ(j.at("config").at("ep_context_cache").at("state"), "disabled");
     EXPECT_EQ(j.at("config").at("ep_context_cache").at("enabled"), false);
+}
+
+TEST(NpuCli, CacheOptionsAreParsed) {
+    const eb::test::TempModel model("m.onnx");
+    const eb::ParseResult r = parse(
+        {"--provider", "npu", "--ep-cache", "use", "--ep-cache-dir", "D:/ctx", "--init-breakdown"},
+        model);
+    ASSERT_FALSE(r.exit) << r.err;
+    EXPECT_EQ(r.run.ep_cache, eb::EpCacheMode::use);
+    EXPECT_EQ(r.run.ep_cache_dir, fs::path("D:/ctx"));
+    EXPECT_TRUE(r.run.init_breakdown);
+    EXPECT_TRUE(r.run.uses_ep_context());
+
+    const eb::ParseResult d = parse({"--provider", "npu"}, model);
+    ASSERT_FALSE(d.exit) << d.err;
+    EXPECT_EQ(d.run.ep_cache, eb::EpCacheMode::off);  // default: unchanged behaviour
+    EXPECT_FALSE(d.run.ep_cache_dir);
+    EXPECT_FALSE(d.run.init_breakdown);
+    EXPECT_FALSE(d.run.uses_ep_context());
+    EXPECT_EQ(eb::schema_name(eb::EpCacheMode::build), "build");
+}
+
+TEST(NpuCli, CacheOptionErrors) {
+    const eb::test::TempModel model("m.onnx");
+    const eb::ParseResult bad = parse({"--provider", "npu", "--ep-cache", "always"}, model);
+    ASSERT_TRUE(bad.exit);
+    EXPECT_EQ(*bad.exit, ExitCode::usage_error);
+    // A cache directory without anything that uses it.
+    const eb::ParseResult unused = parse({"--provider", "npu", "--ep-cache-dir", "D:/ctx"}, model);
+    ASSERT_TRUE(unused.exit);
+    EXPECT_TRUE(contains(unused.err, "--ep-cache-dir")) << unused.err;
+    for (const std::vector<std::string>& args : {std::vector<std::string>{"--ep-cache", "use"},
+                                                 std::vector<std::string>{"--init-breakdown"}}) {
+        const eb::ParseResult r = parse(args, model);
+        ASSERT_TRUE(r.exit) << args.front();
+        EXPECT_TRUE(contains(r.err, "is only allowed with --provider npu")) << r.err;
+    }
 }
 
 TEST(NpuCli, UnknownPerformanceModeIsAUsageError) {

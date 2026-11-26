@@ -79,7 +79,8 @@ Result<std::unique_ptr<QnnProvider>> QnnProvider::create(Runtime& runtime,
         return selection.error();
 
     // The EP lists the NPU whether or not the backend exists.
-    Result<fs::path> backend = check_qnn_htp_backend(runtime.bundle_dir());
+    Result<fs::path> backend =
+        check_qnn_htp_backend(runtime.bundle_dir(), config.uses_ep_context());
     if (!backend)
         return backend.error();
 
@@ -105,7 +106,8 @@ QnnProvider::QnnProvider(Runtime& runtime, EpLibrary& library, std::size_t devic
       device_index_(device_index),
       description_(std::move(description)) {}
 
-Result<Ort::SessionOptions> QnnProvider::session_options(const RunConfig& config) {
+Result<Ort::SessionOptions> QnnProvider::session_options(
+    const RunConfig& config, const std::map<std::string, std::string>& session_config) {
     Result<Ort::ConstEpDevice> device =
         ep_device_handle(runtime_.env(), device_index_, description_.ep_device->device);
     if (!device)
@@ -115,7 +117,7 @@ Result<Ort::SessionOptions> QnnProvider::session_options(const RunConfig& config
         options.SetIntraOpNumThreads(config.threads);
         options.SetExecutionMode(ORT_SEQUENTIAL);
         options.SetGraphOptimizationLevel(ort_graph_optimization_level(config.graph_opt));
-        for (const auto& [key, value] : description_.session_config)
+        for (const auto& [key, value] : session_config)
             options.AddConfigEntry(key.c_str(), value.c_str());
         const std::unordered_map<std::string, std::string> ep_options(
             description_.ep_options.begin(), description_.ep_options.end());
@@ -129,8 +131,19 @@ Result<Ort::SessionOptions> QnnProvider::session_options(const RunConfig& config
 
 Result<std::unique_ptr<BenchSession>> QnnProvider::create_session(const fs::path& model,
                                                                   const RunConfig& config) {
+    return create(model, config, description_.session_config);
+}
+
+Result<std::unique_ptr<BenchSession>> QnnProvider::create_context_building_session(
+    const fs::path& model, const RunConfig& config, const fs::path& context_model) {
+    return create(model, config, qnn_context_build_config(config, context_model));
+}
+
+Result<std::unique_ptr<BenchSession>> QnnProvider::create(
+    const fs::path& model, const RunConfig& config,
+    const std::map<std::string, std::string>& session_config) {
     EpLibrary::Lease lease = library_.lease();  // before the session exists
-    Result<Ort::SessionOptions> options = session_options(config);
+    Result<Ort::SessionOptions> options = session_options(config, session_config);
     if (!options)
         return options.error();
 
@@ -149,7 +162,7 @@ Result<std::unique_ptr<BenchSession>> QnnProvider::create_session(const fs::path
 Result<NodeAssignment> QnnProvider::record_placement(const fs::path& model,
                                                      const RunConfig& config) {
     EpLibrary::Lease lease = library_.lease();
-    Result<Ort::SessionOptions> options = session_options(config);
+    Result<Ort::SessionOptions> options = session_options(config, description_.session_config);
     if (!options)
         return options.error();
 

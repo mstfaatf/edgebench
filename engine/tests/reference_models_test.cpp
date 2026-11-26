@@ -27,7 +27,10 @@
 // INT8 image files are included: their NPU outputs differ from batch 1 (the
 // HTP computes that graph differently), but C++ and Python must still agree.
 // "ReferenceDeterminismNpu" checks, on a few files, that fresh sessions and
-// both run bindings give identical outputs. Both NPU suites skip, with the
+// both run bindings give identical outputs. "ReferenceCachedNpu" checks that a
+// session created from an EP context the engine built matches the references
+// too (a subset by default; every file with EDGEBENCH_CACHED_REFERENCES_ALL=1).
+// The NPU suites skip, with the
 // reason, without a usable NPU (npu_skip_reason()) and, like the CPU suite,
 // without the model files or the references.
 
@@ -48,10 +51,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include "edgebench/ep_context_cache.hpp"
 #include "edgebench/npu_selection.hpp"
 #include "edgebench/provider.hpp"
 #include "edgebench/runtime.hpp"
 #include "edgebench/sha256.hpp"
+#include "process_util.hpp"
 #include "test_runtime.hpp"
 
 namespace fs = std::filesystem;
@@ -492,6 +497,113 @@ INSTANTIATE_TEST_SUITE_P(Subset, ReferenceDeterminismNpu,
                              return std::get<0>(info.param) + "_" + std::get<1>(info.param) + "_b" +
                                     std::to_string(std::get<2>(info.param));
                          });
+
+namespace {
+
+class ReferenceCachedNpu : public ::testing::TestWithParam<Param>, protected NpuTest {
+protected:
+    void TearDown() override { unregister(); }
+};
+
+// Set to run every file of AllFilesManual / ImportedFilesManual (slow: one
+// context build per file).
+constexpr const char* kAllCachedEnv = "EDGEBENCH_CACHED_REFERENCES_ALL";
+
+bool all_cached_requested() {
+    char* value = nullptr;
+    std::size_t size = 0;
+    const bool set = _dupenv_s(&value, &size, kAllCachedEnv) == 0 && value && *value &&
+                     std::string(value) != "0";
+    std::free(value);
+    return set;
+}
+
+void check_cached_session(const Param& param) {
+    const auto& [name, variant, batch] = param;
+    const std::string rel = relative_model(name, variant, batch);
+    const fs::path model = kModels / fs::path(rel).make_preferred();
+    if (!fs::is_regular_file(model))
+        GTEST_SKIP() << rel << " is not present (see docs/models.md)";
+    if (!fs::is_regular_file(kReferences / "index.tsv"))
+        GTEST_SKIP() << "no reference outputs; run scripts/make_references.py";
+    const std::string device = npu_device(variant);
+    (void)npu_record(rel, model, device);  // current, else it throws
+
+    // Build the EP context as `edgebench run --ep-cache build` does, in a
+    // temporary cache directory, then load a session from it.
+    eb::test::TempDir cache(L"cached_reference");
+    eb::RunConfig c = engine_config(model, device);
+    c.ep_cache = eb::EpCacheMode::build;
+    c.ep_cache_dir = cache.path();
+    auto provider = eb::make_provider(eb::test::shared_runtime(), c);
+    ASSERT_TRUE(provider) << provider.error().message;
+    const fs::path context = cache.path() / eb::context_model_name(model);
+    {
+        auto building = provider.value()->create_context_building_session(model, c, context);
+        ASSERT_TRUE(building) << building.error().kind << ": " << building.error().message;
+    }
+    ASSERT_TRUE(fs::is_regular_file(context)) << rel;
+    auto session = provider.value()->create_session(context, c);
+    ASSERT_TRUE(session) << session.error().kind << ": " << session.error().message;
+
+    const std::vector<Row> runs = reference_runs(rel, device);
+    ASSERT_EQ(runs.size(), static_cast<std::size_t>(1 + 8 / batch)) << rel;
+    int identical = 0;
+    for (const Row& r : runs) {
+        const std::vector<std::byte> y = run_on(*session.value(), run_inputs(r));
+        const std::vector<std::byte> ref = read_bytes(r.file);
+        ASSERT_EQ(y.size(), ref.size()) << r.file;
+        const bool same = y == ref;
+        identical += same;
+        const Difference d = difference(y, ref);
+        EXPECT_TRUE(same) << rel << " (cached) " << r.input_set << " run " << r.run << ": "
+                          << d.elements << " of " << ref.size() / sizeof(float)
+                          << " elements differ from Python, max abs diff " << max_abs_diff(y, ref)
+                          << ", max " << d.max_ulp << " ULP";
+    }
+    std::printf("[ reference ] %s (%s, from an EP context): %d/%zu runs bit-identical\n",
+                rel.c_str(), device.c_str(), identical, runs.size());
+    ::testing::Test::RecordProperty("bit_identical_runs", identical);
+}
+
+std::string cached_param_name(const ::testing::TestParamInfo<Param>& info) {
+    return std::get<0>(info.param) + "_" + std::get<1>(info.param) + "_b" +
+           std::to_string(std::get<2>(info.param));
+}
+
+}  // namespace
+
+// A session created from an EP context built by the engine computes exactly
+// the saved NPU references, like a compiled session.
+TEST_P(ReferenceCachedNpu, SessionFromAContextMatchesPythonBitForBit) {
+    if (const std::optional<std::string> reason = skip_reason())
+        GTEST_SKIP() << *reason;
+    const std::string suite =
+        ::testing::UnitTest::GetInstance()->current_test_info()->test_suite_name();
+    if (suite.find("Manual") != std::string::npos && !all_cached_requested())
+        GTEST_SKIP() << "set " << kAllCachedEnv << "=1 to check every file from a context";
+    check_cached_session(GetParam());
+}
+
+INSTANTIATE_TEST_SUITE_P(Subset, ReferenceCachedNpu,
+                         ::testing::Values(Param{"mobilenetv2", "int8", 1},
+                                           Param{"mobilenetv2", "int8", 8},
+                                           Param{"efficientnet_lite0", "fp32", 1},
+                                           Param{"conv1d_autoencoder", "int8", 1},
+                                           Param{"conv1d_autoencoder", "fp32", 1}),
+                         cached_param_name);
+
+INSTANTIATE_TEST_SUITE_P(AllFilesManual, ReferenceCachedNpu,
+                         ::testing::Combine(::testing::ValuesIn(kModelNames),
+                                            ::testing::ValuesIn(kNpuVariants),
+                                            ::testing::ValuesIn(kBatches)),
+                         cached_param_name);
+
+INSTANTIATE_TEST_SUITE_P(ImportedFilesManual, ReferenceCachedNpu,
+                         ::testing::Combine(::testing::ValuesIn(kImportedModelNames),
+                                            ::testing::ValuesIn(kImportedNpuVariants),
+                                            ::testing::ValuesIn(kBatches)),
+                         cached_param_name);
 
 TEST(ReferenceModelsNpu, IndexListsExactlyTheseFiles) {
     if (!fs::is_regular_file(kReferences / "index.tsv"))

@@ -61,6 +61,7 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
     std::string model, provider = "cpu", binding = "iobinding", input = "random", graph = "all";
     std::string label, name, format = "summary", output_dir = defaults.output_dir.string();
     std::string htp_mode(kDefaultHtpPerformanceMode);
+    std::string ep_cache = "off", ep_cache_dir;
     bool no_strict = false;
     std::uint64_t seed = 0;
     double constant_value = 0.0;
@@ -140,6 +141,21 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
             ->check(choice([](std::string_view v) { return is_htp_performance_mode(v); },
                            htp_performance_modes_list(), "HTP performance mode"))
             ->capture_default_str();
+    run->add_option("--ep-cache", ep_cache,
+                    "NPU: EP context cache. off: compile every session from the model; build: "
+                    "rebuild the cache once, then create every timed session from it; use: create "
+                    "the timed sessions from the cache whose key matches (build it if missing)")
+        ->type_name("MODE")
+        ->check(choice(parse_ep_cache_mode, "off, build, use", "EP cache mode"))
+        ->capture_default_str();
+    CLI::Option* cache_dir_opt =
+        run->add_option("--ep-cache-dir", ep_cache_dir,
+                        "NPU: EP context cache directory, one subdirectory per cache key "
+                        "[default: %LOCALAPPDATA%\\EdgeBench\\qnn-context]")
+            ->type_name("PATH");
+    run->add_flag("--init-breakdown", cfg.init_breakdown,
+                  "NPU: per trial, also time a cold, a context-building and a cached session "
+                  "creation (each after the same idle period) before the timed session");
     run->add_flag("--dry-run", cfg.dry_run,
                   "Validate, create the session, run one inference, print the resolved "
                   "configuration as JSON");
@@ -204,6 +220,10 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
         cfg.strict = !no_strict;
         if (htp_opt->count() > 0)
             cfg.htp_performance_mode = htp_mode;
+        cfg.ep_cache = *parse_ep_cache_mode(ep_cache);
+        if (cache_dir_opt->count() > 0)
+            cfg.ep_cache_dir =
+                std::filesystem::path(std::u8string(ep_cache_dir.begin(), ep_cache_dir.end()));
         cfg.output_dir = std::filesystem::path(std::u8string(output_dir.begin(), output_dir.end()));
 
         const std::vector<ConfigError> errors = validate(cfg);

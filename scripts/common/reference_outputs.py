@@ -258,16 +258,25 @@ def check_problems(manifest: list[ManifestFile], root: Path = REFERENCE_DIR,
 # --- batch equivalence (standard library) ---------------------------------------
 #
 # Whether a model file at batch N computes, per item, exactly what the same
-# variant computes at batch 1 on the same device. Derived from the stored image /
-# window outputs (8 items, the same inputs at every batch size); the SplitMix64
-# input does not count, because its batch items differ from each other. The
-# summary is committed (models/batch_equivalence.json) so that the engine can
-# record, by model SHA256, whether a result at batch N may be compared with b1.
+# variant computes at batch 1 on the same device (bitwise_equal_to_b1). Derived
+# from the stored image / window outputs (8 items, the same inputs at every batch
+# size); the SplitMix64 input does not count, because its batch items differ from
+# each other. Where the bytes differ, whether any prediction changes
+# (predictions_equal_to_b1) comes from common/batch_predictions.py, which runs the
+# models on eval-quick or on the autoencoder's test split. The summary is
+# committed (models/batch_equivalence.json) so that the engine can record, by
+# model SHA256, whether a result at batch N may be compared with b1.
 
 BATCH_EQUIVALENCE_JSON = MODELS_DIR / "batch_equivalence.json"
-BATCH_EQUIVALENCE_VERSION = "1.0.0"
+BATCH_EQUIVALENCE_VERSION = "1.1.0"
 DEVICE_PROVIDER = {"cpu": "cpu", "npu": "npu", "npu_fp16": "npu"}
 NPU_COMPUTE_PRECISION = {"npu": "int8", "npu_fp16": "fp16"}
+PREDICTION_KEYS = ("predictions_equal_to_b1", "predictions_basis", "predictions_compared",
+                   "predictions_differing")
+BITWISE_PREDICTIONS = {"predictions_equal_to_b1": True, "predictions_basis": "bitwise",
+                       "predictions_compared": None, "predictions_differing": None}
+NO_PREDICTIONS = {"predictions_equal_to_b1": None, "predictions_basis": "not_available",
+                  "predictions_compared": None, "predictions_differing": None}
 
 
 def compute_precision(entry: ManifestFile, device: str) -> str:
@@ -299,8 +308,21 @@ def _max_abs_diff(a: bytes, b: bytes) -> float:
     return max((abs(p - q) for p, q in zip(x, y)), default=0.0)
 
 
-def batch_equivalence(manifest: list[ManifestFile], root: Path = REFERENCE_DIR) -> dict[str, Any]:
-    """The batch-equivalence summary of every file with references for it and its b1 sibling."""
+def entry_key(entry: dict[str, Any]) -> tuple[str, str, str]:
+    return entry["sha256"], entry["provider"], entry["compute_precision"]
+
+
+def batch_equivalence(manifest: list[ManifestFile], root: Path = REFERENCE_DIR,
+                      predictions: dict[tuple[str, str, str], dict[str, Any]] | None = None,
+                      prediction_inputs: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The batch-equivalence summary of every file with references for it and its b1 sibling.
+
+    ``predictions`` (common/batch_predictions.compute, keyed by entry_key) fills
+    the prediction fields of the entries that are not bitwise equal; without one,
+    an entry gets basis ``not_available``. Bitwise-equal entries are trivially
+    prediction-equal (basis ``bitwise``).
+    """
+    predictions = predictions or {}
     by_key = {(e.model, e.variant, e.batch_size): e for e in manifest}
     entries = []
     for entry in sorted(manifest, key=lambda e: (e.model, e.variant, e.batch_size)):
@@ -317,7 +339,7 @@ def batch_equivalence(manifest: list[ManifestFile], root: Path = REFERENCE_DIR) 
             if items is None or b1_items is None or len(items) != len(b1_items):
                 continue
             differing = [i for i, (a, b) in enumerate(zip(items, b1_items)) if a != b]
-            entries.append({
+            e = {
                 "file": entry.file,
                 "sha256": record["model_sha256"],
                 "model": entry.model,
@@ -326,23 +348,40 @@ def batch_equivalence(manifest: list[ManifestFile], root: Path = REFERENCE_DIR) 
                 "provider": DEVICE_PROVIDER[device],
                 "compute_precision": compute_precision(entry, device),
                 "reference_device": device,
-                "equivalent_to_b1": not differing,
+                "bitwise_equal_to_b1": not differing,
                 "b1_file": b1.file,
                 "b1_sha256": b1_record["model_sha256"],
                 "items_compared": len(items),
                 "items_differing": len(differing),
                 "max_abs_diff": (max(_max_abs_diff(items[i], b1_items[i]) for i in differing)
                                  if differing else 0.0),
-            })
+            }
+            if not differing:
+                e.update(BITWISE_PREDICTIONS)
+            else:
+                found = predictions.get(entry_key(e))
+                e.update({k: found[k] for k in PREDICTION_KEYS} if found else NO_PREDICTIONS)
+            entries.append(e)
     return {
         "batch_equivalence_version": BATCH_EQUIVALENCE_VERSION,
         "description": "Whether each model file computes, per batch item, exactly the output its "
-                       "batch-1 sibling computes on the same provider: from the stored reference "
-                       "outputs on the 8 reference images or windows (models/references, written "
-                       "by scripts/make_references.py). Keyed by model SHA256, provider and "
-                       "compute precision.",
+                       "batch-1 sibling computes on the same provider (bitwise_equal_to_b1: from "
+                       "the stored reference outputs on the 8 reference images or windows, "
+                       "models/references, written by scripts/make_references.py), and, where it "
+                       "does not, whether any prediction changes (predictions_equal_to_b1: top-1 "
+                       "class on ImageNetV2 eval-quick, or anomaly flags on the autoencoder's test "
+                       "split). Keyed by model SHA256, provider and compute precision.",
+        "prediction_inputs": prediction_inputs,
         "entries": entries,
     }
+
+
+def committed_predictions(doc: dict[str, Any]) -> dict[tuple[str, str, str], dict[str, Any]]:
+    """The prediction fields of a summary's entries that are not bitwise equal."""
+    return {entry_key(e): {k: e.get(k) for k in PREDICTION_KEYS}
+            for e in doc.get("entries", [])
+            if e.get("bitwise_equal_to_b1") is False
+            and e.get("predictions_basis") not in (None, "not_available")}
 
 
 def format_batch_equivalence(doc: dict[str, Any]) -> str:
@@ -350,15 +389,30 @@ def format_batch_equivalence(doc: dict[str, Any]) -> str:
 
 
 def batch_equivalence_problems(manifest: list[ManifestFile], root: Path = REFERENCE_DIR,
-                               path: Path = BATCH_EQUIVALENCE_JSON) -> list[str]:
-    """Differences between the committed summary and the one the references give."""
+                               path: Path = BATCH_EQUIVALENCE_JSON,
+                               prediction_inputs: dict[str, Any] | None = None) -> list[str]:
+    """Differences between the committed summary and the one the references give.
+
+    The prediction fields cannot be recomputed without running the models, so they
+    are taken from the committed summary: every entry that is not bitwise equal
+    must have one, and, if ``prediction_inputs`` is given, the committed summary's
+    must equal it (the split manifests it was computed on are unchanged).
+    """
     if not path.is_file():
         return [f"{path.name} is missing; run scripts/make_references.py --batch-equivalence"]
     committed = json.loads(path.read_text(encoding="utf-8"))
-    current = batch_equivalence(manifest, root)
-    old = {(e["sha256"], e["provider"], e["compute_precision"]): e for e in committed.get("entries", [])}
-    new = {(e["sha256"], e["provider"], e["compute_precision"]): e for e in current["entries"]}
+    if committed.get("batch_equivalence_version") != BATCH_EQUIVALENCE_VERSION:
+        return [f"{path.name} has version {committed.get('batch_equivalence_version')!r}, not "
+                f"{BATCH_EQUIVALENCE_VERSION}; run scripts/make_references.py --batch-equivalence"]
+    current = batch_equivalence(manifest, root, committed_predictions(committed),
+                                committed.get("prediction_inputs"))
+    old = {entry_key(e): e for e in committed.get("entries", [])}
+    new = {entry_key(e): e for e in current["entries"]}
     problems = []
+    if prediction_inputs is not None and committed.get("prediction_inputs") != prediction_inputs:
+        problems.append(f"{path.name}: the prediction comparisons were made on other inputs (a "
+                        "split manifest changed); run scripts/make_references.py "
+                        "--batch-equivalence")
     for key in sorted(set(old) | set(new)):
         name = (new.get(key) or old[key])["file"]
         if key not in new:
@@ -367,6 +421,9 @@ def batch_equivalence_problems(manifest: list[ManifestFile], root: Path = REFERE
             problems.append(f"{path.name}: {name} ({key[1]}, {key[2]}) is not listed")
         elif old[key] != new[key]:
             problems.append(f"{path.name}: {name} ({key[1]}, {key[2]}) differs from the references")
+        elif new[key]["predictions_basis"] == "not_available":
+            problems.append(f"{path.name}: {name} ({key[1]}, {key[2]}) is not bitwise equal to "
+                            "batch 1 and has no prediction comparison")
     return problems
 
 

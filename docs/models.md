@@ -727,30 +727,49 @@ folded ones (7/8).
 
 ### Batch equivalence
 
-Whether a file at batch 4 or 8 computes, for every item, exactly the output its
-batch-1 file computes for the same item follows from the references above: the
-8 images (or windows) are the same at every batch size, so item *i* of a batch-4
+Batch equivalence is recorded at two levels. **Bitwise**: whether a file at
+batch 4 or 8 computes, for every item, exactly the output its batch-1 file
+computes for the same item. This follows from the references above: the 8
+images (or windows) are the same at every batch size, so item *i* of a batch-4
 or batch-8 run is compared byte for byte with run *i* of the batch-1 file, on
 the same device. The SplitMix64 input does not count, because its batch items
-differ from each other. `scripts/make_references.py` writes the result to
-`models/batch_equivalence.json` (committed, about 80 KB) whenever it writes the
-references, and `--check` fails if the committed file no longer matches them:
+differ from each other. **Predictions**: for the files whose bits differ,
+whether any prediction changes, from a larger set run on the same provider and
+compute precision (CPU sessions with the reference settings, strict NPU
+sessions):
+
+- image models: the top-1 class of every ImageNetV2 eval-quick image (1,000),
+  batch N against batch 1 (basis `eval_quick_top1`);
+- the autoencoder: the anomaly flag of every window of the test split (11,230),
+  batch N against batch 1, both at one threshold, the batch-1 file's largest
+  validation score on that provider (the rule of
+  [autoencoder.md](autoencoder.md); basis `test_split_flags`).
+
+A bitwise-equal file has equal predictions by definition (basis `bitwise`).
+`scripts/make_references.py` writes both to `models/batch_equivalence.json`
+(committed, about 100 KB) whenever it writes the references, and `--check` fails
+if the committed file no longer matches the references, if a file whose bits
+differ has no prediction comparison, or if a split manifest the comparisons
+were made on has changed:
 
 ```powershell
-# rewrite only the summary, from the references on disk
+# rewrite only the summary: bitwise from the references on disk, predictions by
+# running the models (needs the data, and the NPU for NPU entries; about 2 minutes)
 .\.venv\Scripts\python.exe scripts\make_references.py --batch-equivalence
 ```
 
 Each entry is keyed by the model file's SHA256, the provider (`cpu`, `npu`)
 and the compute precision (the stored precision on the CPU; `int8` or `fp16`
-on the NPU), and records `equivalent_to_b1`, the items compared and differing,
-and the largest absolute difference. `edgebench run` looks every model up there
-and records the answer in its result (`execution.batch_equivalence`; a model
-that is not equivalent gets a `batch_not_equivalent` warning, see
+on the NPU), and records `bitwise_equal_to_b1`, the items compared and
+differing, the largest absolute difference, and `predictions_equal_to_b1` with
+its basis and counts. `edgebench run` looks every model up there and records the
+answer in its result (`execution.batch_equivalence`): a model whose predictions
+differ gets a `batch_not_equivalent` warning, one whose outputs differ only in
+their bits gets a `batch_rounding_only` note (see
 [cli.md](cli.md#batch-equivalence)). The summary lists 132 entries (every model
-file on each of its reference devices), 22 of them not equivalent. By group
-("same": every file of the group computes the batch-1 outputs exactly;
-"differs": none does):
+file on each of its reference devices), 22 of them not bitwise equal, 14 with
+different predictions. Bitwise, by group ("same": every file of the group
+computes the batch-1 outputs exactly; "differs": none does):
 
 | Model | Variants | Provider, compute | b4 vs b1 | b8 vs b1 | Largest difference |
 |---|---|---|---|---|---|
@@ -773,15 +792,40 @@ file on each of its reference devices), 22 of them not equivalent. By group
 | `conv1d_autoencoder` | INT8, INT8 unpruned | CPU, INT8 | same | same | 0 |
 | `conv1d_autoencoder` | INT8, INT8 unpruned | NPU, INT8 | same | same | 0 |
 
+Predictions, for every file whose bits differ (a pruned file and its unpruned
+file always agree, so they share a row):
+
+| Model | Variant | Provider, compute | Batch | Predictions differing from b1 |
+|---|---|---|---|---|
+| `mobilenetv2` | FP32 | CPU, FP32 | 4 | 0 of 1,000 |
+| `mobilenetv2` | FP32 | CPU, FP32 | 8 | 0 of 1,000 |
+| `mobilenetv2` | FP32 folded | CPU, FP32 | 4 | 0 of 1,000 |
+| `mobilenetv2` | FP32 folded | CPU, FP32 | 8 | 0 of 1,000 |
+| `mobilenetv2` | INT8 | NPU, INT8 | 8 | 6 of 1,000 |
+| `mobilenetv2` | INT8 folded | NPU, INT8 | 8 | 7 of 1,000 |
+| `resnet18` | INT8 | NPU, INT8 | 8 | 10 of 1,000 |
+| `resnet18` | INT8 folded | NPU, INT8 | 8 | 13 of 1,000 |
+| `efficientnet_lite0` | FP32 | CPU, FP32 | 4 | 0 of 1,000 |
+| `efficientnet_lite0` | FP32 | CPU, FP32 | 8 | 0 of 1,000 |
+| `efficientnet_lite0` | FP32 folded | CPU, FP32 | 4 | 0 of 1,000 |
+| `efficientnet_lite0` | FP32 folded | CPU, FP32 | 8 | 0 of 1,000 |
+| `efficientnet_lite0` | INT8 | NPU, INT8 | 8 | 5 of 1,000 |
+| `efficientnet_lite0` | INT8 folded | NPU, INT8 | 8 | 1 of 1,000 |
+| `conv1d_autoencoder` | FP32 imported | NPU, FP16 | 4 | 2 of 11,230 |
+| `conv1d_autoencoder` | FP32 imported | NPU, FP16 | 8 | 2 of 11,230 |
+
 The CPU differences of the FP32 MobileNetV2 and EfficientNet-Lite0 files are in
-the last bits of the logits (largest 3.8e-06 and 5.2e-06; every item differs).
-Both models use depthwise convolutions and ResNet-18 does not, so a different
-accumulation order in ONNX Runtime's CPU kernels for a batch is the likely
-cause (not verified). ResNet-18 and every INT8 file are exact on the CPU. On the NPU, the INT8 image files at batch 8 compute
-different outputs on every image (the HTP runs the batch-8 graph differently;
-batch 4 is exact), and the raw tf2onnx graph of the autoencoder
-(`fp32_imported`) differs at batch 4 and 8 in FP16, while its cleaned graph does
-not. A difference is a fact about the computation, not an error: the
-published accuracy evaluation uses the largest batch whose top-5 predictions
-match batch 1 ([accuracy.md](accuracy.md)), and latency results at a batch size
-that is not equivalent say so.
+the last bits of the logits (largest 3.8e-06 and 5.2e-06; every item differs)
+and change no top-1 class. Both models use depthwise convolutions and ResNet-18
+does not, so a different accumulation order in ONNX Runtime's CPU kernels for a
+batch is the likely cause (not verified). ResNet-18 and every INT8 file are
+exact on the CPU. On the NPU, the INT8 image files at batch 8 compute different
+outputs on every image (the HTP runs the batch-8 graph differently; batch 4 is
+exact), and that changes the top-1 class of 1 to 13 of the 1,000 images. The
+raw tf2onnx graph of the autoencoder (`fp32_imported`) differs at batch 4 and 8
+in FP16, while its cleaned graph does not; the difference is small, but it moves
+2 test windows whose scores lie within 2% of the threshold across it. A
+difference is a fact about the computation, not an error: the published accuracy
+evaluation uses the largest batch whose top-5 predictions match batch 1
+([accuracy.md](accuracy.md)), and latency results at a batch size whose
+predictions differ say so.

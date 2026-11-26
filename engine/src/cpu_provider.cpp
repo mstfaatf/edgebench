@@ -85,6 +85,12 @@ Result<NodeAssignment> CpuProvider::record_placement(const std::filesystem::path
     }
 }
 
+Result<std::unique_ptr<BenchSession>> Provider::create_context_building_session(
+    const std::filesystem::path&, const RunConfig&, const std::filesystem::path&) {
+    return Error{ExitCode::internal_error, "ep_context_unsupported",
+                 "the " + std::string(name()) + " provider has no EP context cache"};
+}
+
 Result<std::unique_ptr<Provider>> make_provider(Runtime& runtime, const RunConfig& config) {
     switch (config.provider) {
         case ProviderKind::cpu:

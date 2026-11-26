@@ -18,8 +18,8 @@
     },
     {
       "code": "batch_not_equivalent",
-      "message": "At batch size 8 this model computes outputs that differ from its batch-1 file's on the NPU (int8 compute; from the reference outputs): this result measures a different computation and must not be averaged or compared with batch-1 results as the same one.",
-      "path": "/execution/batch_equivalence/equivalent_to_b1"
+      "message": "At batch size 8 this model's predictions differ from its batch-1 file's on the NPU (int8 compute): 6 of 1000 eval-quick images get a different top-1 class. This result measures a different computation and must not be averaged or compared with batch-1 results as the same one.",
+      "path": "/execution/batch_equivalence/predictions_equal_to_b1"
     },
     {
       "code": "value_unavailable",
@@ -52,6 +52,7 @@
       "path": "/runtime/qnn/soc_model"
     }
   ],
+  "notes": [],
   "tool": {
     "name": "edgebench",
     "version": "0.1.0",
@@ -300,13 +301,16 @@
       "context_path": null,
       "hit": null,
       "verified_equal_outputs": null,
-      "key": null
+      "key": null,
+      "cache_dir": null,
+      "embed_mode": null
     },
     "run_binding": "iobinding_preallocated",
     "profiling": {
       "ort": false,
       "qnn_level": "off"
-    }
+    },
+    "init_breakdown": false
   },
   "execution": {
     "full_device_execution_verified": true,
@@ -361,7 +365,8 @@
           "trial_index": null,
           "modules_outside_bundle": []
         }
-      ]
+      ],
+      "deleted_stale_cache_files": []
     },
     "node_assignment": {
       "total_nodes": 1,
@@ -388,8 +393,12 @@
       "source": "model"
     },
     "batch_equivalence": {
-      "equivalent_to_b1": false,
-      "basis": "reference_outputs",
+      "bitwise_equal_to_b1": false,
+      "bitwise_basis": "reference_outputs",
+      "predictions_equal_to_b1": false,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 6,
       "reference_batch": 1
     }
   },

@@ -1,0 +1,12 @@
+{
+  "description": "A key id that is not the SHA256 of the recorded key fields (a key field was changed).",
+  "base": "docs/examples/v1.2.0/example-npu-int8-ep-cache-init-breakdown.json",
+  "set": {
+    "/config/ep_context_cache/key/graph_optimization_level": "enable_basic"
+  },
+  "expect": {
+    "severity": "error",
+    "code": "cache_key_id_mismatch",
+    "path": "/config/ep_context_cache/key_id"
+  }
+}

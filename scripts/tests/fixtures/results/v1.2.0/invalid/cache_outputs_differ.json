@@ -1,0 +1,12 @@
+{
+  "description": "A successful run whose cached session did not give the compiled session's outputs (the engine fails such a run).",
+  "base": "docs/examples/v1.2.0/example-npu-int8-ep-cache-init-breakdown.json",
+  "set": {
+    "/config/ep_context_cache/verified_equal_outputs": false
+  },
+  "expect": {
+    "severity": "error",
+    "code": "cache_outputs_differ",
+    "path": "/config/ep_context_cache/verified_equal_outputs"
+  }
+}

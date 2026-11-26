@@ -2,6 +2,7 @@
 
 #include <string>
 #include <system_error>
+#include <vector>
 
 #include "edgebench/bundle_modules.hpp"
 
@@ -17,10 +18,13 @@ fs::path qnn_htp_backend_path(const fs::path& bundle_dir) {
     return bundle_dir / kQnnHtpBackendFiles.front();
 }
 
-Result<fs::path> check_qnn_htp_backend(const fs::path& bundle_dir) {
+Result<fs::path> check_qnn_htp_backend(const fs::path& bundle_dir, bool ep_context) {
     std::string missing;
     int count = 0;
-    for (std::wstring_view name : kQnnHtpBackendFiles) {
+    std::vector<std::wstring_view> required(kQnnHtpBackendFiles.begin(), kQnnHtpBackendFiles.end());
+    if (ep_context)
+        required.push_back(kQnnSystemFile);
+    for (std::wstring_view name : required) {
         const fs::path file = bundle_dir / name;
         std::error_code ec;
         if (!fs::is_regular_file(file, ec)) {
@@ -29,10 +33,13 @@ Result<fs::path> check_qnn_htp_backend(const fs::path& bundle_dir) {
         }
     }
     if (count > 0) {
-        return Error{ExitCode::ort_load_failure, "qnn_backend_not_bundled",
-                     std::string("the QNN HTP backend ") + (count == 1 ? "file " : "files ") +
-                         missing + (count == 1 ? " does" : " do") +
-                         " not exist; NPU sessions need it"};
+        return Error{
+            ExitCode::ort_load_failure, "qnn_backend_not_bundled",
+            std::string("the QNN HTP backend ") + (count == 1 ? "file " : "files ") + missing +
+                (count == 1 ? " does" : " do") + " not exist; NPU sessions need it" +
+                (ep_context ? std::string(" (QnnSystem.dll: sessions that write or read an "
+                                          "EP context)")
+                            : std::string())};
     }
     std::error_code ec;
     fs::path backend = fs::absolute(qnn_htp_backend_path(bundle_dir), ec);
@@ -92,6 +99,14 @@ std::string_view qnn_ep_hint(std::string_view kind) {
         return "Strict mode refuses sessions in which any node would run on the CPU. Use a "
                "model the NPU supports, or pass --no-strict to let those nodes run on the CPU "
                "(recorded in the result and warned about).";
+    }
+    if (kind == "ep_context_corrupt" || kind == "ep_context_load_failed") {
+        return "Rebuild the EP context cache entry with --ep-cache build (it deletes the entry "
+               "for this key and compiles the model again).";
+    }
+    if (kind == "ep_context_outputs_differ") {
+        return "The cached context does not compute what the model computes; run with "
+               "--ep-cache off, and report the model and versions.";
     }
     if (kind == "module_outside_bundle")
         return load_error_hint(OrtLoadError::foreign_module_loaded);

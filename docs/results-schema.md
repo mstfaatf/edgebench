@@ -12,11 +12,12 @@ and the dashboard that reads them.
   version is `EDGEBENCH_RESULTS_SCHEMA_VERSION` in `CMakeLists.txt`.
 - Examples:
   - [`docs/examples/v1.2.0/`](examples/v1.2.0/): the four 1.1.0 examples with
-    every 1.2.0 key added, plus two real runs of the C++ engine: a strict-mode
+    every 1.2.0 key added, plus three real runs of the C++ engine: a strict-mode
     refusal of the test fixture `npu_unsupported_op.onnx` (with
-    `error.unsupported_nodes`) and a short NPU run of `mobilenetv2_int8_b8.onnx`,
-    whose batch-8 outputs differ from batch 1 (`batch_not_equivalent`). Their
-    `run_id` is the nil UUID.
+    `error.unsupported_nodes`), a short NPU run of `mobilenetv2_int8_b8.onnx`,
+    whose batch-8 predictions differ from batch 1 (`batch_not_equivalent`), and
+    a short NPU run of `mobilenetv2_int8_b1.onnx` with `--ep-cache use` and
+    `--init-breakdown`. Their `run_id` is the nil UUID.
   - [`docs/examples/v1.1.0/`](examples/v1.1.0/): CPU FP32, CPU INT8, NPU INT8 (strict,
     cached EP context, accelerator time from a profiled pass) and a run that failed
     to load ONNX Runtime. Values come from the C++ measurements in
@@ -523,25 +524,40 @@ an empty list if it named none), and is `null` for every other failure.
 
 ### Batch equivalence
 
-`execution.batch_equivalence` = `{equivalent_to_b1, basis, reference_batch}`
-records whether the model file, on this provider and compute precision,
-computes for every batch item exactly the output its batch-1 sibling computes
-for that item. A result that is not equivalent measures a different
-computation: it must not be averaged or compared with batch-1 results as if it
-were the same one, and it carries a `batch_not_equivalent` warning.
+`execution.batch_equivalence` = `{bitwise_equal_to_b1, bitwise_basis,
+predictions_equal_to_b1, predictions_basis, predictions_compared,
+predictions_differing, reference_batch}` compares the model file, on this
+provider and compute precision, with its batch-1 sibling at two levels:
+
+- `bitwise_equal_to_b1`: every batch item's output is bit-identical to the
+  batch-1 file's output for that item;
+- `predictions_equal_to_b1`: no prediction changes. Bitwise-equal files are
+  prediction-equal by definition (`predictions_basis` `bitwise`); for the
+  others the basis is `eval_quick_top1` (top-1 class of the 1,000 ImageNetV2
+  eval-quick images) or `test_split_flags` (anomaly flag of every test-split
+  window of the autoencoder, at the batch-1 file's threshold), with the count
+  compared and the count that differ.
+
+A result whose predictions differ measures a different computation: it must not
+be averaged or compared with batch-1 results as if it were the same one, and it
+carries a `batch_not_equivalent` warning. A result whose bits differ but whose
+predictions do not carries a `batch_rounding_only` entry in `notes` instead (an
+informational message with the shape of a warning; `notes` is a top-level array
+added in 1.2.0).
 
 The answer comes from the committed reference data, not from a check at run
 time. `scripts/make_references.py` compares the stored reference outputs of
 every model file with those of its batch-1 file, item by item, on the 8
 reference images or windows (the SplitMix64 input does not count: its batch
-items differ from each other) and writes `models/batch_equivalence.json`, keyed
-by model SHA256, provider (`cpu`, `npu`) and compute precision (see
+items differ from each other), runs the prediction comparison for the files that
+differ, and writes `models/batch_equivalence.json`, keyed by model SHA256,
+provider (`cpu`, `npu`) and compute precision (see
 [models.md](models.md#batch-equivalence)). The engine finds that file in the
 model's directory or the nearest parent directory that has one and looks the
-model up by its SHA256. `basis` is `batch_size_1` (a batch-1 model:
-`equivalent_to_b1` is `true` by definition), `reference_outputs` (found), or
-`not_available` (not listed, or no summary file: `equivalent_to_b1` is `null`
-and a `value_unavailable` warning says why). `reference_batch` is always 1.
+model up by its SHA256. `bitwise_basis` is `batch_size_1` (a batch-1 model:
+equal by definition), `reference_outputs` (found), or `not_available` (not
+listed, or no summary file: both answers are `null` and a `value_unavailable`
+warning says why). `reference_batch` is always 1.
 
 ### Session initialization per trial
 
@@ -551,9 +567,14 @@ ONNX model, creation of the session that wrote the EP context cache, and
 creation from the EP context model; each `null` when not measured in the
 trial. `timing.session_init.summary` holds `{count, median_ms, min_ms,
 max_ms}` (nearest-rank median) of each over the trials that measured it, or
-`null`. The 1.1.0 arrays (`session_init.cold_ms`, `cached_ms`) and
-`context_build_ms` stay as they are. The C++ engine measures only `cold_ms`
-so far (no EP context cache).
+`null`. With `config.init_breakdown` (`--init-breakdown`) every trial
+measures all three in separate sessions before its timed session; otherwise a
+trial records only its timed session's creation, as `cold_ms` (compiled) or
+`cached_init_ms` (from the cache). The 1.1.0 fields keep their meaning:
+`session_create_ms` is the median creation time of the timed sessions,
+`ep_context_state` says what they were created from (`cold`, `cached`), the
+`cold_ms` and `cached_ms` arrays list every creation of that kind in order, and
+`context_build_ms` is the one build of the shared cache before the trials.
 
 ### EP context cache
 
@@ -561,14 +582,32 @@ so far (no EP context cache).
 
 | Field | Meaning |
 |---|---|
-| `mode` | `off` (no cache; `enabled` must be `false`), `build` (a missing or stale cache was built and used), `use` (an existing cache whose key matched was used) |
-| `key_id` | The cache key as one string: SHA256 of the 1.1.0 `key` object (the key fields: model SHA256, ONNX Runtime, EP and QNN SDK versions, EP options digest, device) serialized as JSON with sorted keys and no whitespace |
+| `mode` | `off` (no cache; `enabled` must be `false`), `build` (the entry for this key was deleted, built again before the trials, and every timed session created from it), `use` (the timed sessions were created from the entry whose key matched; built first if there was none) |
+| `key_id` | The cache key as one string: SHA256 of the `key` object serialized as JSON with sorted keys, no whitespace and UTF-8 text; the cache entry's directory is named by it |
 | `context_path` | Absolute path of the EP context model the timed sessions were created from |
-| `hit` | Whether a cache with a matching key existed before the run; `null` when the cache is off |
-| `verified_equal_outputs` | Whether a session created from the cache gave bit-identical outputs to one compiled from the ONNX model on the same input; required when `mode` is `use` |
+| `hit` | `true` if a valid entry with a matching key existed and was used (`use`); `false` if the run built it; `null` when the cache is off |
+| `verified_equal_outputs` | Whether a session created from the cache gave bit-identical outputs to one compiled from the ONNX model on the same input; required when `mode` is `build` or `use` |
+| `cache_dir` | Absolute path of the cache directory; also set with `mode` `off` when `--init-breakdown` built its per-trial contexts there |
+| `embed_mode` | `ep.context_embed_mode` of the contexts: `0` (context binary in its own file) |
 
-The C++ engine records NPU runs with the cache off (`enabled` false, `state`
-`disabled`, `mode` `off`, the rest `null`).
+The `key` object gains, next to its 1.1.0 fields (model SHA256, ONNX Runtime,
+EP and QNN SDK versions, EP options digest, device): `qnn_backend_file_version`
+(`QnnHtp.dll` ProductVersion), `ep_options` (every EP option passed),
+`session_config` (every session config entry that affects compilation: all but
+`ep.context_enable` and `ep.context_file_path`) and `graph_optimization_level`.
+With them the key object holds every key field, so the validator recomputes
+`key_id` from it. `state` is `generated` (nothing existed for this model),
+`loaded` (a hit) or `regenerated` (an entry for this model was deleted and
+rebuilt: a stale key, or the current key with `build`).
+
+`config.init_breakdown` (boolean) records `--init-breakdown`;
+`execution.verification_details.deleted_stale_cache_files` lists the files a run
+deleted from stale entries (same model, other key); module checks after
+untimed sessions (context build, the equal-outputs check, `--init-breakdown`
+sessions) have stage `after_untimed_session`. The C++ engine with `--ep-cache
+off` and no `--init-breakdown` records `enabled` false, `state` `disabled`,
+`mode` `off` and the rest `null`; see
+[cli.md](cli.md#ep-context-cache-and-initialization).
 
 ### Profiled accelerator pass
 
@@ -635,7 +674,7 @@ The code is printed with each problem:
 | `device_selection_ambiguous` | error | Successful run whose `ep_device.selection.candidate_count` is not 1 |
 | `ep_context_files_missing` | error | `ep_context_cache.state` is `generated`, `loaded` or `regenerated` but `files` is empty |
 | `ep_context_state_mismatch` | error | `state` is `disabled` while `enabled` is `true` (or the reverse), or the cache was `loaded` but `session_init.ep_context_state` is not `cached` |
-| `session_init_not_applicable` | error | `session_init.context_build_ms` or `cached_ms` is set without an enabled cache, or `context_build_ms` is set although the cache was `loaded` |
+| `session_init_not_applicable` | error | `session_init.context_build_ms` is set without an enabled cache, `cached_ms` without an enabled cache or `init_breakdown`, or `context_build_ms` is set although the cache was `loaded` |
 | `qnn_validation_missing` | error | `verification_method` is `qnn_validation_log` but `execution.qnn_validation` is `null` |
 | `rejected_nodes_but_verified` | error | `full_device_execution_verified` is `true` although `qnn_validation` lists rejected or failed nodes |
 | `missing_1_1_0_key` | warning | `tool.implementation` is `cpp` and a key defined by the 1.1.0 schema is absent (reported once per key, with its path). Other writers may omit keys added in 1.1.0 (absent means null), but the C++ engine writes every key; the check descends into nested objects and arrays but not into blocks that are `null` |
@@ -650,18 +689,29 @@ fields involved are present:
 | `cpu_compute_not_stored` | error | CPU result whose `compute` differs from `stored` |
 | `effective_precision_stored_mismatch` | error | `effective_precision.stored` differs from `model.stored_precision` |
 | `unsupported_nodes_mismatch` | error | `error.kind` is `strict_mode_refusal` but `error.unsupported_nodes` is `null` or absent, or `unsupported_nodes` is set for any other failure |
-| `batch_not_equivalent_unflagged` | error | `batch_equivalence.equivalent_to_b1` is `false` without a `batch_not_equivalent` warning |
+| `batch_not_equivalent_unflagged` | error | `batch_equivalence.predictions_equal_to_b1` is `false` without a `batch_not_equivalent` warning |
+| `batch_not_equivalent_unfounded` | error | A `batch_not_equivalent` warning while `predictions_equal_to_b1` is not `false` |
+| `batch_rounding_note_missing` | error | `bitwise_equal_to_b1` `false` and `predictions_equal_to_b1` `true` without a `batch_rounding_only` note |
+| `batch_rounding_note_unfounded` | error | A `batch_rounding_only` note on a result that is not bitwise different with equal predictions |
+| `batch_prediction_counts_mismatch` | error | `predictions_equal_to_b1` disagrees with `predictions_differing` (true exactly when it is 0) |
 | `cache_hit_without_cache` | error | `ep_context_cache.hit` is `true` while `enabled` is `false` |
-| `cache_outputs_not_verified` | error | `ep_context_cache.mode` is `use` but `verified_equal_outputs` is `null` |
+| `cache_outputs_not_verified` | error | A successful run with `ep_context_cache.mode` `build` or `use` whose `verified_equal_outputs` is `null` |
+| `cache_outputs_differ` | error | A successful run with `verified_equal_outputs` `false` (such a run must fail) |
+| `cache_key_missing` | error | A successful run with `mode` `build` or `use` without `key_id` or `key` |
+| `cache_key_id_mismatch` | error | A 1.2.0 `key` (with `session_config`) whose canonical SHA256 is not `key_id`, or whose `model_sha256` / `ep_options` differ from `model.sha256` / `config.ep_options` |
 | `profiled_pass_without_accelerator_ep` | error | An enabled `timing.profiled_pass` on a CPU run |
 | `qnn_partition_count_mismatch` | error | `runtime.qnn.partition_count` differs from the nodes `execution.node_assignment` places on `QNNExecutionProvider` |
 | `missing_1_2_0_key` | warning | `tool.implementation` is `cpp` and a key added in 1.2.0 is absent. Keys added in 1.1.0 that are absent from a 1.2.0 document are still reported as `missing_1_1_0_key` |
 
 The schema itself also requires: `mode` `off` only with `enabled` `false`;
-`basis` `not_available` exactly when `equivalent_to_b1` is `null`; `basis`
-`batch_size_1` only with `equivalent_to_b1` `true`. The 1.1.0 rule
+`bitwise_basis` `not_available` exactly when `bitwise_equal_to_b1` is `null`;
+`bitwise_basis` `batch_size_1` only with `bitwise_equal_to_b1` `true`;
+`bitwise_equal_to_b1` `true` exactly with `predictions_basis` `bitwise` (and
+`predictions_equal_to_b1` `true`); `predictions_basis` `not_available` exactly
+when `predictions_equal_to_b1` is `null`; counts exactly for `eval_quick_top1`
+and `test_split_flags`. The 1.1.0 rule
 `session_init_not_applicable` also covers the per-trial `context_build_ms` and
-`cached_init_ms`.
+`cached_init_ms` (allowed with an enabled cache or `config.init_breakdown`).
 
 Statistics are not recomputed from the latency file; the engine is responsible
 for computing them from the same data.
@@ -787,9 +837,21 @@ Additive; every 1.0.0 and 1.1.0 document is valid 1.2.0 after changing
 - Validator: the 1.2.0 rules above and `missing_1_2_0_key`.
 
 No latency results have been published yet. Until the first one is, 1.2.0 may
-still be amended in place (as 1.1.0 was) while the EP context cache,
-initialization breakdown, backend-reported versions and the profiled pass are
-filled in; amendments will be listed here.
+still be amended in place (as 1.1.0 was) while the backend-reported versions and
+the profiled pass are filled in. Amendments so far:
+
+- `execution.batch_equivalence`: `equivalent_to_b1` / `basis` became
+  `bitwise_equal_to_b1` / `bitwise_basis`, and `predictions_equal_to_b1`,
+  `predictions_basis`, `predictions_compared`, `predictions_differing` were
+  added; top-level `notes` (informational, same shape as warnings) with
+  `batch_rounding_only`; the `batch_not_equivalent` warning now means the
+  predictions differ.
+- EP context cache: `config.ep_context_cache.cache_dir` and `embed_mode`; key
+  fields `qnn_backend_file_version`, `ep_options`, `session_config`,
+  `graph_optimization_level`; `config.init_breakdown`;
+  `verification_details.deleted_stale_cache_files`; module-check stage
+  `after_untimed_session`; `session_init_not_applicable` allows per-trial
+  cached values with `init_breakdown` and the cache off.
 
 ### 1.1.0
 

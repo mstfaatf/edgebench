@@ -1,0 +1,18 @@
+{
+  "description": "A batch_rounding_only note on a result that is bit-identical to batch 1.",
+  "base": "docs/examples/v1.2.0/example-cpu-fp32.json",
+  "set": {
+    "/notes": [
+      {
+        "code": "batch_rounding_only",
+        "message": "At batch size 4 this model's outputs differ from its batch-1 file's on the CPU (fp32 compute) in their last bits only: no prediction changes (1000 eval-quick images compared).",
+        "path": "/execution/batch_equivalence/bitwise_equal_to_b1"
+      }
+    ]
+  },
+  "expect": {
+    "severity": "error",
+    "code": "batch_rounding_note_unfounded",
+    "path": "/execution/batch_equivalence/bitwise_equal_to_b1"
+  }
+}

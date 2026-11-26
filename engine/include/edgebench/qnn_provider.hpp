@@ -15,7 +15,9 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <map>
 #include <memory>
+#include <string>
 
 #include "edgebench/ep_library.hpp"
 #include "edgebench/provider.hpp"
@@ -35,6 +37,10 @@ public:
     const ProviderDescription& describe() const override { return description_; }
     Result<std::unique_ptr<BenchSession>> create_session(const std::filesystem::path& model,
                                                          const RunConfig& config) override;
+    /// The same session with qnn_context_build_config(): writes the EP context.
+    Result<std::unique_ptr<BenchSession>> create_context_building_session(
+        const std::filesystem::path& model, const RunConfig& config,
+        const std::filesystem::path& context_model) override;
     /// Placement from a separate verbose session with the same options, plus the
     /// QNN EP's node validation (NodeAssignment::qnn_validation). The modules are
     /// checked while that session exists, as after every QNN session.
@@ -46,9 +52,14 @@ private:
                 ProviderDescription description);
 
     /// Session options attached to the selected NPU: intra-op threads, sequential
-    /// execution, graph optimization level, describe().session_config and
+    /// execution, graph optimization level, `session_config` and
     /// describe().ep_options.
-    Result<Ort::SessionOptions> session_options(const RunConfig& config);
+    Result<Ort::SessionOptions> session_options(
+        const RunConfig& config, const std::map<std::string, std::string>& session_config);
+
+    Result<std::unique_ptr<BenchSession>> create(
+        const std::filesystem::path& model, const RunConfig& config,
+        const std::map<std::string, std::string>& session_config);
 
     Runtime& runtime_;
     EpLibrary& library_;

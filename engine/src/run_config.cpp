@@ -76,7 +76,15 @@ std::vector<ConfigError> validate(const RunConfig& c) {
             add("no-strict", only_npu + " (the CPU provider has no fallback to disable)");
         if (c.htp_performance_mode)
             add("htp-performance-mode", only_npu);
+        if (c.ep_cache != EpCacheMode::off)
+            add("ep-cache", only_npu + " (the CPU provider has no EP context cache)");
+        if (c.init_breakdown)
+            add("init-breakdown", only_npu + " (the CPU provider has no EP context cache)");
     }
+    if (c.ep_cache_dir && !c.uses_ep_context())
+        add("ep-cache-dir", "is only used with --ep-cache build|use or --init-breakdown");
+    if (c.ep_cache_dir && c.ep_cache_dir->empty())
+        add("ep-cache-dir", "must not be empty");
     if (c.htp_performance_mode && !is_htp_performance_mode(*c.htp_performance_mode)) {
         add("htp-performance-mode", "unsupported mode '" + *c.htp_performance_mode +
                                         "'; supported modes: " + htp_performance_modes_list());
@@ -124,6 +132,28 @@ std::optional<OutputFormat> parse_output_format(std::string_view text) {
     if (text == "json")
         return OutputFormat::json;
     return std::nullopt;
+}
+
+std::optional<EpCacheMode> parse_ep_cache_mode(std::string_view text) {
+    if (text == "off")
+        return EpCacheMode::off;
+    if (text == "build")
+        return EpCacheMode::build;
+    if (text == "use")
+        return EpCacheMode::use;
+    return std::nullopt;
+}
+
+std::string_view schema_name(EpCacheMode mode) {
+    switch (mode) {
+        case EpCacheMode::off:
+            return "off";
+        case EpCacheMode::build:
+            return "build";
+        case EpCacheMode::use:
+            return "use";
+    }
+    return "off";
 }
 
 std::string_view cli_name(RunBinding binding) {

@@ -7,7 +7,10 @@
 #include <sstream>
 #include <thread>
 
+#include <windows.h>
+
 #include "edgebench/bundle_modules.hpp"
+#include "edgebench/ep_context_cache.hpp"
 #include "edgebench/interrupt.hpp"
 #include "edgebench/npu_options.hpp"
 #include "edgebench/run_identity.hpp"
@@ -96,6 +99,293 @@ Result<void> check_loaded_modules(BenchmarkResult& result, const char* stage,
     return check.result();
 }
 
+// What ONNX Runtime logs when an EP rates a compiled (EP context) model as usable
+// but not optimal for the device.
+constexpr std::string_view kRecompileMessage = "reports compiled model is supported but suboptimal";
+
+std::filesystem::path utf8_path(const std::string& s) {
+    return std::filesystem::path(std::u8string(s.begin(), s.end()));
+}
+
+// --- EP context cache --------------------------------------------------------
+
+std::string utc_now() {
+    return utc_timestamp(std::chrono::system_clock::now());
+}
+
+// A session from an EP context model that ONNX Runtime could not create: the
+// context is unusable (a backend that failed to load keeps its own error).
+Error context_load_failed(Error e, const std::filesystem::path& context_model) {
+    if (e.exit_code == ExitCode::ort_load_failure)
+        return e;
+    e.exit_code = ExitCode::ort_runtime_error;
+    e.kind = "ep_context_load_failed";
+    e.message = "cannot create a session from the EP context model " + path_to_utf8(context_model) +
+                " (" + e.message +
+                "); the context may be corrupt or truncated: rebuild it with --ep-cache build";
+    e.unsupported_nodes.reset();
+    return e;
+}
+
+// The key fields of this run's EP context (ep_context_cache.hpp).
+CacheKeyFields cache_key_fields(const BenchmarkResult& r, const RunConfig& config) {
+    const ProviderDescription& p = r.runtime.provider;
+    CacheKeyFields k;
+    k.model_sha256 = r.model.file.sha256;
+    k.ort_version = r.runtime.onnxruntime.ort_version.empty()
+                        ? std::nullopt
+                        : std::optional<std::string>(r.runtime.onnxruntime.ort_version);
+    k.ep_version = p.ep_version;
+    if (p.qnn) {
+        k.qnn_sdk_version = p.qnn->sdk_version;
+        if (const std::optional<ModuleFileVersion> v =
+                read_module_file_version(utf8_path(p.qnn->backend_path)))
+            k.qnn_backend_file_version = v->product_version;
+    }
+    k.ep_options = p.ep_options;
+    k.session_config = compile_session_config(p.session_config);
+    k.graph_optimization_level = std::string(schema_name(config.graph_opt));
+    if (p.ep_device)
+        k.device = CacheDevice{p.ep_device->device.device_type, p.ep_device->device.vendor_id,
+                               p.ep_device->device.device_id};
+    return k;
+}
+
+// Deletes an entry directory the run created (writing its manifest first, so that
+// only what the build wrote is deleted). Errors are ignored: the run already failed.
+void discard_entry(const std::filesystem::path& dir, const std::string& key_id,
+                   const nlohmann::json& key, const std::string& context_model) {
+    if (write_cache_manifest(dir, key_id, key, context_model, utc_now()))
+        (void)delete_cache_entry(dir.parent_path(), dir);
+}
+
+struct BuiltContext {
+    double build_ms = 0;
+    CacheManifest manifest;
+};
+
+// Builds `model`'s EP context in the new directory `dir` (a direct subdirectory of
+// the cache directory) and writes its manifest. On failure the directory's files
+// are deleted again.
+Result<BuiltContext> build_context(Provider& provider, const RunConfig& config, BenchmarkResult& r,
+                                   const std::filesystem::path& dir, const std::string& key_id,
+                                   const nlohmann::json& key, std::optional<int> trial) {
+    std::error_code ec;
+    if (!std::filesystem::create_directory(dir, ec)) {
+        return Error{ExitCode::output_error, "ep_cache_dir_not_writable",
+                     "cannot create " + path_to_utf8(dir) + " in the EP context cache: " +
+                         (ec ? ec.message() : std::string("it already exists"))};
+    }
+    const std::string name = context_model_name(r.model.file.path);
+    const std::filesystem::path context_model = dir / utf8_path(name);
+    Result<std::unique_ptr<BenchSession>> session =
+        provider.create_context_building_session(r.model.file.path, config, context_model);
+    if (!session) {
+        discard_entry(dir, key_id, key, name);
+        return session.error();
+    }
+    const double ms = session.value()->session_create_ms();
+    Result<void> modules = check_loaded_modules(r, "after_untimed_session", trial);
+    session.value().reset();
+    if (!modules) {
+        discard_entry(dir, key_id, key, name);
+        return modules.error();
+    }
+    if (!std::filesystem::is_regular_file(context_model, ec)) {
+        discard_entry(dir, key_id, key, name);
+        return Error{
+            ExitCode::ort_runtime_error, "ep_context_not_written",
+            "the session with ep.context_enable = 1 did not write " + path_to_utf8(context_model)};
+    }
+    Result<CacheManifest> manifest = write_cache_manifest(dir, key_id, key, name, utc_now());
+    if (!manifest) {
+        discard_entry(dir, key_id, key, name);
+        return manifest.error();
+    }
+    return BuiltContext{ms, std::move(manifest).value()};
+}
+
+// One untimed session: created, checked, run once; its outputs.
+Result<std::vector<std::vector<std::byte>>> outputs_of(Provider& provider, const RunConfig& config,
+                                                       BenchmarkResult& r,
+                                                       const std::filesystem::path& model) {
+    Result<std::unique_ptr<BenchSession>> session = provider.create_session(model, config);
+    if (!session)
+        return session.error();
+    if (Result<void> m = check_loaded_modules(r, "after_untimed_session", std::nullopt); !m)
+        return m.error();
+    if (Result<void> run = session.value()->run_once(); !run)
+        return run.error();
+    return copy_outputs(*session.value());
+}
+
+// Before the trials of an NPU run that uses EP contexts: the cache directory, and
+// for --ep-cache build|use the key, stale entries, the cache entry (built if
+// needed) and the check that a session from it computes exactly what a session
+// compiled from the model computes. Fills result.ep_cache.
+Result<void> prepare_ep_cache(Provider& provider, const RunConfig& config, BenchmarkResult& r,
+                              const ProgressFn& progress, std::string& stage) {
+    EpContextCacheResult& c = r.ep_cache;
+    c.mode = config.ep_cache;
+    stage = "configuration";
+    Result<std::filesystem::path> dir = config.ep_cache_dir
+                                            ? Result<std::filesystem::path>(*config.ep_cache_dir)
+                                            : default_ep_cache_dir();
+    if (!dir)
+        return dir.error();
+    Result<std::filesystem::path> ready = prepare_ep_cache_dir(dir.value());
+    if (!ready)
+        return ready.error();
+    c.cache_dir = ready.value();
+    if (!c.enabled()) {
+        c.state = "disabled";
+        return {};
+    }
+    const std::filesystem::path& cache_dir = *c.cache_dir;
+    const CacheKeyFields fields = cache_key_fields(r, config);
+    const std::string key_id = cache_key_id(fields);
+    const nlohmann::json key = cache_key_json(fields);
+    c.key_id = key_id;
+    c.key = key;
+
+    Result<std::vector<std::filesystem::path>> stale =
+        delete_stale_cache_entries(cache_dir, fields.model_sha256, key_id);
+    if (!stale)
+        return stale.error();
+    c.deleted_stale = std::move(stale).value();
+
+    CacheLookup found = lookup_cache_entry(cache_dir, key_id, key);
+    if (found.state == CacheEntryState::foreign) {
+        return Error{ExitCode::output_error, "ep_cache_entry_foreign",
+                     found.problem +
+                         "; edgebench only deletes files listed in a manifest it wrote, so remove "
+                         "the directory or use another --ep-cache-dir"};
+    }
+    bool replaced = false;
+    if (config.ep_cache == EpCacheMode::build && found.state != CacheEntryState::missing) {
+        Result<std::vector<std::filesystem::path>> d =
+            delete_cache_entry(cache_dir, found.entry_dir);
+        if (!d)
+            return d.error();
+        replaced = true;
+        found.state = CacheEntryState::missing;
+    }
+    stage = "session_creation";
+    if (found.state == CacheEntryState::corrupt) {
+        return Error{ExitCode::ort_runtime_error, "ep_context_corrupt",
+                     "the EP context cache entry " + path_to_utf8(found.entry_dir) +
+                         " cannot be used: " + found.problem +
+                         "; rebuild it with --ep-cache build"};
+    }
+
+    CacheManifest manifest;
+    if (found.state == CacheEntryState::valid) {
+        c.hit = true;
+        c.state = "loaded";
+        manifest = *found.manifest;
+    } else {
+        c.hit = false;
+        if (progress)
+            progress("building the EP context cache (key " + key_id.substr(0, 12) + ")");
+        const std::filesystem::path staging =
+            cache_dir / (".build-" + key_id.substr(0, 16) + "-" +
+                         std::to_string(GetCurrentProcessId()) + "-" + r.run_id.substr(0, 8));
+        Result<BuiltContext> built =
+            build_context(provider, config, r, staging, key_id, key, std::nullopt);
+        if (!built)
+            return built.error();
+        if (!MoveFileExW(staging.c_str(), found.entry_dir.c_str(), MOVEFILE_WRITE_THROUGH)) {
+            const DWORD code = GetLastError();
+            (void)delete_cache_entry(cache_dir, staging);
+            return Error{ExitCode::output_error, "ep_cache_dir_not_writable",
+                         "cannot move the new EP context cache entry to " +
+                             path_to_utf8(found.entry_dir) + " (Windows error " +
+                             std::to_string(code) + ")"};
+        }
+        r.timing.session_init.context_build_ms = built.value().build_ms;
+        manifest = std::move(built.value().manifest);
+        c.state = replaced || !c.deleted_stale.empty() ? "regenerated" : "generated";
+    }
+    c.files = manifest.files;
+    c.context_path = found.entry_dir / utf8_path(manifest.context_model);
+
+    // A session from the cache must compute exactly what a compiled one computes.
+    if (progress)
+        progress("checking that a session from the EP context cache matches a compiled one");
+    Result<std::vector<std::vector<std::byte>>> compiled =
+        outputs_of(provider, config, r, r.model.file.path);
+    if (!compiled)
+        return compiled.error();
+    Result<std::vector<std::vector<std::byte>>> cached =
+        outputs_of(provider, config, r, *c.context_path);
+    if (!cached)
+        return context_load_failed(cached.error(), *c.context_path);
+    c.verified_equal_outputs = compiled.value() == cached.value();
+    if (!*c.verified_equal_outputs) {
+        stage = "measurement";
+        return Error{ExitCode::internal_error, "ep_context_outputs_differ",
+                     "a session created from the EP context model " +
+                         path_to_utf8(*c.context_path) +
+                         " gave outputs that are not bit-identical to a session compiled from the "
+                         "model, for the same input"};
+    }
+    return {};
+}
+
+// The three --init-breakdown session creations of one trial, each after the same
+// idle period: cold (from the model), context build (into a scratch entry
+// directory of this trial) and cached (from that scratch context, which is then
+// deleted).
+Result<TrialSessionInit> measure_init_breakdown(
+    Provider& provider, const RunConfig& config, BenchmarkResult& r, int trial,
+    const std::function<Result<void>(const char*)>& idle) {
+    TrialSessionInit init;
+    const std::filesystem::path& cache_dir = *r.ep_cache.cache_dir;
+    const CacheKeyFields fields = cache_key_fields(r, config);
+    const std::string key_id = cache_key_id(fields);
+    const nlohmann::json key = cache_key_json(fields);
+
+    if (Result<void> i = idle("cold session creation"); !i)
+        return i.error();
+    {
+        Result<std::unique_ptr<BenchSession>> s =
+            provider.create_session(r.model.file.path, config);
+        if (!s)
+            return s.error();
+        init.cold_ms = s.value()->session_create_ms();
+        if (Result<void> m = check_loaded_modules(r, "after_untimed_session", trial); !m)
+            return m.error();
+    }
+
+    if (Result<void> i = idle("context build"); !i)
+        return i.error();
+    const std::filesystem::path scratch =
+        cache_dir / ("scratch-" + r.run_id.substr(0, 8) + "-t" + std::to_string(trial + 1));
+    Result<BuiltContext> built = build_context(provider, config, r, scratch, key_id, key, trial);
+    if (!built)
+        return built.error();
+    init.context_build_ms = built.value().build_ms;
+    const std::filesystem::path context_model =
+        scratch / utf8_path(built.value().manifest.context_model);
+
+    Result<void> step = idle("cached session creation");
+    if (step) {
+        Result<std::unique_ptr<BenchSession>> s = provider.create_session(context_model, config);
+        if (!s) {
+            step = context_load_failed(s.error(), context_model);
+        } else {
+            init.cached_init_ms = s.value()->session_create_ms();
+            step = check_loaded_modules(r, "after_untimed_session", trial);
+        }
+    }
+    Result<std::vector<std::filesystem::path>> removed = delete_cache_entry(cache_dir, scratch);
+    if (!step)
+        return step.error();
+    if (!removed)
+        return removed.error();
+    return init;
+}
+
 // The HTP backend library of the QNN EP, whose version resource is recorded.
 constexpr std::string_view kQnnHtpBackendFile = "QnnHtp.dll";
 
@@ -103,15 +393,19 @@ constexpr std::string_view kQnnHtpBackendFile = "QnnHtp.dll";
 // honoured before and after session creation and between iterations (never
 // inside the timed bracket).
 Result<TrialResult> run_trial(Provider& provider, const RunConfig& config, const ScheduledTrial& st,
-                              BenchmarkResult& result, const StopHook& hook, TrialOutcome& out) {
+                              const std::filesystem::path& source, BenchmarkResult& result,
+                              const StopHook& hook, TrialOutcome& out) {
     const std::string where = trial_label(st.trial_index, config.trials);
     out.failed_stage = "session_creation";
     if (should_stop(hook, StopPoint::before_session, st.trial_index, 0))
         return interrupted_error(where + ", before session creation");
-    Result<std::unique_ptr<BenchSession>> created =
-        provider.create_session(result.model.file.path, config);
-    if (!created)
-        return with_context(created.error(), where);
+    Result<std::unique_ptr<BenchSession>> created = provider.create_session(source, config);
+    if (!created) {
+        return with_context(source == result.model.file.path
+                                ? created.error()
+                                : context_load_failed(created.error(), source),
+                            where);
+    }
     std::unique_ptr<BenchSession> session = std::move(created).value();
     result.known.session = true;
     if (Result<void> modules =
@@ -450,15 +744,38 @@ BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunCon
         return r;
     }
 
+    // EP contexts: the cache directory, and for --ep-cache build|use the cache entry
+    // and the cached == compiled check, before the first trial.
+    const std::uint64_t log_start = runtime.log_position();
+    if (config.provider == ProviderKind::npu && config.uses_ep_context()) {
+        std::string stage;
+        if (Result<void> prepared = prepare_ep_cache(provider, config, r, progress, stage);
+            !prepared) {
+            set_failure(r, prepared.error(), stage);
+            finish_result(r);
+            return r;
+        }
+    }
+    if (r.ep_cache.enabled())
+        r.timing.session_init.ep_context_state = "cached";  // timed sessions load the context
+    const std::filesystem::path timed_source =
+        r.ep_cache.context_path ? *r.ep_cache.context_path : r.model.file.path;
+
     std::vector<std::vector<std::byte>> reference_outputs;
     for (const ScheduledTrial& st : schedule_trials(1, config.trials)) {
         // Every trial, the first included, starts after the same idle period, so
-        // session creation always meets the CPU in the same power state.
+        // session creation always meets the CPU in the same power state. With
+        // --init-breakdown each of its three session creations gets that idle
+        // period too, and the trial's own idle comes last, right before its timed
+        // session.
         std::optional<LoadSample> idle;
         const std::string label = trial_label(st.trial_index, config.trials);
-        if (const std::chrono::milliseconds wait = idle_before_trial(config, st.sequence);
-            wait.count() > 0) {
-            report("idle " + std::to_string(wait.count()) + " ms before " + label +
+        bool first_idle = true;
+        auto idle_period = [&](const std::string& before) -> Result<void> {
+            const std::chrono::milliseconds wait = idle_before_trial(config, st.sequence);
+            if (wait.count() <= 0)
+                return {};
+            report("idle " + std::to_string(wait.count()) + " ms before " + before +
                    " (sampling background CPU load)");
             // Waits on the stop event, so an interrupt ends the idle period at once.
             const CpuTimes start = query_cpu_times();
@@ -467,18 +784,35 @@ BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunCon
             const bool cut = hook_stop || wait_or_stop(wait);
             idle = LoadSample{cpu_utilization(start, query_cpu_times()).value_or(0.0),
                               std::chrono::duration<double>(Clock::now() - t0).count()};
-            if (st.sequence == 0 && !cut)
+            if (st.sequence == 0 && first_idle && !cut)
                 r.system.load = idle;
-            if (cut) {
-                set_failure(r, interrupted_error("idle period before " + label), "measurement");
+            first_idle = false;
+            if (cut)
+                return interrupted_error("idle period before " + before);
+            return {};
+        };
+        std::optional<TrialSessionInit> breakdown;
+        if (config.init_breakdown && config.provider == ProviderKind::npu) {
+            Result<TrialSessionInit> measured = measure_init_breakdown(
+                provider, config, r, st.trial_index,
+                [&](const char* what) { return idle_period(std::string(what) + " of " + label); });
+            if (!measured) {
+                set_failure(
+                    r, measured.error(),
+                    measured.error().kind == "interrupted" ? "measurement" : "session_creation");
                 break;
             }
+            breakdown = measured.value();
+        }
+        if (Result<void> i = idle_period(label); !i) {
+            set_failure(r, i.error(), "measurement");
+            break;
         }
         report(trial_label(st.trial_index, config.trials) + ": creating session, " +
                std::to_string(config.warmup) + " warm-up + " + std::to_string(config.iterations) +
                " measured iterations");
         TrialOutcome outcome;
-        Result<TrialResult> trial = run_trial(provider, config, st, r, hook, outcome);
+        Result<TrialResult> trial = run_trial(provider, config, st, timed_source, r, hook, outcome);
         if (!trial) {
             set_failure(r, trial.error(), outcome.failed_stage);
             if (outcome.discarded_iterations >= 0) {
@@ -510,9 +844,25 @@ BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunCon
             set_failure(r, d.error(), "measurement");
             break;
         }
-        trial.value().idle_before = idle;
-        r.timing.session_init.cold_ms.push_back(trial.value().session_create_ms);
-        r.timing.trials.push_back(std::move(trial).value());
+        TrialResult& done = trial.value();
+        done.idle_before = idle;
+        SessionInitResult& init = r.timing.session_init;
+        init.timed_ms.push_back(done.session_create_ms);
+        if (breakdown) {
+            done.session_init = *breakdown;
+            init.cold_ms.push_back(*breakdown->cold_ms);
+            init.cached_ms.push_back(*breakdown->cached_init_ms);
+        }
+        if (r.ep_cache.enabled()) {
+            init.cached_ms.push_back(done.session_create_ms);
+            if (!breakdown)
+                done.session_init.cached_init_ms = done.session_create_ms;
+        } else {
+            init.cold_ms.push_back(done.session_create_ms);
+            if (!breakdown)
+                done.session_init.cold_ms = done.session_create_ms;
+        }
+        r.timing.trials.push_back(std::move(done));
     }
 
     if (!r.failure) {
@@ -579,6 +929,20 @@ BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunCon
             // The placement session itself is not interruptible; stop right after it.
             if (should_stop(hook, StopPoint::after_placement, 0, 0))
                 set_failure(r, interrupted_error("after node placement"), "session_creation");
+        }
+    }
+    // ONNX Runtime's verdict on the EP context models, if it logged one: a context
+    // compiled for this device but not in the form the EP would compile now. The
+    // outputs were checked against a compiled session, so this is a note.
+    if (config.uses_ep_context()) {
+        for (const std::string& message : runtime.warnings_since(log_start)) {
+            if (message.find(kRecompileMessage) != std::string::npos) {
+                r.notes.push_back(
+                    {"ep_context_recompilation_suggested",
+                     "ONNX Runtime reported for the EP context models of this run: " + message,
+                     std::string("/config/ep_context_cache")});
+                break;
+            }
         }
     }
     finish_result(r);
@@ -666,9 +1030,10 @@ void finish_result(BenchmarkResult& r) {
     TimingResult& t = r.timing;
     if (!t.trials.empty()) {
         t.first_inference_ms = t.trials.front().first_inference_ms;
-        std::vector<double> sorted = t.session_init.cold_ms;
+        std::vector<double> sorted = t.session_init.timed_ms;
         std::sort(sorted.begin(), sorted.end());
-        t.session_init.session_create_ms = nearest_rank(sorted, 50);
+        if (!sorted.empty())
+            t.session_init.session_create_ms = nearest_rank(sorted, 50);
         std::vector<double> pooled, means;
         for (const TrialResult& trial : t.trials) {
             pooled.insert(pooled.end(), trial.latencies_ms.begin(), trial.latencies_ms.end());
@@ -698,24 +1063,52 @@ void finish_result(BenchmarkResult& r) {
                                      config.provider == ProviderKind::npu ? "npu" : "cpu",
                                      r.effective_precision->compute, r.batch_size);
         const BatchEquivalence& be = *r.batch_equivalence;
-        if (be.equivalent_to_b1 == false) {
+        const std::string on =
+            std::string(config.provider == ProviderKind::npu ? "the NPU" : "the CPU") + " (" +
+            r.effective_precision->compute + " compute)";
+        const std::string batch = std::to_string(r.batch_size);
+        if (be.predictions_equal_to_b1 == false) {
             r.warnings.push_back(
                 {"batch_not_equivalent",
-                 "At batch size " + std::to_string(r.batch_size) +
-                     " this model computes outputs "
-                     "that differ from its batch-1 file's on " +
-                     std::string(config.provider == ProviderKind::npu ? "the NPU" : "the CPU") +
-                     " (" + r.effective_precision->compute +
-                     " compute; from the reference outputs): this result measures a different "
-                     "computation and must not be averaged or compared with batch-1 results as "
-                     "the same one.",
-                 std::string("/execution/batch_equivalence/equivalent_to_b1")});
-        } else if (!be.equivalent_to_b1) {
+                 "At batch size " + batch +
+                     " this model's predictions differ from its batch-1 "
+                     "file's on " +
+                     on + ": " + std::to_string(be.predictions_differing.value_or(0)) + " of " +
+                     std::to_string(be.predictions_compared.value_or(0)) + " " +
+                     (be.predictions_basis == "test_split_flags" ? "test windows are flagged "
+                                                                   "differently"
+                                                                 : "eval-quick images get a "
+                                                                   "different top-1 class") +
+                     ". This result measures a different computation and must not be averaged "
+                     "or compared with batch-1 results as the same one.",
+                 std::string("/execution/batch_equivalence/predictions_equal_to_b1")});
+        } else if (be.rounding_only()) {
+            r.notes.push_back({"batch_rounding_only",
+                               "At batch size " + batch +
+                                   " this model's outputs differ from its batch-1 "
+                                   "file's on " +
+                                   on + " in their last bits only: no prediction changes (" +
+                                   std::to_string(be.predictions_compared.value_or(0)) + " " +
+                                   (be.predictions_basis == "test_split_flags" ? "test windows"
+                                                                               : "eval-quick "
+                                                                                 "images") +
+                                   " compared).",
+                               std::string("/execution/batch_equivalence/bitwise_equal_to_b1")});
+        } else if (!be.bitwise_equal_to_b1) {
+            r.warnings.push_back({"value_unavailable",
+                                  "Whether batch size " + batch +
+                                      " computes the same outputs as batch 1 is "
+                                      "unknown: " +
+                                      be.reason + ".",
+                                  std::string("/execution/batch_equivalence/bitwise_equal_to_b1")});
+        } else if (!be.predictions_equal_to_b1) {
             r.warnings.push_back(
                 {"value_unavailable",
-                 "Whether batch size " + std::to_string(r.batch_size) +
-                     " computes the same outputs as batch 1 is unknown: " + be.reason + ".",
-                 std::string("/execution/batch_equivalence/equivalent_to_b1")});
+                 "Batch size " + batch +
+                     " does not compute bit-identical outputs to batch 1, "
+                     "and whether its predictions differ is unknown: " +
+                     be.reason + ".",
+                 std::string("/execution/batch_equivalence/predictions_equal_to_b1")});
         }
     }
 
@@ -806,19 +1199,63 @@ std::string format_summary(const BenchmarkResult& r) {
     out << "Input       " << schema_name(c.input) << "\n";
     if (r.batch_equivalence && r.batch_size > 1) {
         const BatchEquivalence& be = *r.batch_equivalence;
-        out << "Batch       " << r.batch_size << " vs 1: "
-            << (!be.equivalent_to_b1 ? std::string("unknown (no reference data)")
-                : *be.equivalent_to_b1
-                    ? std::string("same per-item outputs (reference outputs)")
-                    : std::string("DIFFERENT per-item outputs (reference outputs)"))
-            << "\n";
+        out << "Batch       " << r.batch_size << " vs 1: ";
+        if (!be.bitwise_equal_to_b1)
+            out << "unknown (no reference data)";
+        else if (*be.bitwise_equal_to_b1)
+            out << "bit-identical per-item outputs (reference outputs)";
+        else if (!be.predictions_equal_to_b1)
+            out << "outputs differ, predictions not compared";
+        else
+            out << (*be.predictions_equal_to_b1 ? "outputs differ in the last bits, same "
+                                                  "predictions"
+                                                : "DIFFERENT predictions")
+                << " (" << be.predictions_differing.value_or(0) << " of "
+                << be.predictions_compared.value_or(0) << " differ, " << be.predictions_basis
+                << ")";
+        out << "\n";
     }
 
     const TimingResult& t = r.timing;
-    out << "Session     create ms:";
-    for (double ms : t.session_init.cold_ms)
+    const EpContextCacheResult& cache = r.ep_cache;
+    if (cache.enabled()) {
+        out << "EP cache    " << schema_name(cache.mode) << ", "
+            << cache.state.value_or("not examined");
+        if (cache.key_id)
+            out << ", key " << cache.key_id->substr(0, 12);
+        if (cache.verified_equal_outputs)
+            out << (*cache.verified_equal_outputs ? ", outputs equal to a compiled session"
+                                                  : ", OUTPUTS DIFFER from a compiled session");
+        if (t.session_init.context_build_ms)
+            out << ", built in " << fmt(*t.session_init.context_build_ms, 1) << " ms";
+        out << "\n";
+        if (cache.context_path)
+            out << "            " << path_to_utf8(*cache.context_path) << "\n";
+        if (!cache.deleted_stale.empty())
+            out << "            deleted " << cache.deleted_stale.size()
+                << " file(s) of stale entries for this model\n";
+    }
+    out << "Session     create ms ("
+        << (t.session_init.ep_context_state == "cached" ? "from the EP context cache"
+                                                        : "compiled from the model")
+        << "):";
+    for (double ms : t.session_init.timed_ms)
         out << " " << fmt(ms, 1);
     out << "  (median " << fmt(t.session_init.session_create_ms, 1) << ")\n";
+    if (c.init_breakdown && !t.trials.empty() && t.trials.front().session_init.context_build_ms) {
+        auto median_of = [&t](std::optional<double> TrialSessionInit::*member) {
+            std::vector<double> v;
+            for (const TrialResult& trial : t.trials)
+                if (const std::optional<double>& x = trial.session_init.*member)
+                    v.push_back(*x);
+            std::sort(v.begin(), v.end());
+            return v.empty() ? std::string("-") : fmt(nearest_rank(v, 50), 1);
+        };
+        out << "Init        median of " << t.trials.size() << " trials: cold "
+            << median_of(&TrialSessionInit::cold_ms) << " ms, context build "
+            << median_of(&TrialSessionInit::context_build_ms) << " ms, cached "
+            << median_of(&TrialSessionInit::cached_init_ms) << " ms\n";
+    }
     out << "First run   " << (t.first_inference_ms ? fmt(*t.first_inference_ms, 3) + " ms" : "-")
         << " (first warm-up iteration of trial 1)\n";
 
@@ -927,6 +1364,11 @@ std::string format_summary(const BenchmarkResult& r) {
             out << "\nWarnings\n";
         printed = true;
         out << "  [" << w.code << "] " << w.message << "\n";
+    }
+    if (!r.notes.empty()) {
+        out << "\nNotes\n";
+        for (const ResultWarning& n : r.notes)
+            out << "  [" << n.code << "] " << n.message << "\n";
     }
     return out.str();
 }

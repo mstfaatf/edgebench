@@ -32,6 +32,7 @@
       "path": "/memory"
     }
   ],
+  "notes": [],
   "tool": {
     "name": "edgebench",
     "version": "0.1.0",
@@ -286,7 +287,7 @@
         }
       ],
       "mode": "use",
-      "key_id": "0050a657ea42a67c4aa6c2dae6b75ce47469389281f699e84797d01975482447",
+      "key_id": "2c18ec2e9c7750bf6ea705aa01b8bf0f62827ed790f54a67118150fcb201e621",
       "context_path": "C:\\dev\\edgebench\\cache\\qnn\\\\0050a657ea42a67c_ctx.onnx",
       "hit": true,
       "verified_equal_outputs": true,
@@ -300,14 +301,27 @@
           "device_type": "NPU",
           "vendor_id": 1297040209,
           "device_id": 1093682224
-        }
-      }
+        },
+        "qnn_backend_file_version": "2.52.0.261104115025",
+        "ep_options": {
+          "backend_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtp.dll",
+          "htp_performance_mode": "burst"
+        },
+        "session_config": {
+          "session.disable_cpu_ep_fallback": "1",
+          "ep.context_embed_mode": "0"
+        },
+        "graph_optimization_level": "enable_all"
+      },
+      "cache_dir": "C:\\Users\\you\\AppData\\Local\\EdgeBench\\qnn-context",
+      "embed_mode": "0"
     },
     "run_binding": "run",
     "profiling": {
       "ort": false,
       "qnn_level": "off"
-    }
+    },
+    "init_breakdown": false
   },
   "execution": {
     "full_device_execution_verified": true,
@@ -367,7 +381,8 @@
           "trial_index": null,
           "modules_outside_bundle": []
         }
-      ]
+      ],
+      "deleted_stale_cache_files": []
     },
     "node_assignment": {
       "total_nodes": 1,
@@ -394,8 +409,12 @@
       "source": "model"
     },
     "batch_equivalence": {
-      "equivalent_to_b1": true,
-      "basis": "batch_size_1",
+      "bitwise_equal_to_b1": true,
+      "bitwise_basis": "batch_size_1",
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null,
       "reference_batch": 1
     }
   },

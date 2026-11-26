@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <string>
@@ -16,6 +17,7 @@
 
 #include "edgebench/batch_equivalence.hpp"
 #include "edgebench/bundle_modules.hpp"
+#include "edgebench/ep_context_cache.hpp"
 #include "edgebench/model_info.hpp"
 #include "edgebench/npu_options.hpp"
 #include "edgebench/onnx_inspect.hpp"
@@ -69,11 +71,46 @@ struct ExecutionResult {
 };
 
 struct SessionInitResult {
-    double session_create_ms = 0;                  // nearest-rank median of cold_ms
-    std::string ep_context_state = "not_used";     // CPU: no EP context cache; NPU: "cold"
-    std::vector<double> cold_ms;                   // one per trial, in trial order
-    std::optional<double> context_build_ms;        // null: no cache
-    std::optional<std::vector<double>> cached_ms;  // null: no cache
+    /// Nearest-rank median of the timed sessions' creation times (one per trial).
+    double session_create_ms = 0;
+    /// What the timed sessions were created from. CPU: not_used (no EP context
+    /// cache); NPU: cold (from the ONNX model) or cached (from the EP context model).
+    std::string ep_context_state = "not_used";
+    std::vector<double> timed_ms;  // the timed sessions' creation times, in trial order
+    /// Every creation from the ONNX model without a cache (--init-breakdown
+    /// sessions, and the timed sessions when they are compiled), in order.
+    std::vector<double> cold_ms;
+    /// The creation that built the shared cache before the trials (null: none).
+    std::optional<double> context_build_ms;
+    /// Every creation from an EP context model (--init-breakdown sessions, and the
+    /// timed sessions when they load the cache), in order; empty: none.
+    std::vector<double> cached_ms;
+};
+
+/// timing.trials[].session_init: one value per kind of initialization, or null if
+/// the trial did not measure it.
+struct TrialSessionInit {
+    std::optional<double> cold_ms;
+    std::optional<double> context_build_ms;
+    std::optional<double> cached_init_ms;
+};
+
+/// config.ep_context_cache of an NPU run.
+struct EpContextCacheResult {
+    EpCacheMode mode = EpCacheMode::off;
+    std::optional<std::filesystem::path> cache_dir;  // absolute; null if no context was used
+    /// disabled | generated | loaded | regenerated; null: the run failed before the
+    /// cache was examined.
+    std::optional<std::string> state;
+    std::optional<std::string> key_id;
+    std::optional<nlohmann::json> key;  // cache_key_json()
+    std::optional<std::filesystem::path> context_path;
+    std::vector<CacheFile> files;
+    std::optional<bool> hit;
+    std::optional<bool> verified_equal_outputs;
+    /// Files deleted because their key differed for the same model (stale).
+    std::vector<std::filesystem::path> deleted_stale;
+    bool enabled() const { return mode != EpCacheMode::off; }
 };
 
 struct TrialResult {
@@ -87,8 +124,9 @@ struct TrialResult {
     /// the results schema; used for warnings and the summary. Null if a counter
     /// could not be read.
     std::optional<LoadSample> during;
-    double session_create_ms = 0;
+    double session_create_ms = 0;  // the timed session's creation
     std::optional<std::int64_t> session_create_working_set_delta_bytes;
+    TrialSessionInit session_init;
     std::optional<double> first_inference_ms;  // first warm-up iteration; null without warm-up
     LatencyStats stats;
     std::vector<double> latencies_ms;  // every measured iteration, in order
@@ -119,7 +157,7 @@ struct TimingResult {
     std::vector<TrialResult> trials;
     std::optional<AggregateResult> aggregate;
     // timing.accelerator and timing.profiled_pass: always null here (no profiled
-    // accelerator pass); per trial only cold_ms is measured (no EP context cache).
+    // accelerator pass).
 };
 
 /// Why a run failed (results schema: error).
@@ -147,6 +185,8 @@ struct BenchmarkResult {
     std::optional<RunFailure> failure;  // set: status "failed"
     KnownParts known;
     std::vector<ResultWarning> warnings;
+    /// notes[]: facts that do not limit how the result may be used (same shape).
+    std::vector<ResultWarning> notes;
 
     std::string status() const { return failure ? "failed" : "success"; }
 
@@ -173,6 +213,7 @@ struct BenchmarkResult {
     ExecutionResult execution;
     TimingResult timing;
     MemoryResult memory;
+    EpContextCacheResult ep_cache;  // NPU runs only
 };
 
 /// Receives progress messages ("idle 2000 ms before trial 1 of 3", "trial 1 of 3: ...").

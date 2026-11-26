@@ -504,11 +504,36 @@ def test_batch_equivalence_schema_rules(validators, equivalence):
     assert any(p.startswith("/execution/batch_equivalence") for p in paths), paths
 
 
+UNKNOWN_BATCH = {"bitwise_equal_to_b1": None, "bitwise_basis": "not_available",
+                 "predictions_equal_to_b1": None, "predictions_basis": "not_available",
+                 "predictions_compared": None, "predictions_differing": None, "reference_batch": 1}
+
+
 def test_batch_equivalence_unknown_is_valid(validators):
     doc = load(NPU_120)
-    doc["execution"]["batch_equivalence"] = {"equivalent_to_b1": None, "basis": "not_available",
-                                             "reference_batch": 1}
+    doc["execution"]["batch_equivalence"] = dict(UNKNOWN_BATCH)
     assert vr.validate_document(doc, validators, NPU_120) == []
+
+
+def test_bits_differ_with_predictions_unknown_is_valid(validators):
+    doc = load(NPU_120)
+    doc["execution"]["batch_equivalence"] = {**UNKNOWN_BATCH, "bitwise_equal_to_b1": False,
+                                             "bitwise_basis": "reference_outputs"}
+    assert vr.validate_document(doc, validators, NPU_120) == []
+
+
+@pytest.mark.parametrize("change", [
+    {"bitwise_equal_to_b1": True, "bitwise_basis": "reference_outputs"},  # bitwise needs basis bitwise
+    {"predictions_basis": "eval_quick_top1"},                            # counts required
+    {"predictions_equal_to_b1": True},                                   # not_available needs null
+    {"bitwise_basis": "batch_size_1"},                                   # batch 1 is bitwise equal
+])
+def test_batch_equivalence_shape_rules_are_in_the_schema(validators, change):
+    doc = load(NPU_120)
+    doc["execution"]["batch_equivalence"] = {**UNKNOWN_BATCH, "bitwise_equal_to_b1": False,
+                                             "bitwise_basis": "reference_outputs", **change}
+    issues = vr.validate_document(doc, validators, NPU_120)
+    assert any(i.path.startswith("/execution/batch_equivalence") for i in vr.errors(issues)), issues
 
 
 def test_cache_mode_off_requires_cache_disabled(validators):
@@ -526,9 +551,43 @@ def test_verification_details_may_still_be_a_string(validators):
 
 def test_b8_example_is_flagged_not_equivalent():
     doc = load(B8_120)
-    assert doc["execution"]["batch_equivalence"] == {"equivalent_to_b1": False,
-                                                     "basis": "reference_outputs", "reference_batch": 1}
+    be = doc["execution"]["batch_equivalence"]
+    assert (be["bitwise_equal_to_b1"], be["bitwise_basis"]) == (False, "reference_outputs")
+    # docs/accuracy.md: 6 of the 1,000 eval-quick top-1 classes change at batch 8.
+    assert (be["predictions_equal_to_b1"], be["predictions_basis"], be["predictions_differing"],
+            be["predictions_compared"]) == (False, "eval_quick_top1", 6, 1000)
     assert any(w["code"] == "batch_not_equivalent" for w in doc["warnings"])
+    assert doc["notes"] == []
+
+
+def test_cache_example_key_id_is_recomputed(validators):
+    path = V120 / "example-npu-int8-ep-cache-init-breakdown.json"
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    cache = doc["config"]["ep_context_cache"]
+    assert (cache["mode"], cache["state"], cache["hit"], cache["verified_equal_outputs"]) == \
+        ("use", "generated", False, True)
+    assert all(t["session_init"]["cold_ms"] and t["session_init"]["context_build_ms"]
+               and t["session_init"]["cached_init_ms"] for t in doc["timing"]["trials"])
+    assert vr.validate_document(doc, validators, path) == []
+    doc["config"]["ep_context_cache"]["key"]["ep_options"]["htp_performance_mode"] = "balanced"
+    codes = {i.code for i in vr.validate_document(doc, validators, path)}
+    assert "cache_key_id_mismatch" in codes
+
+
+def test_init_breakdown_allows_cached_values_with_the_cache_off(validators):
+    path = V120 / "example-npu-int8-ep-cache-init-breakdown.json"
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    cache = doc["config"]["ep_context_cache"]
+    cache.update({"enabled": False, "mode": "off", "state": "disabled", "files": [], "key": None,
+                  "key_id": None, "hit": None, "verified_equal_outputs": None,
+                  "context_path": None, "cache_file": None})
+    doc["timing"]["session_init"]["context_build_ms"] = None
+    doc["timing"]["session_init"]["ep_context_state"] = "cold"
+    assert [i for i in vr.validate_document(doc, validators, path)
+            if i.code == "session_init_not_applicable"] == []
+    doc["config"]["init_breakdown"] = False
+    assert any(i.code == "session_init_not_applicable"
+               for i in vr.validate_document(doc, validators, path))
 
 
 def test_cpp_engine_examples_record_every_module_check():

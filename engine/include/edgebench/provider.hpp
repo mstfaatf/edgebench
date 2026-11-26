@@ -73,6 +73,16 @@ public:
     virtual Result<std::unique_ptr<BenchSession>> create_session(const std::filesystem::path& model,
                                                                  const RunConfig& config) = 0;
 
+    /// Creates a session like create_session() that also writes `model`'s EP context
+    /// model to `context_model` (the EP writes its context binary next to it), for
+    /// the EP context cache. Its creation time is the context build time. A session
+    /// created later from `context_model` with create_session() loads the context.
+    /// Providers without an EP context return internal_error
+    /// (ep_context_unsupported).
+    virtual Result<std::unique_ptr<BenchSession>> create_context_building_session(
+        const std::filesystem::path& model, const RunConfig& config,
+        const std::filesystem::path& context_model);
+
     /// Node placement for `model` with `config`'s session options, from a separate
     /// session created with verbose logging. Call it when no timed session follows
     /// (`run` calls it after the last trial), so it cannot warm anything up.

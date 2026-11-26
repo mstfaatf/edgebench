@@ -25,6 +25,11 @@ enum class RunBinding { run, iobinding_preallocated };
 enum class InputKind { random, constant };
 enum class GraphOptLevel { disable_all, enable_basic, enable_extended, enable_all };
 enum class OutputFormat { summary, json };
+/// --ep-cache: off (compile every session from the ONNX model), build (rebuild the
+/// EP context cache once before the trials, then create every timed session from
+/// it), use (create the timed sessions from an existing cache with a matching key;
+/// build it first if there is none).
+enum class EpCacheMode { off, build, use };
 
 /// Every value `edgebench run` uses. Defaults match the documented CLI defaults
 /// (docs/cli.md). `seed` and `constant_value` are only set when given explicitly;
@@ -53,6 +58,15 @@ struct RunConfig {
     bool strict = true;     // session.disable_cpu_ep_fallback = 1; --no-strict clears it
     bool npu_fp16 = false;  // --npu-fp16: FP32 model with FP16 compute
     std::optional<std::string> htp_performance_mode;  // default: burst
+    EpCacheMode ep_cache = EpCacheMode::off;
+    /// --ep-cache-dir; default: default_ep_cache_dir() (%LOCALAPPDATA%\EdgeBench\qnn-context).
+    std::optional<std::filesystem::path> ep_cache_dir;
+    /// --init-breakdown: per trial, time a cold, a context-building and a cached
+    /// session creation before the timed session.
+    bool init_breakdown = false;
+
+    /// Whether the run creates EP context files (and so needs the cache directory).
+    bool uses_ep_context() const { return ep_cache != EpCacheMode::off || init_breakdown; }
 
     std::uint64_t effective_seed() const { return seed.value_or(0); }
     double effective_constant_value() const { return constant_value.value_or(0.0); }
@@ -85,6 +99,7 @@ std::optional<RunBinding> parse_binding(std::string_view text);
 std::optional<InputKind> parse_input_kind(std::string_view text);
 std::optional<GraphOptLevel> parse_graph_opt(std::string_view text);
 std::optional<OutputFormat> parse_output_format(std::string_view text);
+std::optional<EpCacheMode> parse_ep_cache_mode(std::string_view text);
 std::string_view cli_name(RunBinding binding);     // "run" or "iobinding"
 std::string_view cli_name(ProviderKind provider);  // "cpu" or "npu"
 
@@ -95,6 +110,7 @@ std::string_view supported_providers();
 std::string_view schema_name(RunBinding binding);
 std::string_view schema_name(InputKind kind);
 std::string_view schema_name(GraphOptLevel level);
+std::string_view schema_name(EpCacheMode mode);                   // "off", "build" or "use"
 std::string_view execution_provider_name(ProviderKind provider);  // e.g. "CPUExecutionProvider"
 std::string_view device_type_name(ProviderKind provider);         // e.g. "CPU"
 

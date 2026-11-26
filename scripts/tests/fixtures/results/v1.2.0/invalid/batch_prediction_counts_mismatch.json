@@ -1,0 +1,12 @@
+{
+  "description": "predictions_equal_to_b1 false although no prediction differs.",
+  "base": "docs/examples/v1.2.0/example-npu-int8-b8-not-equivalent.json",
+  "set": {
+    "/execution/batch_equivalence/predictions_differing": 0
+  },
+  "expect": {
+    "severity": "error",
+    "code": "batch_prediction_counts_mismatch",
+    "path": "/execution/batch_equivalence/predictions_differing"
+  }
+}

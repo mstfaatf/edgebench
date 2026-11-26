@@ -22,9 +22,12 @@ and writes results as schema-validated JSON plus CSV.
   ([docs/cli.md](docs/cli.md#npu-runs)); its outputs are bit-identical to the
   Python ONNX Runtime references on the NPU ([docs/models.md](docs/models.md#what-the-c-tests-prove)).
   Results (schema 1.2.0) record the effective compute precision, the nodes a
-  strict-mode refusal names, the loaded QNN backend's version and whether the
-  batch size computes the same per-item outputs as batch 1
-  ([docs/models.md](docs/models.md#batch-equivalence)).
+  strict-mode refusal names, the loaded QNN backend's version, and whether the
+  batch size computes the same per-item outputs and predictions as batch 1
+  ([docs/models.md](docs/models.md#batch-equivalence)). An EP context cache,
+  keyed by everything a compiled context depends on and verified against a
+  compiled session, and a cold / context-build / cached initialization
+  breakdown are available ([docs/cli.md](docs/cli.md#ep-context-cache-and-initialization)).
   No NPU latency results are published yet.
 - **Accuracy results are published**: every model variant on ImageNetV2,
   on the CPU and on the NPU (strict mode), with confidence intervals and paired

@@ -1,0 +1,38 @@
+{
+  "description": "A batch_not_equivalent warning on a result whose predictions equal batch 1's (batch 1, bit-identical by definition).",
+  "base": "docs/examples/v1.2.0/example-cpu-fp32.json",
+  "set": {
+    "/warnings": [
+      {
+        "code": "illustrative_example",
+        "message": "Example document assembled from the C++ (ort_probe) measurements behind docs/feasibility.md section 7.3 (2026-11-21, three rounds, each round one trial in its own process). Per-trial count, mean, p50, p95, min, max and standard deviation, the session creation times and the QNN profile are measured values. p99_ms and the pooled aggregate percentiles were not recorded and are estimates.",
+        "path": null
+      },
+      {
+        "code": "value_unavailable",
+        "message": "Background CPU load was not sampled.",
+        "path": "/system/load"
+      },
+      {
+        "code": "value_unavailable",
+        "message": "The first inference was not timed separately.",
+        "path": "/timing/first_inference_ms"
+      },
+      {
+        "code": "value_unavailable",
+        "message": "Process memory was not recorded.",
+        "path": "/memory"
+      },
+      {
+        "code": "batch_not_equivalent",
+        "message": "At batch size 8 this model's predictions differ from its batch-1 file's.",
+        "path": "/execution/batch_equivalence/predictions_equal_to_b1"
+      }
+    ]
+  },
+  "expect": {
+    "severity": "error",
+    "code": "batch_not_equivalent_unfounded",
+    "path": "/execution/batch_equivalence/predictions_equal_to_b1"
+  }
+}

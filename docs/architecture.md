@@ -141,10 +141,17 @@ session that is timed.
 ```text
 hash + inspect model file            (not timed; warms the file cache for every trial)
 read power state
+NPU, --ep-cache build|use:           (before the first trial, not timed as trials)
+    key fields -> key id; delete stale entries of this model
+    load the entry for the key, or build it (context_build_ms)
+    compiled session vs session from the context, same input -> verified_equal_outputs
 for each trial (scheduler order):
+    --init-breakdown: for cold, context build (scratch entry), cached:
+        idle as below; create the session -> trial session_init; release
     idle --cooldown-ms (1 s before the first trial if 0), sampling CPU load   [stop: idle]
                                                                                [stop: before_session]
-    provider.create_session()        -> cold_ms[trial], working-set delta
+    provider.create_session()        -> timed creation (from the model, or the
+                                        cached context), working-set delta
                                                                                [stop: after_session]
     warm-up 1 (timed)                -> first_inference_ms (trial 0)          [stop: warmup, each]
     warm-up 2..n (untimed)
@@ -165,6 +172,15 @@ slower when the CPU has just been idle: idling only between trials made the
 first trial systematically faster to create. Placement runs last for the
 same reason: its verbose session must not warm anything before a timed session
 is created.
+
+The EP context cache (`ep_context_cache.hpp`) is pure file handling: the key
+fields and their canonical serialization, the manifest each entry carries, the
+manifest-only deletion of entries and stale entries, and the lookup that tells
+a missing, valid, corrupt or foreign entry apart. `benchmark.cpp` decides what
+to build and load; the provider only knows how to create a session that writes
+a context (`Provider::create_context_building_session()`, implemented by
+`QnnProvider` with `qnn_context_build_config()`), and a session from a context
+model is an ordinary `create_session()`.
 
 `schedule_trials(configurations, trials)` (`scheduler.hpp`) produces the order:
 trials run in rounds, round r runs every configuration once starting at

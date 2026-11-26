@@ -159,9 +159,13 @@ TEST(Benchmark, ShortRunOnFixture) {
     }
     ASSERT_EQ(t.session_init.cold_ms.size(), 2u);
     EXPECT_EQ(t.session_init.cold_ms[0], t.trials[0].session_create_ms);
+    EXPECT_EQ(t.session_init.timed_ms, t.session_init.cold_ms);
+    EXPECT_EQ(t.trials[1].session_init.cold_ms, t.trials[1].session_create_ms);
+    EXPECT_FALSE(t.trials[1].session_init.context_build_ms);
+    EXPECT_FALSE(t.trials[1].session_init.cached_init_ms);
     EXPECT_EQ(t.session_init.ep_context_state, "not_used");
     EXPECT_FALSE(t.session_init.context_build_ms.has_value());
-    EXPECT_FALSE(t.session_init.cached_ms.has_value());
+    EXPECT_TRUE(t.session_init.cached_ms.empty());
     EXPECT_EQ(t.first_inference_ms, t.trials[0].first_inference_ms);
     ASSERT_TRUE(t.aggregate.has_value());
     EXPECT_EQ(t.aggregate->stats.count, 20u);
@@ -192,8 +196,10 @@ TEST(Benchmark, ShortRunOnFixture) {
     ASSERT_TRUE(r.effective_precision);
     EXPECT_EQ(*r.effective_precision, (eb::EffectivePrecision{"fp32", "fp32", "model"}));
     ASSERT_TRUE(r.batch_equivalence);
-    EXPECT_EQ(r.batch_equivalence->equivalent_to_b1, true);
-    EXPECT_EQ(r.batch_equivalence->basis, "batch_size_1");
+    EXPECT_EQ(r.batch_equivalence->bitwise_equal_to_b1, true);
+    EXPECT_EQ(r.batch_equivalence->bitwise_basis, "batch_size_1");
+    EXPECT_EQ(r.batch_equivalence->predictions_basis, "bitwise");
+    EXPECT_TRUE(r.notes.empty());
 
     const std::string summary = eb::format_summary(r);
     EXPECT_NE(summary.find("aggregate"), std::string::npos) << summary;
@@ -213,7 +219,9 @@ TEST(Benchmark, RecordsPowerLoadAndMemory) {
     EXPECT_TRUE(r.system.power->battery_saver.has_value());
 
     ASSERT_TRUE(r.system.load.has_value());
-    EXPECT_NEAR(r.system.load->sample_window_s, 0.1, 0.05);
+    // The idle period lasts at least the requested 100 ms; how much longer depends on the
+    // machine's load (ctest -j4), so there is no upper bound.
+    EXPECT_GE(r.system.load->sample_window_s, 0.095);
     EXPECT_GE(r.system.load->cpu_utilization_ratio, 0.0);
     EXPECT_LE(r.system.load->cpu_utilization_ratio, 1.0);
     ASSERT_EQ(r.timing.trials.size(), 2u);
@@ -566,28 +574,37 @@ TEST(OnnxInspectModels, FoldedModelsReportFoldedNormalization) {
 
 // Batch equivalence from models/batch_equivalence.json: on the CPU, the FP32
 // MobileNetV2 at batch 4 differs from batch 1 in the last bits (different
-// kernels), the INT8 file does not.
+// kernels) without changing a prediction (a batch_rounding_only note, no
+// warning); the INT8 file is bit-identical.
 TEST(BenchmarkModels, BatchEquivalenceComesFromTheReferenceSummary) {
     const fs::path models = kSourceDir / "models";
     const fs::path fp32 = models / "mobilenetv2" / "mobilenetv2_fp32_b4.onnx";
     const fs::path int8 = models / "mobilenetv2" / "mobilenetv2_int8_b4.onnx";
     if (!fs::is_regular_file(fp32) || !fs::is_regular_file(int8))
         GTEST_SKIP() << "model files not present; run the model pipeline (docs/setup.md)";
-    for (const auto& [model, equivalent] : {std::pair{fp32, false}, std::pair{int8, true}}) {
+    for (const auto& [model, bitwise] : {std::pair{fp32, false}, std::pair{int8, true}}) {
         eb::RunConfig c = short_run(model);
         c.trials = 1;
         c.iterations = 2;
         const eb::BenchmarkResult r = run(c);
         ASSERT_FALSE(r.failure) << r.failure->error.message;
         ASSERT_TRUE(r.batch_equivalence) << model;
-        EXPECT_EQ(r.batch_equivalence->basis, "reference_outputs") << r.batch_equivalence->reason;
-        EXPECT_EQ(r.batch_equivalence->equivalent_to_b1, equivalent) << model;
-        const bool warned = std::any_of(
+        const eb::BatchEquivalence& be = *r.batch_equivalence;
+        EXPECT_EQ(be.bitwise_basis, "reference_outputs") << be.reason;
+        EXPECT_EQ(be.bitwise_equal_to_b1, bitwise) << model;
+        EXPECT_EQ(be.predictions_equal_to_b1, true) << model;
+        EXPECT_EQ(be.predictions_basis, bitwise ? "bitwise" : "eval_quick_top1") << model;
+        EXPECT_FALSE(std::any_of(
             r.warnings.begin(), r.warnings.end(),
-            [](const eb::ResultWarning& w) { return w.code == "batch_not_equivalent"; });
-        EXPECT_EQ(warned, !equivalent) << model;
+            [](const eb::ResultWarning& w) { return w.code == "batch_not_equivalent"; }))
+            << model;
+        const bool noted =
+            std::any_of(r.notes.begin(), r.notes.end(),
+                        [](const eb::ResultWarning& n) { return n.code == "batch_rounding_only"; });
+        EXPECT_EQ(noted, !bitwise) << model;
         const json doc = eb::to_result_json(r, std::nullopt);
-        EXPECT_EQ(doc.at("execution").at("batch_equivalence").at("equivalent_to_b1"), equivalent);
+        EXPECT_EQ(doc.at("execution").at("batch_equivalence").at("bitwise_equal_to_b1"), bitwise);
+        EXPECT_EQ(doc.at("notes").size(), noted ? 1u : 0u);
     }
 }
 

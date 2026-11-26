@@ -59,6 +59,8 @@ std::string hint_for(const eb::Error& e) {
         case eb::ExitCode::usage_error:
             return kRunHelpHint;
         case eb::ExitCode::output_error:
+            if (e.kind.rfind("ep_cache", 0) == 0)
+                return "Choose another --ep-cache-dir, or check that it is writable.";
             return "Choose another --output-dir, or check that it is writable.";
         default:
             return std::string(eb::qnn_ep_hint(e.kind));  // QNN EP, NPU and backend errors

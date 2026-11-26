@@ -50,8 +50,16 @@ std::map<std::string, std::string> qnn_ep_options(const RunConfig& config,
                                                   const std::filesystem::path& backend_path);
 
 /// Session config entries of an NPU session: session.disable_cpu_ep_fallback (1 in
-/// strict mode, 0 with --no-strict) and ep.context_enable = 0 (no EP context cache).
+/// strict mode, 0 with --no-strict), ep.context_enable = 0 (the session writes no
+/// EP context) and, for runs that use EP contexts (--ep-cache build|use,
+/// --init-breakdown), ep.context_embed_mode = kEpContextEmbedMode.
 std::map<std::string, std::string> qnn_session_config(const RunConfig& config);
+
+/// The entries of a session that writes the EP context model `context_model`:
+/// qnn_session_config() with ep.context_enable = 1, ep.context_file_path and
+/// ep.context_embed_mode.
+std::map<std::string, std::string> qnn_context_build_config(
+    const RunConfig& config, const std::filesystem::path& context_model);
 
 /// The compute precision a run of a model stored as `stored` asks the device for
 /// (results schema: config.requested.compute_precision).

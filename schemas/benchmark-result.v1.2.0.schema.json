@@ -65,6 +65,11 @@
       ]
     },
     "warnings": {"type": "array", "items": {"$ref": "#/$defs/warning"}},
+    "notes": {
+      "description": "Facts worth knowing that do not limit how the result may be used (unlike warnings), e.g. batch_rounding_only. Same shape as a warning. Added in 1.2.0.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/warning"}
+    },
     "tool": {
       "type": "object",
       "additionalProperties": false,
@@ -502,7 +507,7 @@
                 "cache_file": {"type": ["string", "null"], "description": "File name of the EP context model, if enabled."},
                 "state": {
                   "enum": ["disabled", "generated", "loaded", "regenerated", null],
-                  "description": "Null if the run failed before the cache was examined. disabled: no EP context cache. generated: no cache existed; it was built in this run. loaded: an existing cache with a matching key was used. regenerated: a cache existed but its key did not match; it was deleted and rebuilt."
+                  "description": "Null if the run failed before the cache was examined. disabled: no EP context cache. generated: no cache existed for this model; it was built in this run. loaded: an existing cache with a matching key was used. regenerated: a cache for this model existed (with another key, or with this key and --ep-cache build); it was deleted and rebuilt."
                 },
                 "files": {
                   "type": "array",
@@ -520,7 +525,7 @@
                 },
                 "mode": {
                   "enum": ["off", "build", "use", null],
-                  "description": "off: no EP context cache (enabled is false). build: the run built the cache (a missing or stale one) and timed sessions created from it. use: the run created its timed sessions from an existing cache whose key matched."
+                  "description": "off: no EP context cache (enabled is false); every timed session is compiled from the ONNX model. build: the run deleted any cache for this key, built it once before the trials, and created every timed session from it. use: the run created its timed sessions from the existing cache whose key matched (hit true), or built it first if there was none (hit false)."
                 },
                 "key_id": {
                   "oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}],
@@ -532,11 +537,19 @@
                 },
                 "hit": {
                   "type": ["boolean", "null"],
-                  "description": "True if a cache with a matching key existed before the run. Null when the cache is off."
+                  "description": "True if a valid cache with a matching key existed before the run and was used (mode use). False if the run built the cache (mode build, or use without one). Null when the cache is off."
                 },
                 "verified_equal_outputs": {
                   "type": ["boolean", "null"],
                   "description": "Whether a session created from the cache gave bit-identical outputs to a session compiled from the ONNX model, on the same input. Null if not checked."
+                },
+                "cache_dir": {
+                  "type": ["string", "null"],
+                  "description": "Absolute path of the cache directory (one subdirectory per key id). Also set with mode off when --init-breakdown built its per-trial contexts there. Null if the run used no EP context."
+                },
+                "embed_mode": {
+                  "enum": ["0", "1", null],
+                  "description": "ep.context_embed_mode of the contexts the run built or used: 0, the context binary in its own file next to the context model. Null if the run used no EP context."
                 },
                 "key": {
                   "oneOf": [
@@ -558,6 +571,10 @@
                           "oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}],
                           "description": "SHA256 of config.ep_options serialized as JSON with sorted keys and no whitespace."
                         },
+                        "qnn_backend_file_version": {"type": ["string", "null"], "description": "ProductVersion of the HTP backend file (QnnHtp.dll) the context was compiled with. Added in 1.2.0."},
+                        "ep_options": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Every EP option passed. Added in 1.2.0."},
+                        "session_config": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Every session config entry that affects compilation (all but ep.context_enable and ep.context_file_path). Added in 1.2.0."},
+                        "graph_optimization_level": {"enum": ["disable_all", "enable_basic", "enable_extended", "enable_all"], "description": "ONNX Runtime graph optimization level: it decides the graph the EP compiles. Added in 1.2.0."},
                         "device": {
                           "oneOf": [
                             {"type": "null"},
@@ -584,6 +601,10 @@
         "run_binding": {
           "enum": ["run", "iobinding_preallocated"],
           "description": "run: Session::Run with input/output values created per call. iobinding_preallocated: IoBinding with input and output buffers allocated once."
+        },
+        "init_breakdown": {
+          "type": "boolean",
+          "description": "True if every trial also timed a cold, a context-building and a cached session creation (timing.trials[].session_init) before its timed session. Added in 1.2.0."
         },
         "profiling": {
           "description": "Profiling settings of the sessions that produced timing.trials. Profiled sessions are never timed; see timing.accelerator.",
@@ -650,22 +671,27 @@
                       ]
                     },
                     "module_checks": {
-                      "description": "Every check that each ONNX Runtime and QNN module in the process came from the bundle directory, in order: after the execution provider was created (and its library registered), after each timed session was created, and while the node placement session was alive.",
+                      "description": "Every check that each ONNX Runtime and QNN module in the process came from the bundle directory, in order: after the execution provider was created (and its library registered), after each untimed and each timed session was created, and while the node placement session was alive.",
                       "type": "array",
                       "items": {
                         "type": "object",
                         "additionalProperties": false,
                         "required": ["stage", "trial_index", "modules_outside_bundle"],
                         "properties": {
-                          "stage": {"enum": ["after_provider_creation", "after_session_creation", "placement_session"]},
+                          "stage": {"enum": ["after_provider_creation", "after_session_creation", "after_untimed_session", "placement_session"], "description": "after_untimed_session: after a session that is not timed (EP context build and the cached == compiled check before the trials; --init-breakdown sessions of a trial)."},
                           "trial_index": {
                             "type": ["integer", "null"],
                             "minimum": 0,
-                            "description": "The trial whose session was checked (after_session_creation only)."
+                            "description": "The trial whose session was checked (after_session_creation, and after_untimed_session for --init-breakdown sessions)."
                           },
                           "modules_outside_bundle": {"type": "array", "items": {"$ref": "#/$defs/loadedModule"}}
                         }
                       }
+                    },
+                    "deleted_stale_cache_files": {
+                      "description": "Files the run deleted from the EP context cache because they belonged to an entry for the same model with another key (stale), as absolute paths. Empty if none. Added to the 1.2.0 object in place.",
+                      "type": "array",
+                      "items": {"type": "string"}
                     }
                   }
                 }
@@ -691,30 +717,55 @@
               ]
             },
             "batch_equivalence": {
-              "description": "Whether this model file, on this provider and compute precision, computes for every batch item exactly the output the batch-1 file of the same model variant computes for the same item. Results that are not equivalent measure a different computation and must not be averaged or compared with batch-1 results as if they were the same. Null if not determined.",
+              "description": "How this model file, on this provider and compute precision, compares with the batch-1 file of the same model variant: whether every batch item's output is bit-identical (bitwise_equal_to_b1) and, where it is not, whether any prediction changes (predictions_equal_to_b1). A result whose predictions differ measures a different computation and must not be averaged or compared with batch-1 results as if it were the same one; one that differs only in the last bits may. Null if not determined.",
               "oneOf": [
                 {"type": "null"},
                 {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["equivalent_to_b1", "basis", "reference_batch"],
+                  "required": ["bitwise_equal_to_b1", "bitwise_basis", "predictions_equal_to_b1", "predictions_basis", "predictions_compared", "predictions_differing", "reference_batch"],
                   "properties": {
-                    "equivalent_to_b1": {"type": ["boolean", "null"]},
-                    "basis": {
+                    "bitwise_equal_to_b1": {"type": ["boolean", "null"], "description": "True if every batch item's output is bit-identical to the batch-1 file's output for the same input."},
+                    "bitwise_basis": {
                       "enum": ["batch_size_1", "reference_outputs", "not_available"],
-                      "description": "batch_size_1: the model has batch size 1 (equivalent by definition). reference_outputs: from the committed reference outputs (models/batch_equivalence.json), looked up by model SHA256, provider and compute precision. not_available: no reference entry for this model file."
+                      "description": "batch_size_1: the model has batch size 1 (equal by definition). reference_outputs: from the committed reference outputs (models/batch_equivalence.json), looked up by model SHA256, provider and compute precision. not_available: no reference entry for this model file."
                     },
+                    "predictions_equal_to_b1": {"type": ["boolean", "null"], "description": "True if no prediction differs from the batch-1 file's (see predictions_basis)."},
+                    "predictions_basis": {
+                      "enum": ["bitwise", "eval_quick_top1", "test_split_flags", "not_available"],
+                      "description": "bitwise: the outputs are bit-identical, so the predictions are equal. eval_quick_top1: the top-1 class of every ImageNetV2 eval-quick image (1,000) at this batch size against batch 1. test_split_flags: the anomaly flag of every test-split window at the batch-1 file's threshold, against batch 1. not_available: not determined."
+                    },
+                    "predictions_compared": {"$ref": "#/$defs/nullableNonNegativeInteger", "description": "Images or windows compared (eval_quick_top1, test_split_flags)."},
+                    "predictions_differing": {"$ref": "#/$defs/nullableNonNegativeInteger", "description": "Of those, how many predictions differ from batch 1."},
                     "reference_batch": {"const": 1}
                   },
                   "allOf": [
                     {
-                      "if": {"properties": {"basis": {"const": "not_available"}}},
-                      "then": {"properties": {"equivalent_to_b1": {"type": "null"}}},
-                      "else": {"properties": {"equivalent_to_b1": {"type": "boolean"}}}
+                      "if": {"properties": {"bitwise_basis": {"const": "not_available"}}},
+                      "then": {"properties": {"bitwise_equal_to_b1": {"type": "null"}}},
+                      "else": {"properties": {"bitwise_equal_to_b1": {"type": "boolean"}}}
                     },
                     {
-                      "if": {"properties": {"basis": {"const": "batch_size_1"}}},
-                      "then": {"properties": {"equivalent_to_b1": {"const": true}}}
+                      "if": {"properties": {"bitwise_basis": {"const": "batch_size_1"}}},
+                      "then": {"properties": {"bitwise_equal_to_b1": {"const": true}}}
+                    },
+                    {
+                      "if": {"properties": {"bitwise_equal_to_b1": {"const": true}}},
+                      "then": {"properties": {"predictions_equal_to_b1": {"const": true}, "predictions_basis": {"const": "bitwise"}}}
+                    },
+                    {
+                      "if": {"properties": {"predictions_basis": {"const": "bitwise"}}},
+                      "then": {"properties": {"bitwise_equal_to_b1": {"const": true}}}
+                    },
+                    {
+                      "if": {"properties": {"predictions_basis": {"const": "not_available"}}},
+                      "then": {"properties": {"predictions_equal_to_b1": {"type": "null"}}},
+                      "else": {"properties": {"predictions_equal_to_b1": {"type": "boolean"}}}
+                    },
+                    {
+                      "if": {"properties": {"predictions_basis": {"enum": ["eval_quick_top1", "test_split_flags"]}}},
+                      "then": {"properties": {"predictions_compared": {"type": "integer"}, "predictions_differing": {"type": "integer"}}},
+                      "else": {"properties": {"predictions_compared": {"type": "null"}, "predictions_differing": {"type": "null"}}}
                     }
                   ]
                 }

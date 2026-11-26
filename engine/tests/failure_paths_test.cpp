@@ -509,8 +509,11 @@ eb::BenchmarkResult result_with_trials(std::vector<eb::TrialResult> trials) {
     eb::BenchmarkResult r;
     r.config = short_run(static_cast<int>(trials.size()));
     r.batch_size = 1;
-    for (const eb::TrialResult& t : trials)
+    for (eb::TrialResult& t : trials) {
+        t.session_init.cold_ms = t.session_create_ms;
+        r.timing.session_init.timed_ms.push_back(t.session_create_ms);
         r.timing.session_init.cold_ms.push_back(t.session_create_ms);
+    }
     r.timing.trials = std::move(trials);
     return r;
 }

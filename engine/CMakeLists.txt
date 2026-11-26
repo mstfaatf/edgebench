@@ -29,6 +29,7 @@ add_library(edgebench_core STATIC
   src/diagnostics.cpp
   src/doctor.cpp
   src/dry_run.cpp
+  src/ep_context_cache.cpp
   src/ep_devices.cpp
   src/ep_library.cpp
   src/exit_codes.cpp
@@ -106,6 +107,7 @@ endfunction()
 if(EDGEBENCH_BUILD_TESTS)
   add_executable(edgebench_tests
     tests/batch_equivalence_test.cpp
+    tests/ep_context_cache_test.cpp
     tests/cli_test.cpp
     tests/core_types_test.cpp
     tests/exit_codes_test.cpp
@@ -148,6 +150,7 @@ if(EDGEBENCH_BUILD_TESTS)
     tests/provider_test.cpp
     tests/qnn_ep_test.cpp
     tests/qnn_provider_test.cpp
+    tests/ep_cache_npu_test.cpp
     tests/reference_models_test.cpp
     tests/test_runtime.cpp
     tests/process_util.cpp

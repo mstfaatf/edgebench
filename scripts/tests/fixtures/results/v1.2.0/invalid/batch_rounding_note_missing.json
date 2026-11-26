@@ -1,0 +1,20 @@
+{
+  "description": "Outputs that differ from batch 1 in their last bits with equal predictions, without the batch_rounding_only note.",
+  "base": "docs/examples/v1.2.0/example-cpu-fp32.json",
+  "set": {
+    "/execution/batch_equivalence": {
+      "bitwise_equal_to_b1": false,
+      "bitwise_basis": "reference_outputs",
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 0,
+      "reference_batch": 1
+    }
+  },
+  "expect": {
+    "severity": "error",
+    "code": "batch_rounding_note_missing",
+    "path": "/execution/batch_equivalence/bitwise_equal_to_b1"
+  }
+}

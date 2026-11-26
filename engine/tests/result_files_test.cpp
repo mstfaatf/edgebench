@@ -58,7 +58,9 @@ eb::BenchmarkResult fake_result() {
         t.session_create_ms = 10.0 + i;
         t.latencies_ms = latencies[static_cast<std::size_t>(i)];
         t.stats = eb::compute_stats(t.latencies_ms, 1);
+        t.session_init.cold_ms = t.session_create_ms;
         r.timing.trials.push_back(t);
+        r.timing.session_init.timed_ms.push_back(t.session_create_ms);
         r.timing.session_init.cold_ms.push_back(t.session_create_ms);
     }
     r.timing.session_init.session_create_ms = 10.0;

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "edgebench/ep_context_cache.hpp"
 #include "edgebench/ort_loader.hpp"
 
 namespace edgebench {
@@ -37,10 +38,22 @@ std::map<std::string, std::string> qnn_ep_options(const RunConfig& config,
 }
 
 std::map<std::string, std::string> qnn_session_config(const RunConfig& config) {
-    return {
+    std::map<std::string, std::string> entries = {
         {"session.disable_cpu_ep_fallback", config.strict ? "1" : "0"},
-        {"ep.context_enable", "0"},
+        {std::string(kEpContextEnableKey), "0"},
     };
+    if (config.uses_ep_context())
+        entries.emplace(kEpContextEmbedModeKey, kEpContextEmbedMode);
+    return entries;
+}
+
+std::map<std::string, std::string> qnn_context_build_config(
+    const RunConfig& config, const std::filesystem::path& context_model) {
+    std::map<std::string, std::string> entries = qnn_session_config(config);
+    entries[std::string(kEpContextEnableKey)] = "1";
+    entries[std::string(kEpContextFilePathKey)] = path_to_utf8(context_model);
+    entries[std::string(kEpContextEmbedModeKey)] = std::string(kEpContextEmbedMode);
+    return entries;
 }
 
 Result<std::optional<std::string>> requested_compute_precision(const RunConfig& config,

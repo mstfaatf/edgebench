@@ -42,14 +42,18 @@ constexpr bool qnn_ep_in_build() noexcept {
 /// after session creation reports.
 inline constexpr std::array<std::wstring_view, 2> kQnnHtpBackendFiles = {L"QnnHtp.dll",
                                                                          L"QnnHtpPrepare.dll"};
+/// The QNN system library, which the backend loads for every session that writes
+/// or reads an EP context; required up front when a run uses EP contexts.
+inline constexpr std::wstring_view kQnnSystemFile = L"QnnSystem.dll";
 
 /// <bundle_dir>/QnnHtp.dll.
 std::filesystem::path qnn_htp_backend_path(const std::filesystem::path& bundle_dir);
 
 /// The absolute path of the bundled HTP backend, if every kQnnHtpBackendFiles
-/// entry exists in `bundle_dir`; otherwise qnn_backend_not_bundled (exit code 4)
-/// naming each missing file.
-Result<std::filesystem::path> check_qnn_htp_backend(const std::filesystem::path& bundle_dir);
+/// entry (and, with `ep_context`, kQnnSystemFile) exists in `bundle_dir`; otherwise
+/// qnn_backend_not_bundled (exit code 4) naming each missing file.
+Result<std::filesystem::path> check_qnn_htp_backend(const std::filesystem::path& bundle_dir,
+                                                    bool ep_context = false);
 
 /// <bundle_dir>/onnxruntime_providers_qnn.dll.
 std::filesystem::path qnn_ep_library_path(const std::filesystem::path& bundle_dir);

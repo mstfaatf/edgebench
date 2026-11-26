@@ -18,6 +18,7 @@
       "path": null
     }
   ],
+  "notes": [],
   "tool": {
     "name": "edgebench",
     "version": "0.1.0",
@@ -96,13 +97,16 @@
       "context_path": null,
       "hit": false,
       "verified_equal_outputs": null,
-      "key": null
+      "key": null,
+      "cache_dir": "C:\\Users\\you\\AppData\\Local\\EdgeBench\\qnn-context",
+      "embed_mode": "0"
     },
     "run_binding": "run",
     "profiling": {
       "ort": false,
       "qnn_level": "off"
-    }
+    },
+    "init_breakdown": false
   },
   "execution": null,
   "timing": null,

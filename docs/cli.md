@@ -21,9 +21,8 @@ edgebench <command> --help
 
 Benchmarks one model with one configuration, prints a summary, and writes the
 result as a results-schema 1.2.0 JSON document plus CSV files (see
-[Result files](#result-files)). Only the CPU provider is available in this
-version. `--dry-run` creates the real session and checks one inference without
-measuring or writing anything.
+[Result files](#result-files)). `--dry-run` creates the real session and checks
+one inference without measuring or writing anything.
 
 | Option | Default | Constraints / meaning |
 |---|---|---|
@@ -48,6 +47,9 @@ measuring or writing anything.
 | `--no-strict` | off | NPU only: allow nodes the NPU cannot run to fall back to the CPU (recorded as `config.strict_mode` false, with `strict_mode_off` and `cpu_fallback_nodes` warnings). By default such a session is refused (exit 5) |
 | `--npu-fp16` | off | NPU only: run an FP32 model with FP16 compute (`enable_htp_fp16_precision` = `1`). Required for FP32 models, a usage error for INT8 models |
 | `--htp-performance-mode MODE` | `burst` | NPU only: the QNN EP's `htp_performance_mode`: `burst`, `balanced`, `default`, `high_performance`, `high_power_saver`, `low_balanced`, `low_power_saver`, `power_saver`, `extreme_power_saver`, `sustained_high_performance` |
+| `--ep-cache MODE` | `off` | NPU only: EP context cache. `off`: every session is compiled from the model. `build`: delete this key's cache entry, build it once before the trials, create every timed session from it. `use`: create the timed sessions from the entry whose key matches; build it first if there is none. See [EP context cache and initialization](#ep-context-cache-and-initialization) |
+| `--ep-cache-dir PATH` | `%LOCALAPPDATA%\EdgeBench\qnn-context` | NPU only: the cache directory (created if missing; must be writable, exit 6 otherwise), one subdirectory per cache key. Only with `--ep-cache build`/`use` or `--init-breakdown` |
+| `--init-breakdown` | off | NPU only: in every trial, also time a cold, a context-building and a cached session creation, each after the trial's idle period, before the timed session |
 
 All validation problems are reported together, one per line, as
 `error: [usage_error] --<option>: <message>` (`[model_unreadable]` when the
@@ -75,7 +77,8 @@ other QNN EP option stays at the EP's default:
 | `config.ep_options` | `htp_performance_mode` | `--htp-performance-mode` (default `burst`) |
 | `config.ep_options` | `enable_htp_fp16_precision` | `1`, only with `--npu-fp16` |
 | `config.session_config` | `session.disable_cpu_ep_fallback` | `1` (strict mode), `0` with `--no-strict` |
-| `config.session_config` | `ep.context_enable` | `0`: no EP context cache (`config.ep_context_cache.state` `disabled`) |
+| `config.session_config` | `ep.context_enable` | `0`: the session writes no EP context |
+| `config.session_config` | `ep.context_embed_mode` | `0`, only with `--ep-cache build`/`use` or `--init-breakdown` (see below) |
 
 The compute precision follows from the model: an INT8 QDQ model runs as stored
 (`config.requested.compute_precision` `int8`); an FP32 model needs `--npu-fp16`
@@ -94,6 +97,82 @@ after the trials (as for the CPU), together with the QNN EP's node validation
 a node placed anywhere but on the QNN EP is an internal error (exit 1). After
 every QNN session creation the loaded ONNX Runtime/QNN modules are checked
 again: the HTP backend DLLs load at that point.
+
+### EP context cache and initialization
+
+Compiling a model for the HTP takes about 2 s; a session created from an EP
+context (the precompiled graph the QNN EP writes) takes about 0.3 s. With
+`--ep-cache build` or `use` the timed sessions are created from a context
+(`timing.session_init.ep_context_state` `cached`); with `off` (the default) they
+are compiled every time (`cold`). The latency of the steady-state iterations is
+measured on the timed session in every mode, the same way.
+
+**The cache.** One subdirectory of `--ep-cache-dir` per cache key, named by the
+key id, holding `<model stem>_ctx.onnx`, its context binary
+`<model stem>_ctx_qnn.bin` and `edgebench-cache.json` (key fields, key id,
+creation time, every file with its size and SHA256). Entries are built in a
+temporary subdirectory and moved into place when complete. edgebench only ever
+deletes files listed in a manifest it wrote, and only in direct subdirectories
+of the cache directory; a directory for the key without such a manifest stops
+the run (`ep_cache_entry_foreign`, exit 6) instead of being touched.
+
+**The key.** The key id is the SHA256 of the key fields serialized as JSON with
+sorted keys, no whitespace and UTF-8 text (Python:
+`json.dumps(key, sort_keys=True, separators=(",", ":"), ensure_ascii=False)`),
+recorded as `config.ep_context_cache.key` and `key_id` (the validator recomputes
+it). The fields: the model file's SHA256, the ONNX Runtime version, the QNN EP
+version, the QNN SDK version as reported by the backend (null until it is read),
+the HTP backend file's version (`QnnHtp.dll` ProductVersion), every EP option
+passed (including the backend path), every session config entry that affects
+compilation (all but `ep.context_enable` and `ep.context_file_path`: strict
+mode and the embed mode), the graph optimization level, and the device (type,
+vendor id, device id). Changing any of them gives a new key.
+
+**Invalidation.** With `build` or `use`, entries of the same model (same model
+SHA256) under another key are stale and deleted first; the deleted files are
+listed in `execution.verification_details.deleted_stale_cache_files`. `build`
+also deletes the entry of the current key before building it again
+(`state` `regenerated`; `generated` when nothing existed for the model). `use`
+loads a matching entry (`state` `loaded`, `hit` true) after checking every file
+against its manifest; a file that is missing, truncated or changed fails the run
+(`ep_context_corrupt`, exit 3), and so does a context ONNX Runtime cannot load
+(`ep_context_load_failed`, exit 3): the message says to rebuild it with
+`--ep-cache build`, and nothing is rebuilt silently. Without an entry, `use`
+builds one first (`hit` false).
+
+**Verified equal outputs.** Before the first trial of a `build` or `use` run,
+the engine runs its generated input (the same SplitMix64 input as the timed
+sessions) once through a session compiled from the model and once through a
+session created from the context, and compares the output bytes. A difference
+fails the run (`ep_context_outputs_differ`, exit 1); the result records
+`verified_equal_outputs`. There is no tolerance.
+
+**Embed mode.** Contexts are written with `ep.context_embed_mode` `0`: the
+context binary in its own file next to a small context model. That is the mode
+whose cached initialization and output equality were measured
+([feasibility.md](feasibility.md)), and the binary is loaded from its file
+rather than parsed out of the ONNX file (on MobileNetV2 INT8 the median cached
+initialization was 336 ms with mode 0 and 368 ms with mode 1). Context sessions
+load `QnnSystem.dll`, so with the cache or `--init-breakdown` it must be in the
+bundle too (exit 4 otherwise).
+
+**`--init-breakdown`.** Each trial times three more session creations before
+its timed session, each after the same idle period as the trial
+(`--cooldown-ms`): `cold_ms` (from the model, no context), `context_build_ms`
+(a session that writes a context into a scratch directory of that trial: a full
+build every trial) and `cached_init_ms` (a session from that scratch context,
+which is then deleted). They go into `timing.trials[].session_init` and their
+nearest-rank median, minimum and maximum into `timing.session_init.summary`.
+Without `--init-breakdown` a trial records only its timed session's creation,
+as `cold_ms` (cache off) or `cached_init_ms` (cache on).
+`timing.session_init.session_create_ms` is always the median creation time of
+the timed sessions; `cold_ms` and `cached_ms` list every creation of that kind
+in order, and `context_build_ms` is the build of the shared cache entry before
+the trials (null if none was built).
+
+When ONNX Runtime reports that the QNN EP rates a context as "supported but
+suboptimal" (it suggests recompiling), the result gets an
+`ep_context_recompilation_suggested` note. The outputs were verified either way.
 
 ### What `run` measures
 
@@ -204,14 +283,21 @@ EfficientNet-Lite0 files at batch 4 and 8 differ in the last bits. `run` looks
 the model up by its SHA256, the provider and the compute precision in
 `batch_equivalence.json` (the file in the model's directory or the nearest
 parent directory that has one: `models/batch_equivalence.json`, written by
-`scripts/make_references.py` from the reference outputs; see
-[models.md](models.md#batch-equivalence)) and records the answer in
-`execution.batch_equivalence`. A model that is not equivalent gets a
-`batch_not_equivalent` warning: its latency is that of a different
-computation and must not be averaged or compared with batch-1 results as the
-same one. The summary prints a `Batch` line for batch sizes above 1. A model
-that is not listed is recorded as `not_available` with a `value_unavailable`
-warning.
+`scripts/make_references.py`; see [models.md](models.md#batch-equivalence)) and
+records the answer in `execution.batch_equivalence`: whether the outputs are
+bit-identical to batch 1's (`bitwise_equal_to_b1`) and, if not, whether any
+prediction changes (`predictions_equal_to_b1`: top-1 on the 1,000 eval-quick
+images, or the anomaly flags of the autoencoder's test split).
+
+- Predictions differ: a `batch_not_equivalent` warning. The latency is that of
+  a different computation and must not be averaged or compared with batch-1
+  results as the same one.
+- Only the bits differ: a `batch_rounding_only` note (in `notes`, not a
+  warning). The result may be compared with batch 1.
+- Not listed: `not_available` with a `value_unavailable` warning.
+
+The summary prints a `Batch` line for batch sizes above 1, and the notes after
+the warnings.
 
 ### Output
 
@@ -685,7 +771,7 @@ Shared by `edgebench` and `tools/ort_probe` (defined in
 | 3 | `ort_runtime_error` | ONNX Runtime error: no usable EP device (none, or more than one, matches the requested device), or session creation or inference failed |
 | 4 | `ort_load_failure` | ONNX Runtime, the QNN execution provider or its HTP backend could not be loaded, or a loaded ONNX Runtime/QNN DLL is not the bundled one |
 | 5 | `strict_mode_refusal` | Strict mode refused the session: not every node can run on the requested device (NPU runs without `--no-strict`; `ort_probe --target npu`) |
-| 6 | `output_error` | Results could not be written (`edgebench run`: after the summary was printed, or before measuring if `--output-dir` is an existing file; `ort_probe`: the `--json` file exists or could not be written) |
+| 6 | `output_error` | Results could not be written (`edgebench run`: after the summary was printed, or before measuring if `--output-dir` is an existing file, or the EP context cache directory is not writable; `ort_probe`: the `--json` file exists or could not be written) |
 | 130 | `interrupted` | Stopped by Ctrl+C, Ctrl+Break or closing the console (the conventional 128 + SIGINT) |
 
 ## Messages
@@ -717,7 +803,8 @@ Every way `edgebench` and `ort_probe` can end with an error. "Result" says
 whether a result document is written. Tests are in
 `engine/tests/exit_paths_test.cpp`, `failure_paths_test.cpp`,
 `edgebench_exe_test.cpp`, `benchmark_test.cpp`, `qnn_ep_test.cpp`,
-`qnn_provider_test.cpp`, `npu_options_test.cpp`, `npu_selection_test.cpp`,
+`qnn_provider_test.cpp`, `ep_cache_npu_test.cpp`, `ep_context_cache_test.cpp`,
+`npu_options_test.cpp`, `npu_selection_test.cpp`,
 `run_config_test.cpp` and `cli_test.cpp`; "not triggerable" marks paths that need ONNX Runtime or Windows
 to fail internally and that a test cannot provoke.
 
@@ -758,12 +845,26 @@ to fail internally and that a test cannot provoke.
 | NPU, strict mode: a node cannot run on the NPU | `strict_mode_refusal` (code `ORT_FAIL`) | 5 | yes, `session_creation` | `RunNpu.StrictRefusalExits5AndWritesAFailedResult`, `QnnProviderNpu.StrictRefusalIsExit5WithTheOrtError`, `QnnSessionFailure.*` |
 | NPU: after a QNN session is created, a QNN module is loaded from outside the bundle (e.g. the display driver's HTP stub when the bundled one is missing) | `module_outside_bundle` | 4 | yes, `session_creation` | `QnnProviderNpu.ModulesAreCheckedAfterEveryQnnSessionCreation`, `RunNpu.BackendStubFromOutsideTheBundleExits4` |
 | NPU, strict mode: the placement session reports a node off the QNN EP | `strict_placement_mismatch` | 1 | yes, `session_creation` | not triggerable (ONNX Runtime refuses such a session) |
+| `--ep-cache`, `--init-breakdown` without `--provider npu`; `--ep-cache-dir` without either; unknown `--ep-cache` mode | `usage_error` | 2 | no | `NpuCli.CacheOptionErrors` |
+| NPU with EP contexts: `QnnSystem.dll` missing from the bundle | `qnn_backend_not_bundled` | 4 | yes, `ep_registration` | `QnnHtpBackend.MissingFilesAreALoadFailureNamingThem` |
+| EP context cache directory cannot be created or written (or `LOCALAPPDATA` is unset) | `ep_cache_dir_not_writable` | 6 | yes, `configuration` | `EpCacheNpu.UnwritableCacheDirectoryExits6`, `EpCacheNpu.ExeExitCodesForCacheErrors`, `EpCacheDirectory.MustBeWritable` |
+| The directory for the cache key exists without a manifest edgebench wrote | `ep_cache_entry_foreign` | 6 | yes, `configuration` | `EpCacheNpu.ADirectoryWithoutAManifestIsNeverTouched` |
+| A cache file cannot be deleted | `ep_cache_delete_failed` | 6 | yes, `configuration` | `EpCacheEntries.RefusesToDeleteOutsideTheCacheDirectory` (the refusal); deletion failures not triggerable |
+| `--ep-cache use`: a file of the entry is missing, truncated or changed (checked against its manifest) | `ep_context_corrupt` | 3 | yes, `session_creation`; nothing rebuilt | `EpCacheNpu.UseWithATruncatedContextExits3WithoutRebuilding`, `EpCacheNpu.ExeExitCodesForCacheErrors` |
+| A session cannot be created from an EP context model | `ep_context_load_failed` (ORT code kept) | 3 | yes, `session_creation` | `EpCacheNpu.UseWithAContextOnnxRuntimeCannotLoadExits3` |
+| The context-building session writes no context model | `ep_context_not_written` | 3 | yes, `session_creation` | not triggerable |
+| A session from the EP context gives other outputs than a compiled session | `ep_context_outputs_differ` | 1 | yes, `measurement`, `verified_equal_outputs` false | not triggerable (the QNN EP gives bit-identical outputs; `ReferenceCachedNpu.*`) |
 | Ctrl+C, Ctrl+Break, console closed | `interrupted` | 130 | yes, current stage, completed trials kept | `ExitPaths.CtrlBreakDuringARunWritesAnInterruptedResult`, `Interrupt.*` |
 | Second Ctrl+C or Ctrl+Break | none | 130 | no | `ExitPaths.SecondCtrlBreakExitsAtOnce` |
 | Ctrl+C or Ctrl+Break during `--dry-run` | none | 130 | no | same handler mode as `ExitPaths.OrtProbeCtrlBreakExits130WithoutWriting` |
 | The result cannot be written | `write_failed` | 6 (a failed run keeps its own code) | no | `Cli.RunWithAnUnwritableOutputDirectoryExits6AfterTheSummary`, `ResultFiles.*` |
 | An exception escapes | `internal_error` / `ort_runtime_error` | 1 / 3 | no | not triggerable |
 | A crash (structured exception) | `internal_error` | 1 | no | `ExitPaths.UnhandledExceptionIsReportedAndExits1` |
+
+Notes (in `notes`, not warnings): `batch_rounding_only`
+(`BenchmarkModels.BatchEquivalenceComesFromTheReferenceSummary`) and
+`ep_context_recompilation_suggested`
+(`EpCacheNpu.LoadingAContextIsNotedWhenOnnxRuntimeSuggestsRecompiling`).
 
 Warnings that do not end the run: `nondeterministic_outputs`
 (`FailurePaths.OutputsDifferingWithTheSameTop1AreAWarning`), `strict_mode_off`
@@ -777,7 +878,7 @@ log reports failed nodes; not triggerable),
 `background_cpu_load_high` (idle and during-trial samples;
 `FailurePaths.BackgroundLoadDuringATrialIsAWarning`), `trial_spread_high`
 (`FailurePaths.TrialSpreadIsAWarningInTheResultAndSummary`, `TrialSpread.*`),
-`batch_not_equivalent` (`BenchmarkModels.BatchEquivalenceComesFromTheReferenceSummary`),
+`batch_not_equivalent` (`BatchEquivalence.LooksUpByShaProviderAndComputePrecision`; the warning itself: validator fixture `batch_not_equivalent_unflagged`),
 `power_state_changed`, `unknown_power_mode`, `value_unavailable`.
 
 `edgebench doctor`:

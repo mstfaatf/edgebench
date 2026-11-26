@@ -1,5 +1,5 @@
 {
-  "description": "A batch-8 result that is not equivalent to batch 1, without the batch_not_equivalent warning.",
+  "description": "A batch-8 result whose predictions differ from batch 1, without the batch_not_equivalent warning.",
   "base": "docs/examples/v1.2.0/example-npu-int8-b8-not-equivalent.json",
   "set": {
     "/warnings": [
@@ -48,6 +48,6 @@
   "expect": {
     "severity": "error",
     "code": "batch_not_equivalent_unflagged",
-    "path": "/execution/batch_equivalence/equivalent_to_b1"
+    "path": "/execution/batch_equivalence/predictions_equal_to_b1"
   }
 }

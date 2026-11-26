@@ -1,6 +1,21 @@
 {
-  "batch_equivalence_version": "1.0.0",
-  "description": "Whether each model file computes, per batch item, exactly the output its batch-1 sibling computes on the same provider: from the stored reference outputs on the 8 reference images or windows (models/references, written by scripts/make_references.py). Keyed by model SHA256, provider and compute precision.",
+  "batch_equivalence_version": "1.1.0",
+  "description": "Whether each model file computes, per batch item, exactly the output its batch-1 sibling computes on the same provider (bitwise_equal_to_b1: from the stored reference outputs on the 8 reference images or windows, models/references, written by scripts/make_references.py), and, where it does not, whether any prediction changes (predictions_equal_to_b1: top-1 class on ImageNetV2 eval-quick, or anomaly flags on the autoencoder's test split). Keyed by model SHA256, provider and compute precision.",
+  "prediction_inputs": {
+    "eval_quick_top1": {
+      "split": "eval-quick",
+      "manifest": "datasets/imagenetv2-matched-frequency/eval-quick.tsv",
+      "manifest_sha256": "414993d9d303c6cd22884d47c3a11d800af8f62e80576b0fa50e8b05a1cf12f3",
+      "compared": "top-1 class of every image"
+    },
+    "test_split_flags": {
+      "split": "test",
+      "manifest": "datasets/nab-machine-temperature/splits.json",
+      "manifest_sha256": "b97ee8e2a09139a91e61820d114ca552e1443ec519024d09a31426fa01074c82",
+      "compared": "anomaly flag of every window",
+      "threshold_rule": "max_validation_score of the batch-1 file on the same provider and compute precision; a window is flagged if its score is above it"
+    }
+  },
   "entries": [
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_fp32_b1.onnx",
@@ -11,12 +26,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_fp32_b1.onnx",
       "b1_sha256": "591757a33c9bbe482eec21ee449e9601512d2d1be615b1528219355c00d5fd3a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_fp32_b1.onnx",
@@ -27,12 +46,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_fp32_b1.onnx",
       "b1_sha256": "591757a33c9bbe482eec21ee449e9601512d2d1be615b1528219355c00d5fd3a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_fp32_b4.onnx",
@@ -43,12 +66,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_fp32_b1.onnx",
       "b1_sha256": "591757a33c9bbe482eec21ee449e9601512d2d1be615b1528219355c00d5fd3a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_fp32_b4.onnx",
@@ -59,12 +86,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_fp32_b1.onnx",
       "b1_sha256": "591757a33c9bbe482eec21ee449e9601512d2d1be615b1528219355c00d5fd3a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_fp32_b8.onnx",
@@ -75,12 +106,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_fp32_b1.onnx",
       "b1_sha256": "591757a33c9bbe482eec21ee449e9601512d2d1be615b1528219355c00d5fd3a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_fp32_b8.onnx",
@@ -91,12 +126,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_fp32_b1.onnx",
       "b1_sha256": "591757a33c9bbe482eec21ee449e9601512d2d1be615b1528219355c00d5fd3a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_fp32_imported_b1.onnx",
@@ -107,12 +146,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_fp32_imported_b1.onnx",
       "b1_sha256": "1cf04ca216aa4614f35dd7b9c037e3762976ee750d90f47827b1481f6bb0d889",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_fp32_imported_b1.onnx",
@@ -123,12 +166,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_fp32_imported_b1.onnx",
       "b1_sha256": "1cf04ca216aa4614f35dd7b9c037e3762976ee750d90f47827b1481f6bb0d889",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_fp32_imported_b4.onnx",
@@ -139,12 +186,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_fp32_imported_b1.onnx",
       "b1_sha256": "1cf04ca216aa4614f35dd7b9c037e3762976ee750d90f47827b1481f6bb0d889",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_fp32_imported_b4.onnx",
@@ -155,12 +206,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_fp32_imported_b1.onnx",
       "b1_sha256": "1cf04ca216aa4614f35dd7b9c037e3762976ee750d90f47827b1481f6bb0d889",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 0.0078125
+      "max_abs_diff": 0.0078125,
+      "predictions_equal_to_b1": false,
+      "predictions_basis": "test_split_flags",
+      "predictions_compared": 11230,
+      "predictions_differing": 2
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_fp32_imported_b8.onnx",
@@ -171,12 +226,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_fp32_imported_b1.onnx",
       "b1_sha256": "1cf04ca216aa4614f35dd7b9c037e3762976ee750d90f47827b1481f6bb0d889",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_fp32_imported_b8.onnx",
@@ -187,12 +246,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_fp32_imported_b1.onnx",
       "b1_sha256": "1cf04ca216aa4614f35dd7b9c037e3762976ee750d90f47827b1481f6bb0d889",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 0.0078125
+      "max_abs_diff": 0.0078125,
+      "predictions_equal_to_b1": false,
+      "predictions_basis": "test_split_flags",
+      "predictions_compared": 11230,
+      "predictions_differing": 2
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_int8_b1.onnx",
@@ -203,12 +266,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_int8_b1.onnx",
       "b1_sha256": "9ef48a4297e3d1d12e42cf39a285667e09343939c4edc9d4d81b0e14ddb3068a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_int8_b1.onnx",
@@ -219,12 +286,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_int8_b1.onnx",
       "b1_sha256": "9ef48a4297e3d1d12e42cf39a285667e09343939c4edc9d4d81b0e14ddb3068a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_int8_b4.onnx",
@@ -235,12 +306,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_int8_b1.onnx",
       "b1_sha256": "9ef48a4297e3d1d12e42cf39a285667e09343939c4edc9d4d81b0e14ddb3068a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_int8_b4.onnx",
@@ -251,12 +326,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_int8_b1.onnx",
       "b1_sha256": "9ef48a4297e3d1d12e42cf39a285667e09343939c4edc9d4d81b0e14ddb3068a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_int8_b8.onnx",
@@ -267,12 +346,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_int8_b1.onnx",
       "b1_sha256": "9ef48a4297e3d1d12e42cf39a285667e09343939c4edc9d4d81b0e14ddb3068a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_int8_b8.onnx",
@@ -283,12 +366,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_int8_b1.onnx",
       "b1_sha256": "9ef48a4297e3d1d12e42cf39a285667e09343939c4edc9d4d81b0e14ddb3068a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_int8_unpruned_b1.onnx",
@@ -299,12 +386,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_int8_unpruned_b1.onnx",
       "b1_sha256": "bad07e8e7f46564ce51d0f267a96169fb40958ebe23c68a63dece56a4bf4f724",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_int8_unpruned_b1.onnx",
@@ -315,12 +406,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_int8_unpruned_b1.onnx",
       "b1_sha256": "bad07e8e7f46564ce51d0f267a96169fb40958ebe23c68a63dece56a4bf4f724",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_int8_unpruned_b4.onnx",
@@ -331,12 +426,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_int8_unpruned_b1.onnx",
       "b1_sha256": "bad07e8e7f46564ce51d0f267a96169fb40958ebe23c68a63dece56a4bf4f724",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_int8_unpruned_b4.onnx",
@@ -347,12 +446,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_int8_unpruned_b1.onnx",
       "b1_sha256": "bad07e8e7f46564ce51d0f267a96169fb40958ebe23c68a63dece56a4bf4f724",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_int8_unpruned_b8.onnx",
@@ -363,12 +466,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_int8_unpruned_b1.onnx",
       "b1_sha256": "bad07e8e7f46564ce51d0f267a96169fb40958ebe23c68a63dece56a4bf4f724",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "conv1d_autoencoder/conv1d_autoencoder_int8_unpruned_b8.onnx",
@@ -379,12 +486,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "conv1d_autoencoder/conv1d_autoencoder_int8_unpruned_b1.onnx",
       "b1_sha256": "bad07e8e7f46564ce51d0f267a96169fb40958ebe23c68a63dece56a4bf4f724",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_fp32_b1.onnx",
@@ -395,12 +506,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_fp32_b1.onnx",
       "b1_sha256": "d4a9e1f6ee6512a2cae1c1f032cff1ba284717bc54ee9d32a8d95dd9385f1a4e",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_fp32_b1.onnx",
@@ -411,12 +526,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_fp32_b1.onnx",
       "b1_sha256": "d4a9e1f6ee6512a2cae1c1f032cff1ba284717bc54ee9d32a8d95dd9385f1a4e",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_fp32_b4.onnx",
@@ -427,12 +546,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_fp32_b1.onnx",
       "b1_sha256": "d4a9e1f6ee6512a2cae1c1f032cff1ba284717bc54ee9d32a8d95dd9385f1a4e",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 3.993511199951172e-06
+      "max_abs_diff": 3.993511199951172e-06,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 0
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_fp32_b4.onnx",
@@ -443,12 +566,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_fp32_b1.onnx",
       "b1_sha256": "d4a9e1f6ee6512a2cae1c1f032cff1ba284717bc54ee9d32a8d95dd9385f1a4e",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_fp32_b8.onnx",
@@ -459,12 +586,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_fp32_b1.onnx",
       "b1_sha256": "d4a9e1f6ee6512a2cae1c1f032cff1ba284717bc54ee9d32a8d95dd9385f1a4e",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 3.993511199951172e-06
+      "max_abs_diff": 3.993511199951172e-06,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 0
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_fp32_b8.onnx",
@@ -475,12 +606,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_fp32_b1.onnx",
       "b1_sha256": "d4a9e1f6ee6512a2cae1c1f032cff1ba284717bc54ee9d32a8d95dd9385f1a4e",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_fp32_folded_b1.onnx",
@@ -491,12 +626,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_fp32_folded_b1.onnx",
       "b1_sha256": "d966af5ae1e29f97d416399de5c77070d7655145ecc12162644897a609bbf22a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_fp32_folded_b1.onnx",
@@ -507,12 +646,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_fp32_folded_b1.onnx",
       "b1_sha256": "d966af5ae1e29f97d416399de5c77070d7655145ecc12162644897a609bbf22a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_fp32_folded_b4.onnx",
@@ -523,12 +666,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_fp32_folded_b1.onnx",
       "b1_sha256": "d966af5ae1e29f97d416399de5c77070d7655145ecc12162644897a609bbf22a",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 5.245208740234375e-06
+      "max_abs_diff": 5.245208740234375e-06,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 0
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_fp32_folded_b4.onnx",
@@ -539,12 +686,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_fp32_folded_b1.onnx",
       "b1_sha256": "d966af5ae1e29f97d416399de5c77070d7655145ecc12162644897a609bbf22a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_fp32_folded_b8.onnx",
@@ -555,12 +706,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_fp32_folded_b1.onnx",
       "b1_sha256": "d966af5ae1e29f97d416399de5c77070d7655145ecc12162644897a609bbf22a",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 5.245208740234375e-06
+      "max_abs_diff": 5.245208740234375e-06,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 0
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_fp32_folded_b8.onnx",
@@ -571,12 +726,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_fp32_folded_b1.onnx",
       "b1_sha256": "d966af5ae1e29f97d416399de5c77070d7655145ecc12162644897a609bbf22a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_b1.onnx",
@@ -587,12 +746,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_b1.onnx",
       "b1_sha256": "2403764478fd08197383200c35620d1b592ca2fa853d2024db38e840c31b4cd3",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_b1.onnx",
@@ -603,12 +766,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_b1.onnx",
       "b1_sha256": "2403764478fd08197383200c35620d1b592ca2fa853d2024db38e840c31b4cd3",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_b4.onnx",
@@ -619,12 +786,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_b1.onnx",
       "b1_sha256": "2403764478fd08197383200c35620d1b592ca2fa853d2024db38e840c31b4cd3",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_b4.onnx",
@@ -635,12 +806,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_b1.onnx",
       "b1_sha256": "2403764478fd08197383200c35620d1b592ca2fa853d2024db38e840c31b4cd3",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_b8.onnx",
@@ -651,12 +826,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_b1.onnx",
       "b1_sha256": "2403764478fd08197383200c35620d1b592ca2fa853d2024db38e840c31b4cd3",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_b8.onnx",
@@ -667,12 +846,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_b1.onnx",
       "b1_sha256": "2403764478fd08197383200c35620d1b592ca2fa853d2024db38e840c31b4cd3",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 0.08502340316772461
+      "max_abs_diff": 0.08502340316772461,
+      "predictions_equal_to_b1": false,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 5
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_folded_b1.onnx",
@@ -683,12 +866,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_folded_b1.onnx",
       "b1_sha256": "5fef2c3c07e6fe35522d9a821edfbc56846c17b6dae1f8cfd2e5306e9ae62900",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_folded_b1.onnx",
@@ -699,12 +886,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_folded_b1.onnx",
       "b1_sha256": "5fef2c3c07e6fe35522d9a821edfbc56846c17b6dae1f8cfd2e5306e9ae62900",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_folded_b4.onnx",
@@ -715,12 +906,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_folded_b1.onnx",
       "b1_sha256": "5fef2c3c07e6fe35522d9a821edfbc56846c17b6dae1f8cfd2e5306e9ae62900",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_folded_b4.onnx",
@@ -731,12 +926,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_folded_b1.onnx",
       "b1_sha256": "5fef2c3c07e6fe35522d9a821edfbc56846c17b6dae1f8cfd2e5306e9ae62900",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_folded_b8.onnx",
@@ -747,12 +946,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_folded_b1.onnx",
       "b1_sha256": "5fef2c3c07e6fe35522d9a821edfbc56846c17b6dae1f8cfd2e5306e9ae62900",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_folded_b8.onnx",
@@ -763,12 +966,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_folded_b1.onnx",
       "b1_sha256": "5fef2c3c07e6fe35522d9a821edfbc56846c17b6dae1f8cfd2e5306e9ae62900",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 0.0853567123413086
+      "max_abs_diff": 0.0853567123413086,
+      "predictions_equal_to_b1": false,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 1
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_folded_unpruned_b1.onnx",
@@ -779,12 +986,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_folded_unpruned_b1.onnx",
       "b1_sha256": "c4a6c43f254b9d42c50a15ec1cfb21838f50ab4a4f1a819ff13f2fbda109b05e",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_folded_unpruned_b1.onnx",
@@ -795,12 +1006,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_folded_unpruned_b1.onnx",
       "b1_sha256": "c4a6c43f254b9d42c50a15ec1cfb21838f50ab4a4f1a819ff13f2fbda109b05e",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_folded_unpruned_b4.onnx",
@@ -811,12 +1026,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_folded_unpruned_b1.onnx",
       "b1_sha256": "c4a6c43f254b9d42c50a15ec1cfb21838f50ab4a4f1a819ff13f2fbda109b05e",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_folded_unpruned_b4.onnx",
@@ -827,12 +1046,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_folded_unpruned_b1.onnx",
       "b1_sha256": "c4a6c43f254b9d42c50a15ec1cfb21838f50ab4a4f1a819ff13f2fbda109b05e",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_folded_unpruned_b8.onnx",
@@ -843,12 +1066,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_folded_unpruned_b1.onnx",
       "b1_sha256": "c4a6c43f254b9d42c50a15ec1cfb21838f50ab4a4f1a819ff13f2fbda109b05e",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_folded_unpruned_b8.onnx",
@@ -859,12 +1086,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_folded_unpruned_b1.onnx",
       "b1_sha256": "c4a6c43f254b9d42c50a15ec1cfb21838f50ab4a4f1a819ff13f2fbda109b05e",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 0.0853567123413086
+      "max_abs_diff": 0.0853567123413086,
+      "predictions_equal_to_b1": false,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 1
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_unpruned_b1.onnx",
@@ -875,12 +1106,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_unpruned_b1.onnx",
       "b1_sha256": "1609c347b0662fff7ed3ad0ae04b8d7b22959462e9c0786b7a86b0586542f610",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_unpruned_b1.onnx",
@@ -891,12 +1126,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_unpruned_b1.onnx",
       "b1_sha256": "1609c347b0662fff7ed3ad0ae04b8d7b22959462e9c0786b7a86b0586542f610",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_unpruned_b4.onnx",
@@ -907,12 +1146,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_unpruned_b1.onnx",
       "b1_sha256": "1609c347b0662fff7ed3ad0ae04b8d7b22959462e9c0786b7a86b0586542f610",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_unpruned_b4.onnx",
@@ -923,12 +1166,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_unpruned_b1.onnx",
       "b1_sha256": "1609c347b0662fff7ed3ad0ae04b8d7b22959462e9c0786b7a86b0586542f610",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_unpruned_b8.onnx",
@@ -939,12 +1186,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_unpruned_b1.onnx",
       "b1_sha256": "1609c347b0662fff7ed3ad0ae04b8d7b22959462e9c0786b7a86b0586542f610",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "efficientnet_lite0/efficientnet_lite0_int8_unpruned_b8.onnx",
@@ -955,12 +1206,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "efficientnet_lite0/efficientnet_lite0_int8_unpruned_b1.onnx",
       "b1_sha256": "1609c347b0662fff7ed3ad0ae04b8d7b22959462e9c0786b7a86b0586542f610",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 0.08502340316772461
+      "max_abs_diff": 0.08502340316772461,
+      "predictions_equal_to_b1": false,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 5
     },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_b1.onnx",
@@ -971,12 +1226,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_fp32_b1.onnx",
       "b1_sha256": "bcf75698a82b096f63ce9d2048b0f50cb152ba3ea60882cdac06be3c12b6b674",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_b1.onnx",
@@ -987,12 +1246,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_fp32_b1.onnx",
       "b1_sha256": "bcf75698a82b096f63ce9d2048b0f50cb152ba3ea60882cdac06be3c12b6b674",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_b4.onnx",
@@ -1003,12 +1266,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "mobilenetv2/mobilenetv2_fp32_b1.onnx",
       "b1_sha256": "bcf75698a82b096f63ce9d2048b0f50cb152ba3ea60882cdac06be3c12b6b674",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 3.635883331298828e-06
+      "max_abs_diff": 3.635883331298828e-06,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 0
     },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_b4.onnx",
@@ -1019,12 +1286,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_fp32_b1.onnx",
       "b1_sha256": "bcf75698a82b096f63ce9d2048b0f50cb152ba3ea60882cdac06be3c12b6b674",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_b8.onnx",
@@ -1035,12 +1306,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "mobilenetv2/mobilenetv2_fp32_b1.onnx",
       "b1_sha256": "bcf75698a82b096f63ce9d2048b0f50cb152ba3ea60882cdac06be3c12b6b674",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 3.635883331298828e-06
+      "max_abs_diff": 3.635883331298828e-06,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 0
     },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_b8.onnx",
@@ -1051,12 +1326,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_fp32_b1.onnx",
       "b1_sha256": "bcf75698a82b096f63ce9d2048b0f50cb152ba3ea60882cdac06be3c12b6b674",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_folded_b1.onnx",
@@ -1067,12 +1346,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_fp32_folded_b1.onnx",
       "b1_sha256": "9d46447ed9a1d26334cfba193c2d7d206d98eba2934b481fb3f40e95e315f82f",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_folded_b1.onnx",
@@ -1083,12 +1366,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_fp32_folded_b1.onnx",
       "b1_sha256": "9d46447ed9a1d26334cfba193c2d7d206d98eba2934b481fb3f40e95e315f82f",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_folded_b4.onnx",
@@ -1099,12 +1386,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "mobilenetv2/mobilenetv2_fp32_folded_b1.onnx",
       "b1_sha256": "9d46447ed9a1d26334cfba193c2d7d206d98eba2934b481fb3f40e95e315f82f",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 3.814697265625e-06
+      "max_abs_diff": 3.814697265625e-06,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 0
     },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_folded_b4.onnx",
@@ -1115,12 +1406,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_fp32_folded_b1.onnx",
       "b1_sha256": "9d46447ed9a1d26334cfba193c2d7d206d98eba2934b481fb3f40e95e315f82f",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_folded_b8.onnx",
@@ -1131,12 +1426,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "mobilenetv2/mobilenetv2_fp32_folded_b1.onnx",
       "b1_sha256": "9d46447ed9a1d26334cfba193c2d7d206d98eba2934b481fb3f40e95e315f82f",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 3.814697265625e-06
+      "max_abs_diff": 3.814697265625e-06,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 0
     },
     {
       "file": "mobilenetv2/mobilenetv2_fp32_folded_b8.onnx",
@@ -1147,12 +1446,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_fp32_folded_b1.onnx",
       "b1_sha256": "9d46447ed9a1d26334cfba193c2d7d206d98eba2934b481fb3f40e95e315f82f",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_b1.onnx",
@@ -1163,12 +1466,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_b1.onnx",
       "b1_sha256": "197ffa4d0b301e864fbbf1674c47a4c3f6df17363b267c6d93d5b7bb01819b03",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_b1.onnx",
@@ -1179,12 +1486,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_b1.onnx",
       "b1_sha256": "197ffa4d0b301e864fbbf1674c47a4c3f6df17363b267c6d93d5b7bb01819b03",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_b4.onnx",
@@ -1195,12 +1506,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_b1.onnx",
       "b1_sha256": "197ffa4d0b301e864fbbf1674c47a4c3f6df17363b267c6d93d5b7bb01819b03",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_b4.onnx",
@@ -1211,12 +1526,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_b1.onnx",
       "b1_sha256": "197ffa4d0b301e864fbbf1674c47a4c3f6df17363b267c6d93d5b7bb01819b03",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_b8.onnx",
@@ -1227,12 +1546,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_b1.onnx",
       "b1_sha256": "197ffa4d0b301e864fbbf1674c47a4c3f6df17363b267c6d93d5b7bb01819b03",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_b8.onnx",
@@ -1243,12 +1566,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "mobilenetv2/mobilenetv2_int8_b1.onnx",
       "b1_sha256": "197ffa4d0b301e864fbbf1674c47a4c3f6df17363b267c6d93d5b7bb01819b03",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 0.05847311019897461
+      "max_abs_diff": 0.05847311019897461,
+      "predictions_equal_to_b1": false,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 6
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_folded_b1.onnx",
@@ -1259,12 +1586,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_folded_b1.onnx",
       "b1_sha256": "51ec54fe6974c8c7bec78dad34fbf08d54c77131f8b3d7398290799b06962b0e",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_folded_b1.onnx",
@@ -1275,12 +1606,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_folded_b1.onnx",
       "b1_sha256": "51ec54fe6974c8c7bec78dad34fbf08d54c77131f8b3d7398290799b06962b0e",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_folded_b4.onnx",
@@ -1291,12 +1626,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_folded_b1.onnx",
       "b1_sha256": "51ec54fe6974c8c7bec78dad34fbf08d54c77131f8b3d7398290799b06962b0e",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_folded_b4.onnx",
@@ -1307,12 +1646,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_folded_b1.onnx",
       "b1_sha256": "51ec54fe6974c8c7bec78dad34fbf08d54c77131f8b3d7398290799b06962b0e",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_folded_b8.onnx",
@@ -1323,12 +1666,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_folded_b1.onnx",
       "b1_sha256": "51ec54fe6974c8c7bec78dad34fbf08d54c77131f8b3d7398290799b06962b0e",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_folded_b8.onnx",
@@ -1339,12 +1686,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "mobilenetv2/mobilenetv2_int8_folded_b1.onnx",
       "b1_sha256": "51ec54fe6974c8c7bec78dad34fbf08d54c77131f8b3d7398290799b06962b0e",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 0.05857133865356445
+      "max_abs_diff": 0.05857133865356445,
+      "predictions_equal_to_b1": false,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 7
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_folded_unpruned_b1.onnx",
@@ -1355,12 +1706,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_folded_unpruned_b1.onnx",
       "b1_sha256": "b029d1810e95e6ab77440fec57adc239090cc54d34c11a1eee3297c3b9a8ecbe",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_folded_unpruned_b1.onnx",
@@ -1371,12 +1726,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_folded_unpruned_b1.onnx",
       "b1_sha256": "b029d1810e95e6ab77440fec57adc239090cc54d34c11a1eee3297c3b9a8ecbe",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_folded_unpruned_b4.onnx",
@@ -1387,12 +1746,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_folded_unpruned_b1.onnx",
       "b1_sha256": "b029d1810e95e6ab77440fec57adc239090cc54d34c11a1eee3297c3b9a8ecbe",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_folded_unpruned_b4.onnx",
@@ -1403,12 +1766,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_folded_unpruned_b1.onnx",
       "b1_sha256": "b029d1810e95e6ab77440fec57adc239090cc54d34c11a1eee3297c3b9a8ecbe",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_folded_unpruned_b8.onnx",
@@ -1419,12 +1786,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_folded_unpruned_b1.onnx",
       "b1_sha256": "b029d1810e95e6ab77440fec57adc239090cc54d34c11a1eee3297c3b9a8ecbe",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_folded_unpruned_b8.onnx",
@@ -1435,12 +1806,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "mobilenetv2/mobilenetv2_int8_folded_unpruned_b1.onnx",
       "b1_sha256": "b029d1810e95e6ab77440fec57adc239090cc54d34c11a1eee3297c3b9a8ecbe",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 0.05857133865356445
+      "max_abs_diff": 0.05857133865356445,
+      "predictions_equal_to_b1": false,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 7
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_unpruned_b1.onnx",
@@ -1451,12 +1826,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_unpruned_b1.onnx",
       "b1_sha256": "f98bb0b8f874a260c90e006361e2e541c68ac00268a3a9b0e6371bafeac7c694",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_unpruned_b1.onnx",
@@ -1467,12 +1846,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_unpruned_b1.onnx",
       "b1_sha256": "f98bb0b8f874a260c90e006361e2e541c68ac00268a3a9b0e6371bafeac7c694",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_unpruned_b4.onnx",
@@ -1483,12 +1866,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_unpruned_b1.onnx",
       "b1_sha256": "f98bb0b8f874a260c90e006361e2e541c68ac00268a3a9b0e6371bafeac7c694",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_unpruned_b4.onnx",
@@ -1499,12 +1886,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_unpruned_b1.onnx",
       "b1_sha256": "f98bb0b8f874a260c90e006361e2e541c68ac00268a3a9b0e6371bafeac7c694",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_unpruned_b8.onnx",
@@ -1515,12 +1906,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "mobilenetv2/mobilenetv2_int8_unpruned_b1.onnx",
       "b1_sha256": "f98bb0b8f874a260c90e006361e2e541c68ac00268a3a9b0e6371bafeac7c694",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "mobilenetv2/mobilenetv2_int8_unpruned_b8.onnx",
@@ -1531,12 +1926,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "mobilenetv2/mobilenetv2_int8_unpruned_b1.onnx",
       "b1_sha256": "f98bb0b8f874a260c90e006361e2e541c68ac00268a3a9b0e6371bafeac7c694",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 0.05847311019897461
+      "max_abs_diff": 0.05847311019897461,
+      "predictions_equal_to_b1": false,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 6
     },
     {
       "file": "resnet18/resnet18_fp32_b1.onnx",
@@ -1547,12 +1946,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_fp32_b1.onnx",
       "b1_sha256": "5fd8a508cb03f38b8985af740a1287291a27ab2a03ecc6ee61217d0749cf33b2",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_fp32_b1.onnx",
@@ -1563,12 +1966,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_fp32_b1.onnx",
       "b1_sha256": "5fd8a508cb03f38b8985af740a1287291a27ab2a03ecc6ee61217d0749cf33b2",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_fp32_b4.onnx",
@@ -1579,12 +1986,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_fp32_b1.onnx",
       "b1_sha256": "5fd8a508cb03f38b8985af740a1287291a27ab2a03ecc6ee61217d0749cf33b2",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_fp32_b4.onnx",
@@ -1595,12 +2006,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_fp32_b1.onnx",
       "b1_sha256": "5fd8a508cb03f38b8985af740a1287291a27ab2a03ecc6ee61217d0749cf33b2",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_fp32_b8.onnx",
@@ -1611,12 +2026,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_fp32_b1.onnx",
       "b1_sha256": "5fd8a508cb03f38b8985af740a1287291a27ab2a03ecc6ee61217d0749cf33b2",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_fp32_b8.onnx",
@@ -1627,12 +2046,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_fp32_b1.onnx",
       "b1_sha256": "5fd8a508cb03f38b8985af740a1287291a27ab2a03ecc6ee61217d0749cf33b2",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_fp32_folded_b1.onnx",
@@ -1643,12 +2066,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_fp32_folded_b1.onnx",
       "b1_sha256": "1c2ab3d215d769e959ba58f08bb3bbcd24840e1455846c283e6c4a06e64f07d0",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_fp32_folded_b1.onnx",
@@ -1659,12 +2086,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_fp32_folded_b1.onnx",
       "b1_sha256": "1c2ab3d215d769e959ba58f08bb3bbcd24840e1455846c283e6c4a06e64f07d0",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_fp32_folded_b4.onnx",
@@ -1675,12 +2106,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_fp32_folded_b1.onnx",
       "b1_sha256": "1c2ab3d215d769e959ba58f08bb3bbcd24840e1455846c283e6c4a06e64f07d0",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_fp32_folded_b4.onnx",
@@ -1691,12 +2126,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_fp32_folded_b1.onnx",
       "b1_sha256": "1c2ab3d215d769e959ba58f08bb3bbcd24840e1455846c283e6c4a06e64f07d0",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_fp32_folded_b8.onnx",
@@ -1707,12 +2146,16 @@
       "provider": "cpu",
       "compute_precision": "fp32",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_fp32_folded_b1.onnx",
       "b1_sha256": "1c2ab3d215d769e959ba58f08bb3bbcd24840e1455846c283e6c4a06e64f07d0",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_fp32_folded_b8.onnx",
@@ -1723,12 +2166,16 @@
       "provider": "npu",
       "compute_precision": "fp16",
       "reference_device": "npu_fp16",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_fp32_folded_b1.onnx",
       "b1_sha256": "1c2ab3d215d769e959ba58f08bb3bbcd24840e1455846c283e6c4a06e64f07d0",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_b1.onnx",
@@ -1739,12 +2186,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_b1.onnx",
       "b1_sha256": "72831876dc9974548ed5a4fdb8ae2f5e7695f68aed5c8b881ceaa37026c30937",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_b1.onnx",
@@ -1755,12 +2206,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_b1.onnx",
       "b1_sha256": "72831876dc9974548ed5a4fdb8ae2f5e7695f68aed5c8b881ceaa37026c30937",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_b4.onnx",
@@ -1771,12 +2226,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_b1.onnx",
       "b1_sha256": "72831876dc9974548ed5a4fdb8ae2f5e7695f68aed5c8b881ceaa37026c30937",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_b4.onnx",
@@ -1787,12 +2246,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_b1.onnx",
       "b1_sha256": "72831876dc9974548ed5a4fdb8ae2f5e7695f68aed5c8b881ceaa37026c30937",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_b8.onnx",
@@ -1803,12 +2266,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_b1.onnx",
       "b1_sha256": "72831876dc9974548ed5a4fdb8ae2f5e7695f68aed5c8b881ceaa37026c30937",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_b8.onnx",
@@ -1819,12 +2286,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "resnet18/resnet18_int8_b1.onnx",
       "b1_sha256": "72831876dc9974548ed5a4fdb8ae2f5e7695f68aed5c8b881ceaa37026c30937",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 0.1701068878173828
+      "max_abs_diff": 0.1701068878173828,
+      "predictions_equal_to_b1": false,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 10
     },
     {
       "file": "resnet18/resnet18_int8_folded_b1.onnx",
@@ -1835,12 +2306,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_folded_b1.onnx",
       "b1_sha256": "74912302af2507e4a2d1a3e2e8e41781052d8697052c67d2e139b625ba2232ad",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_folded_b1.onnx",
@@ -1851,12 +2326,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_folded_b1.onnx",
       "b1_sha256": "74912302af2507e4a2d1a3e2e8e41781052d8697052c67d2e139b625ba2232ad",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_folded_b4.onnx",
@@ -1867,12 +2346,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_folded_b1.onnx",
       "b1_sha256": "74912302af2507e4a2d1a3e2e8e41781052d8697052c67d2e139b625ba2232ad",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_folded_b4.onnx",
@@ -1883,12 +2366,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_folded_b1.onnx",
       "b1_sha256": "74912302af2507e4a2d1a3e2e8e41781052d8697052c67d2e139b625ba2232ad",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_folded_b8.onnx",
@@ -1899,12 +2386,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_folded_b1.onnx",
       "b1_sha256": "74912302af2507e4a2d1a3e2e8e41781052d8697052c67d2e139b625ba2232ad",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_folded_b8.onnx",
@@ -1915,12 +2406,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "resnet18/resnet18_int8_folded_b1.onnx",
       "b1_sha256": "74912302af2507e4a2d1a3e2e8e41781052d8697052c67d2e139b625ba2232ad",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 0.17034626007080078
+      "max_abs_diff": 0.17034626007080078,
+      "predictions_equal_to_b1": false,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 13
     },
     {
       "file": "resnet18/resnet18_int8_folded_unpruned_b1.onnx",
@@ -1931,12 +2426,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_folded_unpruned_b1.onnx",
       "b1_sha256": "e0bdeb9760fe0362e0648e55d6553207604c4c618c0b79f6e187a632c7d61d92",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_folded_unpruned_b1.onnx",
@@ -1947,12 +2446,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_folded_unpruned_b1.onnx",
       "b1_sha256": "e0bdeb9760fe0362e0648e55d6553207604c4c618c0b79f6e187a632c7d61d92",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_folded_unpruned_b4.onnx",
@@ -1963,12 +2466,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_folded_unpruned_b1.onnx",
       "b1_sha256": "e0bdeb9760fe0362e0648e55d6553207604c4c618c0b79f6e187a632c7d61d92",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_folded_unpruned_b4.onnx",
@@ -1979,12 +2486,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_folded_unpruned_b1.onnx",
       "b1_sha256": "e0bdeb9760fe0362e0648e55d6553207604c4c618c0b79f6e187a632c7d61d92",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_folded_unpruned_b8.onnx",
@@ -1995,12 +2506,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_folded_unpruned_b1.onnx",
       "b1_sha256": "e0bdeb9760fe0362e0648e55d6553207604c4c618c0b79f6e187a632c7d61d92",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_folded_unpruned_b8.onnx",
@@ -2011,12 +2526,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "resnet18/resnet18_int8_folded_unpruned_b1.onnx",
       "b1_sha256": "e0bdeb9760fe0362e0648e55d6553207604c4c618c0b79f6e187a632c7d61d92",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 0.17034626007080078
+      "max_abs_diff": 0.17034626007080078,
+      "predictions_equal_to_b1": false,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 13
     },
     {
       "file": "resnet18/resnet18_int8_unpruned_b1.onnx",
@@ -2027,12 +2546,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_unpruned_b1.onnx",
       "b1_sha256": "9cd8a2d5c538f031206a149ff486e535ccc28ff6d3b6cfd2a353a70dd83ca47a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_unpruned_b1.onnx",
@@ -2043,12 +2566,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_unpruned_b1.onnx",
       "b1_sha256": "9cd8a2d5c538f031206a149ff486e535ccc28ff6d3b6cfd2a353a70dd83ca47a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_unpruned_b4.onnx",
@@ -2059,12 +2586,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_unpruned_b1.onnx",
       "b1_sha256": "9cd8a2d5c538f031206a149ff486e535ccc28ff6d3b6cfd2a353a70dd83ca47a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_unpruned_b4.onnx",
@@ -2075,12 +2606,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_unpruned_b1.onnx",
       "b1_sha256": "9cd8a2d5c538f031206a149ff486e535ccc28ff6d3b6cfd2a353a70dd83ca47a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_unpruned_b8.onnx",
@@ -2091,12 +2626,16 @@
       "provider": "cpu",
       "compute_precision": "int8",
       "reference_device": "cpu",
-      "equivalent_to_b1": true,
+      "bitwise_equal_to_b1": true,
       "b1_file": "resnet18/resnet18_int8_unpruned_b1.onnx",
       "b1_sha256": "9cd8a2d5c538f031206a149ff486e535ccc28ff6d3b6cfd2a353a70dd83ca47a",
       "items_compared": 8,
       "items_differing": 0,
-      "max_abs_diff": 0.0
+      "max_abs_diff": 0.0,
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null
     },
     {
       "file": "resnet18/resnet18_int8_unpruned_b8.onnx",
@@ -2107,12 +2646,16 @@
       "provider": "npu",
       "compute_precision": "int8",
       "reference_device": "npu",
-      "equivalent_to_b1": false,
+      "bitwise_equal_to_b1": false,
       "b1_file": "resnet18/resnet18_int8_unpruned_b1.onnx",
       "b1_sha256": "9cd8a2d5c538f031206a149ff486e535ccc28ff6d3b6cfd2a353a70dd83ca47a",
       "items_compared": 8,
       "items_differing": 8,
-      "max_abs_diff": 0.1701068878173828
+      "max_abs_diff": 0.1701068878173828,
+      "predictions_equal_to_b1": false,
+      "predictions_basis": "eval_quick_top1",
+      "predictions_compared": 1000,
+      "predictions_differing": 10
     }
   ]
 }

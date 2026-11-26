@@ -27,8 +27,14 @@ the references give.
 
 Generating also writes that summary: for every file and device, whether each
 batch item's output equals the batch-1 file's output for the same reference image
-or window. ``--batch-equivalence`` rewrites only the summary, from the references
-already on disk.
+or window (bitwise), and, for the files where it does not, whether any prediction
+changes (top-1 on all 1,000 eval-quick images, or the anomaly flags of the
+autoencoder's test split; ``common/batch_predictions.py``).
+``--batch-equivalence`` rewrites only the summary, from the references already on
+disk (it runs the models for the prediction comparisons, so it needs the data and,
+for NPU entries, the NPU). ``--check`` takes the prediction comparisons from the
+committed summary and checks that the split manifests they were made on are
+unchanged.
 
 Usage:
     python scripts/make_references.py [--no-npu]
@@ -282,24 +288,46 @@ def generate(npu: bool) -> int:
     return 1 if failures or problems else 0
 
 
+def reference_session(path: Path, device: str):
+    """A session with the settings the references of `device` were made with."""
+    if device == "cpu":
+        return cpu_session(path)
+    from common import onnx_quantize as oq
+
+    return oq.npu_session(path, fp16=device == "npu_fp16")
+
+
 def write_batch_equivalence() -> int:
+    """Rewrite the summary: bitwise from the references, predictions by running the models."""
+    from common import batch_predictions as bp
+
     files, _ = read_manifest()
-    doc = ro.batch_equivalence(files)
+    bitwise = ro.batch_equivalence(files)
+    differ = [e for e in bitwise["entries"] if not e["bitwise_equal_to_b1"]]
+    print(f"comparing predictions with batch 1 for {len(differ)} file(s) whose outputs are not "
+          "bitwise equal")
+    predictions = bp.compute(differ, reference_session)
+    doc = ro.batch_equivalence(files, predictions=predictions, prediction_inputs=bp.basis_inputs())
     ro.BATCH_EQUIVALENCE_JSON.write_text(ro.format_batch_equivalence(doc), encoding="utf-8",
                                          newline="\n")
-    differ = [e for e in doc["entries"] if not e["equivalent_to_b1"]]
+    changed = [e for e in doc["entries"] if e["predictions_equal_to_b1"] is False]
     print(f"wrote {ro.BATCH_EQUIVALENCE_JSON.name}: {len(doc['entries'])} entries, "
-          f"{len(differ)} not equivalent to batch 1")
+          f"{len(differ)} not bitwise equal to batch 1, {len(changed)} with different predictions")
     for e in differ:
-        print(f"  {e['file']} ({e['provider']}, {e['compute_precision']})")
+        print(f"  {e['file']} ({e['provider']}, {e['compute_precision']}): max abs diff "
+              f"{e['max_abs_diff']:.2g}; predictions "
+              + next(f"{x['predictions_differing']} of {x['predictions_compared']} differ"
+                     for x in doc["entries"] if ro.entry_key(x) == ro.entry_key(e)))
     return 0
 
 
 def check() -> int:
+    from common import batch_predictions as bp
+
     files, _ = read_manifest()
     problems = ro.check_problems(files)
     if not problems:
-        problems = ro.batch_equivalence_problems(files)
+        problems = ro.batch_equivalence_problems(files, prediction_inputs=bp.basis_inputs())
     for p in problems:
         print(f"error: {p}", file=sys.stderr)
     present = sum((MODELS_DIR / f.file).is_file() for f in files)
@@ -314,12 +342,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="check the references against the model files; write nothing")
     parser.add_argument("--no-npu", action="store_true", help="CPU references only")
     parser.add_argument("--batch-equivalence", action="store_true",
-                        help="rewrite models/batch_equivalence.json from the references on disk")
+                        help="rewrite models/batch_equivalence.json from the references on disk "
+                             "(runs the models for the prediction comparisons)")
     args = parser.parse_args(argv)
     if args.check:
         return check()
-    if args.batch_equivalence:
-        return write_batch_equivalence()
 
     from common.platform_guard import NonNativeInterpreterError, require_native_arm64
 
@@ -328,6 +355,8 @@ def main(argv: list[str] | None = None) -> int:
     except NonNativeInterpreterError as exc:
         print(exc, file=sys.stderr)
         return 2
+    if args.batch_equivalence:
+        return write_batch_equivalence()
     return generate(npu=not args.no_npu)
 
 

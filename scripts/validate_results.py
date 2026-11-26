@@ -352,14 +352,22 @@ V1_2_RULES = {
     "effective_precision_stored_mismatch": ERROR,
     "unsupported_nodes_mismatch": ERROR,
     "batch_not_equivalent_unflagged": ERROR,
+    "batch_not_equivalent_unfounded": ERROR,
+    "batch_rounding_note_missing": ERROR,
+    "batch_rounding_note_unfounded": ERROR,
+    "batch_prediction_counts_mismatch": ERROR,
     "cache_hit_without_cache": ERROR,
     "cache_outputs_not_verified": ERROR,
+    "cache_outputs_differ": ERROR,
+    "cache_key_missing": ERROR,
+    "cache_key_id_mismatch": ERROR,
     "profiled_pass_without_accelerator_ep": ERROR,
     "qnn_partition_count_mismatch": ERROR,
     "missing_1_2_0_key": WARNING,
 }
 
 BATCH_NOT_EQUIVALENT_WARNING = "batch_not_equivalent"
+BATCH_ROUNDING_NOTE = "batch_rounding_only"
 STRICT_REFUSAL_KIND = "strict_mode_refusal"
 
 
@@ -533,16 +541,20 @@ def v1_1_issues(doc: dict[str, Any]) -> list[Issue]:
                   f"{timing['session_init']['ep_context_state']!r})", "ep_context_state_mismatch")
     if timing is not None:
         init = timing["session_init"]
-        for key in ("context_build_ms", "cached_ms"):
-            if init.get(key) is not None and not cache_on:
-                report(f"/timing/session_init/{key}",
-                      "must be null when no EP context cache is enabled", "session_init_not_applicable")
+        # --init-breakdown (1.2.0) builds and loads per-trial contexts with the cache off.
+        contexts_used = cache_on or config.get("init_breakdown") is True
+        if init.get("context_build_ms") is not None and not cache_on:
+            report("/timing/session_init/context_build_ms",
+                  "must be null when no EP context cache is enabled", "session_init_not_applicable")
+        if init.get("cached_ms") is not None and not contexts_used:
+            report("/timing/session_init/cached_ms",
+                  "must be null when no EP context was used", "session_init_not_applicable")
         # Per-trial values (1.2.0) follow the same rule.
         for i, trial in enumerate(timing["trials"]):
             for key in ("context_build_ms", "cached_init_ms"):
-                if (trial.get("session_init") or {}).get(key) is not None and not cache_on:
+                if (trial.get("session_init") or {}).get(key) is not None and not contexts_used:
                     report(f"/timing/trials/{i}/session_init/{key}",
-                          "must be null when no EP context cache is enabled",
+                          "must be null when no EP context was used",
                           "session_init_not_applicable")
         if init.get("context_build_ms") is not None and state == "loaded":
             report("/timing/session_init/context_build_ms",
@@ -616,13 +628,38 @@ def v1_2_issues(doc: dict[str, Any]) -> list[Issue]:
                                                f"{STRICT_REFUSAL_KIND!r} (got {error.get('kind')!r})",
                    "unsupported_nodes_mismatch")
 
-    # Batch equivalence.
+    # Batch equivalence: a warning if predictions differ from batch 1, a note if only
+    # the last bits do.
     equivalence = execution.get("batch_equivalence")
-    if equivalence is not None and equivalence["equivalent_to_b1"] is False and not any(
-            w["code"] == BATCH_NOT_EQUIVALENT_WARNING for w in doc["warnings"]):
-        report("/execution/batch_equivalence/equivalent_to_b1",
-              f"a result that is not equivalent to batch 1 needs a '{BATCH_NOT_EQUIVALENT_WARNING}' "
-              "warning", "batch_not_equivalent_unflagged")
+    warned = any(w["code"] == BATCH_NOT_EQUIVALENT_WARNING for w in doc["warnings"])
+    noted = any(n["code"] == BATCH_ROUNDING_NOTE for n in doc.get("notes", []))
+    equivalence = equivalence or {}
+    predictions_differ = equivalence.get("predictions_equal_to_b1") is False
+    rounding_only = (equivalence.get("bitwise_equal_to_b1") is False
+                     and equivalence.get("predictions_equal_to_b1") is True)
+    base = "/execution/batch_equivalence"
+    if predictions_differ and not warned:
+        report(f"{base}/predictions_equal_to_b1",
+               f"a result whose predictions differ from batch 1 needs a "
+               f"'{BATCH_NOT_EQUIVALENT_WARNING}' warning", "batch_not_equivalent_unflagged")
+    if warned and not predictions_differ:
+        report(f"{base}/predictions_equal_to_b1",
+               f"a '{BATCH_NOT_EQUIVALENT_WARNING}' warning requires predictions_equal_to_b1 "
+               "false", "batch_not_equivalent_unfounded")
+    if rounding_only and not noted:
+        report(f"{base}/bitwise_equal_to_b1",
+               "outputs that differ from batch 1 only in their bits (same predictions) need a "
+               f"'{BATCH_ROUNDING_NOTE}' note", "batch_rounding_note_missing")
+    if noted and not rounding_only:
+        report(f"{base}/bitwise_equal_to_b1",
+               f"a '{BATCH_ROUNDING_NOTE}' note requires bitwise_equal_to_b1 false and "
+               "predictions_equal_to_b1 true", "batch_rounding_note_unfounded")
+    differing = equivalence.get("predictions_differing")
+    equal = equivalence.get("predictions_equal_to_b1")
+    if isinstance(differing, int) and isinstance(equal, bool) and equal != (differing == 0):
+        report(f"{base}/predictions_differing",
+               f"predictions_equal_to_b1 is {equal} but {differing} prediction(s) differ",
+               "batch_prediction_counts_mismatch")
 
     # EP context cache.
     cache = config["ep_context_cache"]
@@ -630,10 +667,35 @@ def v1_2_issues(doc: dict[str, Any]) -> list[Issue]:
         if cache.get("hit") is True and not cache["enabled"]:
             report("/config/ep_context_cache/hit", "a cache hit requires an enabled cache",
                    "cache_hit_without_cache")
-        if cache.get("mode") == "use" and cache.get("verified_equal_outputs") is None:
+        if (cache.get("mode") in ("build", "use") and doc["status"] == "success"
+                and cache.get("verified_equal_outputs") is None):
             report("/config/ep_context_cache/verified_equal_outputs",
-                  "a run that uses an existing cache must record whether cached and uncached "
+                  "a run that builds or uses a cache must record whether cached and uncached "
                   "sessions give the same outputs", "cache_outputs_not_verified")
+        if cache.get("verified_equal_outputs") is False and doc["status"] == "success":
+            report("/config/ep_context_cache/verified_equal_outputs",
+                   "cached and uncached sessions gave different outputs; such a run must fail",
+                   "cache_outputs_differ")
+        if cache.get("mode") in ("build", "use") and (
+                cache.get("key_id") is None or cache.get("key") is None) and \
+                doc["status"] == "success":
+            report("/config/ep_context_cache/key_id",
+                   "a run that builds or uses a cache must record its key", "cache_key_missing")
+        key = cache.get("key")
+        if cache.get("key_id") is not None and key is not None and "session_config" in key:
+            # A key with every 1.2.0 key field: its id can be recomputed.
+            canonical = json.dumps(key, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            if hashlib.sha256(canonical.encode("utf-8")).hexdigest() != cache["key_id"]:
+                report("/config/ep_context_cache/key_id",
+                       "is not the SHA256 of the key object serialized with sorted keys and no "
+                       "whitespace", "cache_key_id_mismatch")
+            model = doc.get("model")
+            if model is not None and key["model_sha256"] != model["sha256"]:
+                report("/config/ep_context_cache/key/model_sha256", "differs from model.sha256",
+                       "cache_key_id_mismatch")
+            if key.get("ep_options") is not None and key["ep_options"] != config["ep_options"]:
+                report("/config/ep_context_cache/key/ep_options", "differs from config.ep_options",
+                       "cache_key_id_mismatch")
 
     # The profiled pass measures an accelerator.
     profiled = timing.get("profiled_pass") if timing is not None else None

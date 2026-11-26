@@ -528,10 +528,35 @@ def batch_equivalence_rows(entries: list[dict]) -> list[tuple[str, str, str, str
             sel = [e for e in group if (e["provider"], e["compute_precision"]) == key]
             cells = []
             for batch in (4, 8):
-                same = [e["equivalent_to_b1"] for e in sel if e["batch_size"] == batch]
+                same = [e["bitwise_equal_to_b1"] for e in sel if e["batch_size"] == batch]
                 cells.append("same" if all(same) else "differs" if not any(same) else "mixed")
             rows.append((model, label, PROVIDER_LABEL[key], cells[0], cells[1],
                          max(e["max_abs_diff"] for e in sel)))
+    return rows
+
+
+VARIANT_LABEL = {"fp32": "FP32", "fp32_folded": "FP32 folded", "fp32_imported": "FP32 imported",
+                 "int8": "INT8", "int8_folded": "INT8 folded"}
+MODEL_ORDER = (*IMAGE_MODELS, AE)
+
+
+def prediction_rows(entries: list[dict]) -> list[tuple[str, str, str, int, str]]:
+    """(model, variant, provider, batch, "N of M") for every entry whose bits differ
+    from b1; a pruned file and its unpruned file share a row (their counts must agree)."""
+    groups: dict[tuple, list[dict]] = {}
+    for e in entries:
+        if e["bitwise_equal_to_b1"]:
+            continue
+        variant = e["variant"].replace("_unpruned", "")
+        key = (MODEL_ORDER.index(e["model"]), e["model"], variant,
+               PROVIDER_LABEL[(e["provider"], e["compute_precision"])], e["batch_size"])
+        groups.setdefault(key, []).append(e)
+    rows = []
+    for key in sorted(groups, key=lambda k: (k[0], k[2], k[3], k[4])):
+        counts = {(e["predictions_differing"], e["predictions_compared"]) for e in groups[key]}
+        differing, compared = counts.pop() if len(counts) == 1 else (None, None)
+        text = "mixed" if differing is None else f"{differing:,} of {compared:,}"
+        rows.append((key[1], VARIANT_LABEL[key[2]], key[3], key[4], text))
     return rows
 
 
@@ -546,9 +571,17 @@ def check_batch_equivalence(c: Checker) -> None:
             c.equal(where, shown[5], "0")
         else:
             c.number(where, shown[5], want[5])
+    predicted = prediction_rows(c.src.batch_equivalence)
+    rows = c.rows(doc, "| Model | Variant | Provider, compute | Batch | Predictions differing from b1 |",
+                  len(predicted))
+    for shown, want in zip(rows, predicted):
+        c.equal(f"{doc}: batch predictions row {shown[:4]}",
+                [shown[0].strip("`"), shown[1], shown[2], int(shown[3]), shown[4]], list(want))
     entries = c.src.batch_equivalence
-    c.sentence(doc, r"summary lists (\d+) entries \(every model file on each of its reference devices\), (\d+) of them not equivalent",
-               len(entries), sum(1 for e in entries if not e["equivalent_to_b1"]))
+    c.sentence(doc, r"summary lists (\d+) entries \(every model file on each of its reference "
+                    r"devices\), (\d+) of them not bitwise equal, (\d+) with different predictions",
+               len(entries), sum(1 for e in entries if not e["bitwise_equal_to_b1"]),
+               sum(1 for e in entries if e["predictions_equal_to_b1"] is False))
 
 
 def check_hashes(c: Checker) -> None:

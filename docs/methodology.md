@@ -31,8 +31,39 @@ every variant on each device, and whether the NPU's accuracy on the same INT8
 file matches the CPU's, is measured separately and needs no idle machine
 ([accuracy.md](accuracy.md)).
 
-Session creation is measured separately (`timing.session_init.cold_ms`, one
-value per trial) and is never mixed into the iteration latencies.
+Session creation is measured separately (`timing.session_init`) and is never
+mixed into the iteration latencies.
+
+## Initialization and the EP context cache
+
+On the NPU, creating a session means compiling the graph for the HTP (about
+2 s for the models here) unless an EP context, the compiled graph the QNN EP
+can write to disk, already exists; a session from a context takes about 0.3 s.
+These are different costs and are reported separately, each from repeated
+creations (`--init-breakdown`, one of each per trial, after the same idle
+period as the trial):
+
+- **cold** (`cold_ms`): a session created from the ONNX model with no context;
+  what every session costs without a cache;
+- **context build** (`context_build_ms`): a session that compiles the model and
+  writes a context; a fresh build in every trial, not a rewrite of a shared one;
+- **cached** (`cached_init_ms`): a session created from that context.
+
+The steady-state latency comes from the trial's timed session in every case,
+created as `--ep-cache` says: compiled from the model (`off`, the default) or
+from the cache (`build`, `use`). A context depends on more than the model, so
+the cache is keyed by everything it depends on: the model file's SHA256, the
+ONNX Runtime and QNN EP versions, the QNN SDK version as reported by the
+backend, the HTP backend file version, every EP option, every session config
+entry that changes compilation (strict mode, embed mode), the graph
+optimization level, and the device's vendor and device id. A change to any of
+them gives a new key, so a stale context is never loaded; entries of the same
+model under an old key are deleted. Before a run uses a context, one session
+from the context and one compiled from the model run the same input, and their
+outputs must be bit-identical (`verified_equal_outputs`); a corrupt or
+unloadable context fails the run rather than being rebuilt behind the user's
+back. The rules and file layout are in
+[cli.md](cli.md#ep-context-cache-and-initialization).
 
 ## Trial structure
 

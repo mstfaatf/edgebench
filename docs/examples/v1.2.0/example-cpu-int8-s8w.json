@@ -27,6 +27,7 @@
       "path": "/memory"
     }
   ],
+  "notes": [],
   "tool": {
     "name": "edgebench",
     "version": "0.1.0",
@@ -222,7 +223,8 @@
     "profiling": {
       "ort": false,
       "qnn_level": "off"
-    }
+    },
+    "init_breakdown": false
   },
   "execution": {
     "full_device_execution_verified": true,
@@ -256,7 +258,8 @@
           "trial_index": null,
           "modules_outside_bundle": []
         }
-      ]
+      ],
+      "deleted_stale_cache_files": []
     },
     "node_assignment": null,
     "qnn_validation": null,
@@ -266,8 +269,12 @@
       "source": "model"
     },
     "batch_equivalence": {
-      "equivalent_to_b1": true,
-      "basis": "batch_size_1",
+      "bitwise_equal_to_b1": true,
+      "bitwise_basis": "batch_size_1",
+      "predictions_equal_to_b1": true,
+      "predictions_basis": "bitwise",
+      "predictions_compared": null,
+      "predictions_differing": null,
       "reference_batch": 1
     }
   },

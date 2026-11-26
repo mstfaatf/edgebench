@@ -58,6 +58,7 @@
       "path": "/runtime/qnn/soc_model"
     }
   ],
+  "notes": [],
   "tool": {
     "name": "edgebench",
     "version": "0.1.0",
@@ -285,13 +286,16 @@
       "context_path": null,
       "hit": null,
       "verified_equal_outputs": null,
-      "key": null
+      "key": null,
+      "cache_dir": null,
+      "embed_mode": null
     },
     "run_binding": "iobinding_preallocated",
     "profiling": {
       "ort": false,
       "qnn_level": "off"
-    }
+    },
+    "init_breakdown": false
   },
   "execution": null,
   "timing": null,

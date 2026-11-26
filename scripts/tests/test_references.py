@@ -18,6 +18,7 @@ import pytest
 
 from common import model_registry as reg
 from common import reference_outputs as ro
+from common.model_registry import IMPORTED_MODELS
 from common.manifests import EVAL_QUICK_MANIFEST, read_manifest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -278,16 +279,31 @@ def batch_tree(tmp_path, b4_items: list[bytes]):
 def test_batch_equivalence_of_identical_items(tmp_path):
     root, manifest, items = batch_tree(tmp_path, [_floats(float(i)) for i in range(4)])
     entries = {e["file"]: e for e in ro.batch_equivalence(manifest, root)["entries"]}
-    assert entries["m/m_int8_b1.onnx"]["equivalent_to_b1"] is True
+    assert entries["m/m_int8_b1.onnx"]["bitwise_equal_to_b1"] is True
     b4 = entries["m/m_int8_b4.onnx"]
-    assert (b4["equivalent_to_b1"], b4["items_compared"], b4["items_differing"]) == (True, 4, 0)
+    assert (b4["bitwise_equal_to_b1"], b4["items_compared"], b4["items_differing"]) == (True, 4, 0)
     assert (b4["sha256"], b4["provider"], b4["compute_precision"]) == ("4" * 64, "cpu", "int8")
+    # Bit-identical outputs make identical predictions: nothing to run.
+    assert {k: b4[k] for k in ro.PREDICTION_KEYS} == ro.BITWISE_PREDICTIONS
 
 
 def test_batch_equivalence_finds_one_differing_item(tmp_path):
     root, manifest, _ = batch_tree(tmp_path, [_floats(0.0), _floats(1.0), _floats(2.5), _floats(3.0)])
     b4 = next(e for e in ro.batch_equivalence(manifest, root)["entries"] if e["batch_size"] == 4)
-    assert (b4["equivalent_to_b1"], b4["items_differing"], b4["max_abs_diff"]) == (False, 1, 0.5)
+    assert (b4["bitwise_equal_to_b1"], b4["items_differing"], b4["max_abs_diff"]) == (False, 1, 0.5)
+    # Without a prediction comparison the answer is not available.
+    assert {k: b4[k] for k in ro.PREDICTION_KEYS} == ro.NO_PREDICTIONS
+
+
+def test_batch_equivalence_takes_prediction_comparisons_by_key(tmp_path):
+    root, manifest, _ = batch_tree(tmp_path, [_floats(0.0), _floats(1.0), _floats(2.5), _floats(3.0)])
+    found = {"predictions_equal_to_b1": False, "predictions_basis": "eval_quick_top1",
+             "predictions_compared": 1000, "predictions_differing": 6}
+    doc = ro.batch_equivalence(manifest, root, {("4" * 64, "cpu", "int8"): found}, {"x": 1})
+    b4 = next(e for e in doc["entries"] if e["batch_size"] == 4)
+    assert {k: b4[k] for k in ro.PREDICTION_KEYS} == found
+    assert doc["prediction_inputs"] == {"x": 1}
+    assert ro.committed_predictions(doc) == {("4" * 64, "cpu", "int8"): found}
 
 
 def test_batch_equivalence_problems_name_changed_entries(tmp_path):
@@ -296,10 +312,27 @@ def test_batch_equivalence_problems_name_changed_entries(tmp_path):
     doc = ro.batch_equivalence(manifest, root)
     path.write_text(ro.format_batch_equivalence(doc), encoding="utf-8")
     assert ro.batch_equivalence_problems(manifest, root, path) == []
-    doc["entries"][1]["equivalent_to_b1"] = False
+    doc["entries"][1]["bitwise_equal_to_b1"] = False
     path.write_text(ro.format_batch_equivalence(doc), encoding="utf-8")
     assert any("m_int8_b4" in p and "differs" in p
                for p in ro.batch_equivalence_problems(manifest, root, path))
+
+
+def test_batch_equivalence_problems_need_a_prediction_comparison(tmp_path):
+    root, manifest, _ = batch_tree(tmp_path, [_floats(0.0), _floats(1.0), _floats(2.5), _floats(3.0)])
+    path = tmp_path / "batch_equivalence.json"
+    path.write_text(ro.format_batch_equivalence(ro.batch_equivalence(manifest, root)),
+                    encoding="utf-8")
+    assert any("no prediction comparison" in p
+               for p in ro.batch_equivalence_problems(manifest, root, path))
+    found = {"predictions_equal_to_b1": True, "predictions_basis": "eval_quick_top1",
+             "predictions_compared": 1000, "predictions_differing": 0}
+    doc = ro.batch_equivalence(manifest, root, {("4" * 64, "cpu", "int8"): found}, {"x": 1})
+    path.write_text(ro.format_batch_equivalence(doc), encoding="utf-8")
+    assert ro.batch_equivalence_problems(manifest, root, path, {"x": 1}) == []
+    # A split manifest changed since the comparison was made.
+    assert any("other inputs" in p
+               for p in ro.batch_equivalence_problems(manifest, root, path, {"x": 2}))
 
 
 def test_npu_compute_precision_per_reference_device():
@@ -322,11 +355,21 @@ def test_committed_batch_equivalence_matches_the_manifest():
         assert key not in keys
         keys.add(key)
         if e["batch_size"] == 1:
-            assert e["equivalent_to_b1"] is True and e["items_differing"] == 0
-        assert e["equivalent_to_b1"] == (e["items_differing"] == 0)
+            assert e["bitwise_equal_to_b1"] is True and e["items_differing"] == 0
+        assert e["bitwise_equal_to_b1"] == (e["items_differing"] == 0)
+        if e["bitwise_equal_to_b1"]:
+            assert {k: e[k] for k in ro.PREDICTION_KEYS} == ro.BITWISE_PREDICTIONS
+        else:  # every file whose bits differ has its predictions compared
+            assert e["predictions_basis"] == ("test_split_flags" if e["model"] in IMPORTED_MODELS
+                                              else "eval_quick_top1"), e["file"]
+            assert e["predictions_equal_to_b1"] == (e["predictions_differing"] == 0)
+            assert 0 <= e["predictions_differing"] <= e["predictions_compared"]
     assert len(keys) == sum(len(ro.expected_devices(f)) for f in manifest.values())
     assert ro.BATCH_EQUIVALENCE_JSON.stat().st_size < 1 << 20
 
 
 def test_committed_batch_equivalence_matches_the_references(references):
-    assert ro.batch_equivalence_problems(reg.read_manifest()[0]) == []
+    from common import batch_predictions as bp
+
+    assert ro.batch_equivalence_problems(reg.read_manifest()[0],
+                                         prediction_inputs=bp.basis_inputs()) == []
