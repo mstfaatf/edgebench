@@ -145,6 +145,22 @@ it: device and bundle checks, strict mode, precision, the provider options
 initialization, the EP context cache, accelerator time against latency, and
 why INT8 image models at batch 8 compute something different from batch 1.
 
+## Experiment suites
+
+Benchmark plans run through `edgebench suite`: a JSON configuration lists the
+models and configurations (or a matrix of providers, precisions and batch
+sizes), run parameters, repetitions and cooldowns. Every run is its own
+`edgebench run` process, the configurations run in a rotated order, a
+pre-flight doctor check gates the start, every result is validated, and an
+interrupted suite resumes where it stopped.
+
+```powershell
+.\build\arm64-release\bin\Release\edgebench.exe suite benchmarks\configs\smoke.json --dry-run
+.\build\arm64-release\bin\Release\edgebench.exe suite benchmarks\configs\smoke.json
+```
+
+See [docs/suite.md](docs/suite.md).
+
 ## Testing
 
 Tests carry CTest labels by what they need: `unit` (nothing), `ort` (the ONNX
@@ -177,6 +193,9 @@ hygiene check. See [Test labels](docs/setup.md#test-labels) and
   compute different outputs from batch 7 up
 - [docs/cli.md](docs/cli.md): `edgebench` commands, options, output and exit
   codes
+- [docs/suite.md](docs/suite.md): experiment suites: configuration files,
+  matrix expansion, run order, run IDs, the pre-flight gate, the manifest,
+  resuming and the duration estimate
 - [docs/results-schema.md](docs/results-schema.md): result file format (JSON
   Schema in [schemas/](schemas/))
 - [docs/architecture.md](docs/architecture.md): engine structure
@@ -192,11 +211,11 @@ hygiene check. See [Test labels](docs/setup.md#test-labels) and
 | `engine/` | C++ engine: `edgebench_core` library, `edgebench` CLI, tests |
 | `tools/` | Diagnostics: `ort_probe` (C++ CPU/NPU runner), QNN rejection check |
 | `scripts/` | Dependency fetch, data and model preparation, NPU checks, result validation |
-| `schemas/` | JSON Schema for result, accuracy and model-recipe files, one file per version |
+| `schemas/` | JSON Schema for result, accuracy, doctor, suite and model-recipe files, one file per version |
 | `datasets/` | Manifests of the evaluation and calibration data (images: path, label, SHA256; the NAB time series: windows and splits); the data is downloaded, not committed |
 | `notebooks/` | Colab notebook that trains the Keras autoencoder and exports it to ONNX |
 | `models/` | Model manifest (committed), the committed autoencoder source in `models/sources/`; model files are made locally |
-| `benchmarks/` | Configurations and results (`results/published/` is committed, `results/local/` is not) |
+| `benchmarks/` | Suite configurations (`configs/`) and results (`results/published/` is committed, `results/local/` is not) |
 | `ml/`, `dashboard/` | Model training/export pipelines and the static dashboard (planned) |
 | `docs/` | Documentation |
 

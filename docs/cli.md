@@ -4,6 +4,9 @@
 edgebench run --model <file.onnx> [options]    benchmark a model
 edgebench doctor [--json] [--quick] [--prune-cache] [--ep-cache-dir PATH] [--load-sample-ms N]
                                                 check everything a run depends on
+edgebench suite CONFIG [--dry-run] [--output-dir PATH] [--fail-fast] [--skip-preflight] [--python PATH]
+edgebench suite --resume DIR [CONFIG] [--fail-fast] [--skip-preflight] [--python PATH]
+                                                run an experiment plan (docs/suite.md)
 edgebench --version | --help
 edgebench <command> --help
 ```
@@ -859,6 +862,22 @@ Loading the probe's EP context makes ONNX Runtime print its "supported but
 suboptimal" warning on stderr (see
 [EP context cache and initialization](#ep-context-cache-and-initialization));
 the QNN EP's own diagnostics (`DSP_INFO ...`) may appear there too.
+
+## `edgebench suite`
+
+Runs an experiment plan from a configuration file: every run is an
+`edgebench run` child process, in a rotated order with a cooldown before each,
+after a pre-flight check (`doctor --json --quick`), with a manifest that lets
+an interrupted suite resume. The configuration format, the run order, run IDs,
+the pre-flight gate, the manifest, resuming and the duration estimate are in
+[suite.md](suite.md); its exit codes in [suite.md](suite.md#exit-codes).
+
+`run` has hidden options that only `suite` passes (`--suite-name`,
+`--suite-config-hash`, `--suite-run-id`, `--suite-repetition`,
+`--suite-order-index`, `--suite-cooldown-s-before`, `--suite-preflight-skipped`):
+they put the result's `suite` block ([results-schema.md](results-schema.md#suite-link)).
+They are all given together or not at all (otherwise a usage error), and they
+do not change what is measured.
 
 ## Exit codes
 

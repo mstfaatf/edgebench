@@ -271,6 +271,24 @@ dialog, and no dump is written. The full list of failure cases with their kind,
 exit code and whether a result is written is in
 [cli.md](cli.md#exit-paths).
 
+## Suites
+
+`edgebench suite` ([suite.md](suite.md)) sits on top of `run` and never loads
+ONNX Runtime itself. `suite_config.hpp` is pure apart from reading model files:
+it parses and validates a configuration, expands a matrix, resolves every
+configuration to a model file and to the `RunConfig` it stands for, checks that
+`RunConfig` with `validate()` and `requested_compute_precision()` (the same
+rules as `run`, so a suite cannot plan a run `run` would refuse), computes run
+IDs with `canonical_json()` and the compile-relevant EP options of the EP
+context cache key, and orders the runs (`run_order()`, a Williams design).
+`suite.hpp` runs the plan: the pre-flight gate (a list of `PreflightCheck`
+objects; `doctor` is the first), one `edgebench run` child process per run in
+a job object, the manifest (rewritten with `replace_file_atomically()` after
+every state change), resume decisions (`resume_action()`, pure), the duration
+estimate (pure, from earlier results) and the summary. A run learns that it
+belongs to a suite only from the hidden `--suite-*` options, which fill
+`RunConfig::suite` and so the result's `suite` block.
+
 ## Adding a provider
 
 1. Implement `Provider` for the device: select the EP device (exactly one

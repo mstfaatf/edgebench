@@ -649,6 +649,22 @@ measured in that pass is part of the timed latency fields (`timing.trials`,
 `config.profiling` keeps describing the timed sessions (`off`); error stage
 `profiled_pass` and module-check stage `profiled_session` belong to this pass.
 
+### Suite link
+
+`suite` (top level, amended in place): present only in results of runs that
+`edgebench suite` launched ([suite.md](suite.md#results-link-back-to-the-suite)),
+absent otherwise, so a run started by hand writes exactly what it wrote
+before; the validator never reports it as a missing key.
+
+| Field | Meaning |
+|---|---|
+| `suite_name` | The suite's name |
+| `suite_config_hash` | SHA256 of the suite configuration (canonical JSON) |
+| `run_id` | The suite's run ID: SHA256 of the resolved configuration and the repetition. Not the result's own `run_id` (a UUID) |
+| `repetition`, `order_index` | 0-based repetition, and position in the suite's run order |
+| `cooldown_s_before` | The suite's idle period before the run, in seconds |
+| `preflight_skipped` | `true` if the suite ran without its pre-flight gate (`--skip-preflight`). Such a result also has a `preflight_skipped` warning and is not publishable |
+
 ### Verification evidence
 
 `execution.verification_details` may be an object (it was a string):
@@ -741,7 +757,10 @@ fields involved are present:
 | `trial_spread_mismatch` | error | `timing.aggregate.trial_spread` values (min, max, stddev, CV of the trial p50s, thresholds, `high`) differ from those the trials' medians give |
 | `trial_spread_unflagged` | error | The trial medians exceed a spread threshold, but there is no `trial_spread_high` warning |
 | `trial_spread_unfounded` | error | A `trial_spread_high` warning although the trial medians are within both thresholds |
-| `missing_1_2_0_key` | warning | `tool.implementation` is `cpp` and a key added in 1.2.0 is absent. Keys added in 1.1.0 that are absent from a 1.2.0 document are still reported as `missing_1_1_0_key` |
+| `preflight_skipped_unflagged` | error | `suite.preflight_skipped` is `true` but there is no `preflight_skipped` warning |
+| `preflight_skipped_unfounded` | error | A `preflight_skipped` warning without `suite.preflight_skipped` `true` |
+| `result_not_publishable` | warning | `suite.preflight_skipped` is `true` (and flagged): valid, but `--strict`, which published results are checked with, rejects it |
+| `missing_1_2_0_key` | warning | `tool.implementation` is `cpp` and a key added in 1.2.0 is absent (except `suite`, which only suite runs have). Keys added in 1.1.0 that are absent from a 1.2.0 document are still reported as `missing_1_1_0_key` |
 
 The schema itself also requires: `mode` `off` only with `enabled` `false`;
 `bitwise_basis` `not_available` exactly when `bitwise_equal_to_b1` is `null`;
@@ -905,6 +924,9 @@ the profiled pass are filled in. Amendments so far:
   `qnn_backend_build_file_version_mismatch`,
   `accelerator_exceeds_latency_unflagged` / `_unfounded`,
   `profiled_pass_count_mismatch`, `cache_compatibility_without_cache`.
+- Suite link: top-level `suite` (only in runs launched by `edgebench suite`),
+  the `preflight_skipped` warning, rules `preflight_skipped_unflagged`,
+  `preflight_skipped_unfounded`, `result_not_publishable`.
 
 ### 1.1.0
 

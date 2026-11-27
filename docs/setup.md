@@ -720,7 +720,7 @@ To run the same checks locally:
 
 ```powershell
 # python job (any OS; with the full .venv or a venv with requirements-ci.txt)
-python -m pytest scripts/tests/test_validate_results.py scripts/tests/test_check_hygiene.py scripts/tests/test_coverage_summary.py scripts/tests/test_manifests.py scripts/tests/test_export_models.py scripts/tests/test_model_recipes.py scripts/tests/test_references.py scripts/tests/test_accuracy_eval.py scripts/tests/test_timeseries.py scripts/tests/test_autoencoder.py scripts/tests/test_autoencoder_pipeline.py scripts/tests/test_anomaly_eval.py scripts/tests/test_doc_numbers.py scripts/tests/test_validate_doctor.py scripts/tests/test_matrix.py scripts/tests/test_check_links.py
+python -m pytest scripts/tests/test_validate_results.py scripts/tests/test_check_hygiene.py scripts/tests/test_coverage_summary.py scripts/tests/test_manifests.py scripts/tests/test_export_models.py scripts/tests/test_model_recipes.py scripts/tests/test_references.py scripts/tests/test_accuracy_eval.py scripts/tests/test_timeseries.py scripts/tests/test_autoencoder.py scripts/tests/test_autoencoder_pipeline.py scripts/tests/test_anomaly_eval.py scripts/tests/test_doc_numbers.py scripts/tests/test_validate_doctor.py scripts/tests/test_matrix.py scripts/tests/test_check_links.py scripts/tests/test_validate_suite.py
 python scripts/validate_accuracy.py benchmarks/results/published/accuracy
 python scripts/validate_results.py --strict docs/examples benchmarks/results/published
 python scripts/check_doc_numbers.py
