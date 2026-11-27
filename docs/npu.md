@@ -152,12 +152,13 @@ finalization mode included), the session settings that affect compilation, the
 graph optimization level and the device. A change to any of them gives a new
 key, so a stale context is never loaded.
 
-**Stale entries.** An entry of the same model file under another key is stale
-and is deleted when a run builds or uses the cache. One consequence: runs of
-the same model file with two different EP options (for example
-`--htp-graph-finalization-mode 1` and the default) evict each other's entries,
-so alternating between them rebuilds every time. Use separate `--ep-cache-dir`
-directories to keep both.
+**Stale entries.** An entry is stale when it was built by another ONNX
+Runtime, QNN EP, QNN SDK or HTP backend version, or for another device: no run
+on this machine can load it again. A run that builds or uses the cache deletes
+the stale entries of its own model and configuration; `doctor --prune-cache`
+deletes every stale entry. Entries for different options of the same model
+file (for example `--htp-graph-finalization-mode 1` and the default) are not
+stale: they coexist, and each stays a cache hit.
 
 **Verification.** Before the trials of a `build` or `use` run, the engine runs
 its input through a session compiled from the model and through a session from

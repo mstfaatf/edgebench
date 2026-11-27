@@ -435,7 +435,7 @@ cached creation.
 | `disabled` | No EP context cache (`enabled` is `false`) |
 | `generated` | No cache existed; it was built in this run |
 | `loaded` | An existing cache whose key matches this run was used |
-| `regenerated` | A cache existed but its key did not match (stale); it was deleted and rebuilt |
+| `regenerated` | A stale entry of this model and configuration was deleted (another runtime, backend or device), or `build` replaced this key's entry, and it was rebuilt |
 
 A context binary depends on the device, the QNN SDK and the EP options, not on
 the language binding, so the key covers exactly those.
@@ -480,7 +480,7 @@ node in an ONNX Runtime profile) and `combined` (more than one method agreed;
 | `system.power.power_plan` | string | yes | Active power plan, e.g. `Balanced` |
 | `system.power.battery_percent` | integer 0–100 | yes | Battery charge at the start of the run |
 | `system.power.battery_saver` | boolean | yes | Whether battery saver was on |
-| `system.load` | object | yes | Background load sampled right before measurement; `null` if not sampled |
+| `system.load` | object | yes | CPU load of other processes (edgebench's own CPU time excluded), sampled in the idle period before the first trial; `null` if not sampled |
 | `system.load.cpu_utilization_ratio` | number 0–1 | yes | System-wide CPU utilization |
 | `system.load.sample_window_s` | number | yes | Sampling window |
 | `memory.session_create_working_set_delta_bytes` | integer | yes | Change of the **process working set** across session creation (may be negative). Like every `memory` field it covers the edgebench process only: memory on the NPU or in drivers outside the process is not included |
@@ -605,13 +605,20 @@ EP and QNN SDK versions, EP options digest, device): `qnn_backend_file_version`
 when it started reading the backend build id, which changed every key and made
 older entries stale).
 With them the key object holds every key field, so the validator recomputes
-`key_id` from it. `state` is `generated` (nothing existed for this model),
-`loaded` (a hit) or `regenerated` (an entry for this model was deleted and
-rebuilt: a stale key, or the current key with `build`).
+`key_id` from it. `state` is `generated` (nothing existed for this key),
+`loaded` (a hit) or `regenerated` (an entry was deleted and rebuilt: a stale
+entry of this model and configuration, or the current key with `build`).
 
 `config.init_breakdown` (boolean) records `--init-breakdown`;
+`execution.verification_details.background_load_samples` (amended in place)
+lists every background-load sample above the `background_cpu_load_high`
+threshold: `phase` (`idle_before_trial`, `measured_iterations`), `trial_index`,
+`cpu_utilization_ratio` (other processes), `sample_window_s` and `attribution`
+(`top_processes` [{`name`, `cpu_share`}], `own_process_share`,
+`unattributed_share`; null if the process list could not be read).
 `execution.verification_details.deleted_stale_cache_files` lists the files a run
-deleted from stale entries (same model, other key); module checks after
+deleted from stale entries (same model and configuration, other runtime, backend or
+device; entries for other options are kept); module checks after
 untimed sessions (context build, the equal-outputs check, `--init-breakdown`
 sessions) have stage `after_untimed_session`. The C++ engine with `--ep-cache
 off` and no `--init-breakdown` records `enabled` false, `state` `disabled`,

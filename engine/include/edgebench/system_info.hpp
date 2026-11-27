@@ -53,9 +53,28 @@ struct PowerState {
 };
 
 /// System-wide CPU utilization over a window (results schema: system.load).
+/// One process's share of all CPU time during a load sample.
+struct ProcessShare {
+    std::string name;      // image name only (e.g. "MsMpEng.exe"); same-named processes summed
+    double cpu_share = 0;  // of the window times the logical processor count
+    bool operator==(const ProcessShare&) const = default;
+};
+
+/// Where the CPU time of a load sample went (attribute_cpu_load()).
+struct LoadAttribution {
+    std::vector<ProcessShare> top_processes;  // other processes, largest first
+    double own_share = 0;                     // the measuring process (not part of the load)
+    double unattributed_share = 0;  // busy time no process accounts for (interrupts, DPCs)
+};
+
 struct LoadSample {
-    double cpu_utilization_ratio = 0;  // 0..1
+    /// CPU load of other processes: the system's busy time minus this process's
+    /// own CPU time, over the system's total (0..1).
+    double cpu_utilization_ratio = 0;
     double sample_window_s = 0;
+    /// Per-process breakdown of the same window; null if the process list could
+    /// not be read. Not part of system.load.
+    std::optional<LoadAttribution> attribution;
 };
 
 /// Process memory counters (results schema: memory; process working set only).
@@ -116,6 +135,42 @@ std::optional<double> cpu_utilization(const CpuTimes& start, const CpuTimes& end
 std::optional<double> background_cpu_utilization(const CpuTimes& start, const CpuTimes& end,
                                                  std::uint64_t own_start, std::uint64_t own_end);
 
+/// Cumulative CPU time (kernel + user, 100 ns units) of one process.
+struct ProcessCpuTime {
+    std::uint32_t pid = 0;
+    std::string name;  // image name, UTF-8
+    std::uint64_t cpu = 0;
+};
+
+/// The CPU time of every process between two process lists (matched by process
+/// id and name; a process that started in between counts with all of its time):
+/// the `top` other processes by share, the share of `own_pid`, and the busy time
+/// (`busy`, from CpuTimes) that no listed process accounts for. Shares are of
+/// `total` (the CpuTimes total over the window). The idle process (id 0) is not
+/// a process here. Pure.
+LoadAttribution attribute_cpu_load(const std::vector<ProcessCpuTime>& start,
+                                   const std::vector<ProcessCpuTime>& end, std::uint64_t busy,
+                                   std::uint64_t total, std::uint32_t own_pid, std::size_t top);
+
+/// Every process with its CPU time (NtQuerySystemInformation,
+/// SystemProcessInformation: one call, no process handles); null on failure.
+std::optional<std::vector<ProcessCpuTime>> query_all_process_cpu_times();
+
+/// A load measurement in progress: the counters at its start.
+struct LoadProbe {
+    CpuTimes system;
+    std::optional<std::uint64_t> own;
+    std::optional<std::vector<ProcessCpuTime>> processes;
+    std::chrono::steady_clock::time_point started;
+};
+
+/// Reads the counters a LoadSample needs (system, this process, every process).
+LoadProbe start_load_probe();
+/// The load of other processes since `probe` started (background_cpu_utilization()),
+/// with its attribution (top `top` other processes). Null if a counter could not
+/// be read or no time elapsed.
+std::optional<LoadSample> finish_load_probe(const LoadProbe& probe, std::size_t top = 5);
+
 OsInfo query_os_info();
 /// Architecture of the running process (the machine type it was built for).
 Architecture query_process_architecture();
@@ -137,8 +192,8 @@ CpuTimes query_cpu_times();
 /// GetProcessTimes, 100 ns units); null if it cannot be read.
 std::optional<std::uint64_t> query_process_cpu_time();
 
-/// Sleeps for `window` and returns the system-wide CPU utilization over it.
-/// The calling process is idle during the window, so the value is background load.
+/// Sleeps for `window` and returns the CPU load of other processes over it
+/// (start_load_probe() / finish_load_probe()).
 LoadSample sample_cpu_load(std::chrono::milliseconds window);
 
 /// Memory counters of the current process (GetProcessMemoryInfo).

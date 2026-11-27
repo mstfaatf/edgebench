@@ -389,7 +389,8 @@
           "modules_outside_bundle": []
         }
       ],
-      "deleted_stale_cache_files": []
+      "deleted_stale_cache_files": [],
+      "background_load_samples": []
     },
     "node_assignment": {
       "total_nodes": 1,

@@ -7,6 +7,8 @@ Fails (exit 1) when:
   FORBIDDEN below): phase or prompt numbers, names of AI tools or assistants, or
   commit attribution trailers;
 * a tracked file is larger than MAX_FILE_BYTES and not in LARGE_FILE_ALLOWLIST;
+* a relative link or #anchor in a tracked Markdown file does not resolve
+  (``check_links.py``);
 * the message of a commit that is not yet on the base branch (default
   ``origin/main``) contains forbidden wording.
 
@@ -31,6 +33,8 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # --------------------------------------------------------------------------- rules
 # The forbidden patterns, in one place. All are matched case-insensitively.
@@ -120,6 +124,15 @@ def check_files(root: Path, paths: list[str]) -> list[Finding]:
     return findings
 
 
+def check_markdown_links(root: Path, paths: list[str]) -> list[Finding]:
+    """Broken relative links and anchors in the tracked Markdown files (check_links.py)."""
+    import check_links
+
+    markdown = [root / p for p in paths if p.endswith(".md") and not p.startswith("third_party/")]
+    return [Finding(f"{b.file}:{b.line}", "broken_link", f"{b.target}: {b.reason}")
+            for b in check_links.check(markdown, root)]
+
+
 def check_messages(commits: list[tuple[str, str]]) -> list[Finding]:
     findings = []
     for sha, message in commits:
@@ -186,6 +199,10 @@ def main(argv: list[str] | None = None) -> int:
 
     failures = check_files(root, files)
     print(f"Checked {len(files)} tracked files: {len(failures)} finding(s).")
+    broken = check_markdown_links(root, files)
+    print(f"Checked the links of {sum(f.endswith('.md') for f in files)} Markdown files: "
+          f"{len(broken)} broken.")
+    failures += broken
 
     if ref_exists(root, args.base):
         new = commits(root, f"{args.base}..HEAD")

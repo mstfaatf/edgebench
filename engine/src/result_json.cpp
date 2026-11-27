@@ -302,10 +302,28 @@ json verification_details_json(const BenchmarkResult& r, const std::string& summ
     json deleted = json::array();
     for (const std::filesystem::path& p : r.ep_cache.deleted_stale)
         deleted.push_back(path_to_utf8(p));
+    json load = json::array();
+    for (const BenchmarkResult::BackgroundLoadRecord& b : r.background_load_samples) {
+        json attribution = nullptr;
+        if (b.sample.attribution) {
+            json top = json::array();
+            for (const ProcessShare& p : b.sample.attribution->top_processes)
+                top.push_back({{"name", p.name}, {"cpu_share", p.cpu_share}});
+            attribution = {{"top_processes", top},
+                           {"own_process_share", b.sample.attribution->own_share},
+                           {"unattributed_share", b.sample.attribution->unattributed_share}};
+        }
+        load.push_back({{"phase", b.phase},
+                        {"trial_index", b.trial_index},
+                        {"cpu_utilization_ratio", b.sample.cpu_utilization_ratio},
+                        {"sample_window_s", b.sample.sample_window_s},
+                        {"attribution", attribution}});
+    }
     return {{"summary", summary},
             {"qnn_validation_passes", passes},
             {"module_checks", checks},
-            {"deleted_stale_cache_files", deleted}};
+            {"deleted_stale_cache_files", deleted},
+            {"background_load_samples", load}};
 }
 
 json effective_precision_json(const BenchmarkResult& r) {

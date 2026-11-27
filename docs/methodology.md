@@ -58,7 +58,8 @@ time, the HTP backend file version, every EP option, every session config
 entry that changes compilation (strict mode, embed mode), the graph
 optimization level, and the device's vendor and device id. A change to any of
 them gives a new key, so a stale context is never loaded; entries of the same
-model under an old key are deleted. Before a run uses a context, one session
+model and configuration built by another runtime, backend or device are
+deleted, and entries for other options coexist. Before a run uses a context, one session
 from the context and one compiled from the model run the same input, and their
 outputs must be bit-identical (`verified_equal_outputs`); a corrupt or
 unloadable context fails the run rather than being rebuilt behind the user's
@@ -180,8 +181,11 @@ benchmark itself. EdgeBench therefore subtracts its own process's CPU time over
 the same window (`GetProcessTimes`, all threads) from the system's busy time
 and divides the remainder by the system's total time, which is the window times
 the number of logical processors. What is left is the load from other
-processes. The result's `system.load` records the pre-run sample; the
-during-trial values are reported in the summary and in warnings.
+processes. The idle samples are computed the same way, so a session that is
+still being torn down never counts as background load. The result's
+`system.load` records the pre-run sample; the during-trial values are reported
+in the summary and in warnings. Every sample above 10% is recorded with the
+top other processes by share, to find the source of the load.
 
 **Memory** is the process's own working set and private bytes (peak values,
 and the working-set change across session creation). Memory used by drivers or

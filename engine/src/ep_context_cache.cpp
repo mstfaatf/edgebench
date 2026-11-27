@@ -7,6 +7,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "edgebench/npu_options.hpp"
 #include "edgebench/ort_loader.hpp"
 #include "edgebench/result_files.hpp"
 #include "edgebench/sha256.hpp"
@@ -264,11 +265,56 @@ Result<std::vector<fs::path>> delete_cache_entry(const fs::path& cache_dir,
     return deleted;
 }
 
+CacheEnvironment cache_environment(const CacheKeyFields& key) {
+    CacheEnvironment env{key.ort_version, key.ep_version, key.qnn_sdk_version,
+                         key.qnn_backend_file_version, std::nullopt};
+    if (key.device)
+        env.device = cache_key_json(key).at("device");
+    return env;
+}
+
+std::vector<std::string> stale_key_fields(const json& k, const CacheEnvironment& cur) {
+    std::vector<std::string> stale;
+    auto compare = [&](const char* field, const std::optional<std::string>& value) {
+        if (!value)
+            return;
+        const auto it = k.find(field);
+        if (it == k.end() || !it->is_string() || it->get<std::string>() != *value)
+            stale.emplace_back(field);
+    };
+    compare("ort_version", cur.ort_version);
+    compare("ep_version", cur.ep_version);
+    compare("qnn_sdk_version", cur.qnn_sdk_version);
+    compare("qnn_backend_file_version", cur.qnn_backend_file_version);
+    if (cur.device) {
+        const auto it = k.find("device");
+        if (it == k.end() || *it != *cur.device)
+            stale.emplace_back("device");
+    }
+    return stale;
+}
+
+bool same_model_configuration(const json& a, const json& b) {
+    try {
+        const auto options = [](const json& k) {
+            return compile_relevant_ep_options(
+                k.at("ep_options").get<std::map<std::string, std::string>>());
+        };
+        return a.at("model_sha256") == b.at("model_sha256") && options(a) == options(b) &&
+               a.at("session_config") == b.at("session_config") &&
+               a.at("graph_optimization_level") == b.at("graph_optimization_level");
+    } catch (const json::exception&) {
+        return false;  // a malformed key is never treated as this run's
+    }
+}
+
 Result<std::vector<fs::path>> delete_stale_cache_entries(const fs::path& cache_dir,
-                                                         std::string_view model_sha256,
-                                                         std::string_view keep_key_id) {
+                                                         const CacheKeyFields& current) {
     std::vector<fs::path> deleted;
     std::vector<fs::path> stale;
+    const json current_key = cache_key_json(current);
+    const std::string keep_key_id = cache_key_id(current);
+    const CacheEnvironment env = cache_environment(current);
     std::error_code ec;
     for (const fs::directory_entry& e : fs::directory_iterator(cache_dir, ec)) {
         if (!e.is_directory())
@@ -276,7 +322,8 @@ Result<std::vector<fs::path>> delete_stale_cache_entries(const fs::path& cache_d
         const std::optional<CacheManifest> m = read_cache_manifest(e.path());
         if (!m || path_to_utf8(e.path().filename()) != m->key_id || m->key_id == keep_key_id)
             continue;
-        if (m->key_fields.value("model_sha256", "") == model_sha256)
+        if (same_model_configuration(m->key_fields, current_key) &&
+            !stale_key_fields(m->key_fields, env).empty())
             stale.push_back(e.path());
     }
     if (ec)

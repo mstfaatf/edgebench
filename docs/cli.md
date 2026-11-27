@@ -134,11 +134,20 @@ compilation (all but `ep.context_enable` and `ep.context_file_path`: strict
 mode and the embed mode), the graph optimization level, and the device (type,
 vendor id, device id). Changing any of them gives a new key.
 
-**Invalidation.** With `build` or `use`, entries of the same model (same model
-SHA256) under another key are stale and deleted first; the deleted files are
-listed in `execution.verification_details.deleted_stale_cache_files`. `build`
-also deletes the entry of the current key before building it again
-(`state` `regenerated`; `generated` when nothing existed for the model). `use`
+**Invalidation.** An entry is stale when it is for the same model (SHA256) and
+the same configuration (the compile-relevant EP options, i.e. all but
+`backend_path`, `htp_performance_mode` and `enable_htp_fp16_precision`, the
+session config and the graph optimization level) but its environment key
+fields differ: the ONNX Runtime, QNN EP or QNN SDK version, the HTP backend
+file version or the device. Such an entry can never be loaded again. With
+`build` or `use`, stale entries of the run's model and configuration are
+deleted first; the deleted files are listed in
+`execution.verification_details.deleted_stale_cache_files`. Entries for other
+options of the same model (another `--htp-graph-finalization-mode`, another
+performance mode) are not stale and stay, so runs alternating between them
+keep their cache hits. `build` also deletes the entry of the current key
+before building it again (`state` `regenerated`; `generated` when nothing
+existed for the key). `use`
 loads a matching entry (`state` `loaded`, `hit` true) after checking every file
 against its manifest; a file that is missing, truncated or changed fails the run
 (`ep_context_corrupt`, exit 3), and so does a context ONNX Runtime cannot load
@@ -297,9 +306,18 @@ sample.
 mode, power plan, battery charge and battery saver (`system.power`), and the
 background CPU load of the idle period before trial 1 (`system.load`). The power
 state is read again at the end; if the source, mode, plan or battery saver
-changed, the result gets a `power_state_changed` warning. If any idle sample
-shows more than 10% CPU utilization, the result gets a
-`background_cpu_load_high` warning with the highest value and when it occurred.
+changed, the result gets a `power_state_changed` warning. Every load sample (the
+idle periods and each trial's measured iterations) counts other processes
+only: edgebench's own CPU time over the window is subtracted. If any sample
+shows more than 10%, the result gets a `background_cpu_load_high` warning with
+the highest value, when it occurred and the top other processes by CPU share,
+and every such sample is recorded in
+`execution.verification_details.background_load_samples` with its
+attribution: the top other processes (image name and share only, no command
+lines), edgebench's own share and the busy time no process accounts for
+(interrupts, DPCs). Short windows (the measured iterations of a fast model can
+take tens of milliseconds) give coarse values, because the system counters
+advance in clock ticks.
 
 System-wide CPU utilization is also sampled across each trial's measured
 iterations (`GetSystemTimes` before the first and after the last iteration,
@@ -425,7 +443,7 @@ Placement   55 nodes: CPUExecutionProvider 55 (all on the requested EP)
 - `First run`: trial 1's first warm-up iteration.
 - `Power`: power source, Windows power mode, power plan, battery saver and
   battery charge at the start of the run.
-- `CPU load`: system-wide CPU utilization during the idle period before trial 1
+- `CPU load`: the CPU load of other processes during the idle period before trial 1
   (`system.load`), the highest value seen during the cooldowns, and the highest
   background load during a trial's measured iterations (`highest during trials
   N% (trial k, own process excluded)`).
@@ -761,7 +779,7 @@ about compatibility info after one (see [architecture.md](architecture.md)).
 | `devices` | Every EP device ONNX Runtime enumerates, and the NPU an NPU run would select (the single `QNNExecutionProvider` device of type NPU) | Fail (exit 3): `multiple_npu_devices`, `ep_enumeration_failed`. Warn: `no_qnn_ep_devices`, `no_npu_device` (CPU runs still work) |
 | `npu_probe` | Two tiny probe models, built into the executable ([`engine/resources/doctor/`](../engine/resources/doctor/)): a 3x3 convolution as static INT8 QDQ, and in FP32 run with FP16 compute (`--npu-fp16` semantics). Each runs once in a strict NPU session, with the generated input of `run` (SplitMix64, seed 0), and its output must be byte-identical to the expected output made with the Python reference sessions (`scripts/make_probe_references.py`). The modules are checked while each session exists | Fail: a session failure with its `run` exit code (backend 4, strict refusal 5, other ONNX Runtime errors 3), `npu_probe_mismatch` (1: the NPU computes something else than the reference: check the QNN files and the NPU driver), `module_outside_bundle` (4) |
 | `npu_context` | An EP context of the INT8 probe built in a temporary directory under `%TEMP%` (never in the user's cache), loaded, and run: its output must equal the compiled session's. Reports the HTP arch from the context's compatibility info. The EP's verdict on it is not available: it can only be asked before the first QNN session | Fail: the error's exit code (a context that cannot be loaded: 3), `ep_context_outputs_differ` (1: do not use `--ep-cache`). Warn: `htp_arch_unavailable`, `temporary_directory_left` |
-| `ep_cache_dir` | The cache directory: exists (missing is fine: the first `--ep-cache` run creates it), writable, size, entries, and stale entries: their key's ONNX Runtime, QNN EP or QNN SDK version, HTP backend file version or device differs from this machine's, so no run will ever use them | Fail (exit 6): `ep_cache_dir_not_writable` (pass a writable `--ep-cache-dir`). Warn: `stale_cache_entries` (delete them with `--prune-cache`), `cache_directories_without_manifest` (never touched by edgebench: remove them yourself) |
+| `ep_cache_dir` | The cache directory: exists (missing is fine: the first `--ep-cache` run creates it), writable, size, entries, and stale entries: their key's ONNX Runtime, QNN EP or QNN SDK version, HTP backend file version or device differs from this machine's, so no run will ever use them (the rule runs use, applied to every model and configuration) | Fail (exit 6): `ep_cache_dir_not_writable` (pass a writable `--ep-cache-dir`). Warn: `stale_cache_entries` (delete them with `--prune-cache`), `cache_directories_without_manifest` (never touched by edgebench: remove them yourself) |
 | `power` | AC or battery, battery saver, the Windows power mode | Warn: `battery_power`, `battery_saver_on`, `power_mode_not_best_performance`, `power_source_unknown`. Published latency runs require AC power and the power mode Best performance |
 | `background_load` | System-wide CPU load over `--load-sample-ms`, sampled first, before doctor does any work | Warn: `background_cpu_load_high` above 10% (close background apps) |
 

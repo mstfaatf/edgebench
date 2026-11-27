@@ -207,6 +207,14 @@ struct BenchmarkResult {
     std::vector<ResultWarning> warnings;
     /// notes[]: facts that do not limit how the result may be used (same shape).
     std::vector<ResultWarning> notes;
+    /// execution.verification_details.background_load_samples: every load sample
+    /// above kHighBackgroundLoad, with its per-process attribution.
+    struct BackgroundLoadRecord {
+        std::string phase;  // idle_before_trial | measured_iterations
+        int trial_index = 0;
+        LoadSample sample;
+    };
+    std::vector<BackgroundLoadRecord> background_load_samples;
 
     std::string status() const { return failure ? "failed" : "success"; }
 

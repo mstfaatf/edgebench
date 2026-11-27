@@ -156,7 +156,7 @@ session that is timed.
 hash + inspect model file            (not timed; warms the file cache for every trial)
 read power state
 NPU, --ep-cache build|use:           (before the first trial, not timed as trials)
-    key fields -> key id; delete stale entries of this model
+    key fields -> key id; delete stale entries of this model and configuration
     load the entry for the key, or build it (context_build_ms)
     compiled session vs session from the context, same input -> verified_equal_outputs
 for each trial (scheduler order):

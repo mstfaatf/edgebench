@@ -160,7 +160,7 @@
           "oneOf": [
             {"type": "null"},
             {
-              "description": "System load sampled right before measurement. Null if not sampled.",
+              "description": "CPU load of other processes (this process's own CPU time excluded), sampled during the idle period before the first trial. Null if not sampled.",
               "type": "object",
               "additionalProperties": false,
               "required": ["cpu_utilization_ratio", "sample_window_s"],
@@ -721,9 +721,50 @@
                       }
                     },
                     "deleted_stale_cache_files": {
-                      "description": "Files the run deleted from the EP context cache because they belonged to an entry for the same model with another key (stale), as absolute paths. Empty if none. Added to the 1.2.0 object in place.",
+                      "description": "Files the run deleted from the EP context cache because they belonged to a stale entry (same model and configuration, built by another ONNX Runtime, QNN EP, QNN SDK or backend version or for another device), as absolute paths. Empty if none. Added to the 1.2.0 object in place.",
                       "type": "array",
                       "items": {"type": "string"}
+                    },
+                    "background_load_samples": {
+                      "description": "Every background-load sample above the background_cpu_load_high threshold, with where its CPU time went: the top other processes by share (image name only), this process's own share (not part of the load) and the busy time no process accounts for (interrupts, DPCs). Empty if none. Added to the 1.2.0 object in place.",
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["phase", "trial_index", "cpu_utilization_ratio", "sample_window_s", "attribution"],
+                        "properties": {
+                          "phase": {"enum": ["idle_before_trial", "measured_iterations"]},
+                          "trial_index": {"type": "integer", "minimum": 0},
+                          "cpu_utilization_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+                          "sample_window_s": {"type": "number", "minimum": 0},
+                          "attribution": {
+                            "oneOf": [
+                              {"type": "null"},
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": ["top_processes", "own_process_share", "unattributed_share"],
+                                "properties": {
+                                  "top_processes": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": ["name", "cpu_share"],
+                                      "properties": {
+                                        "name": {"type": "string", "minLength": 1},
+                                        "cpu_share": {"type": "number", "minimum": 0, "maximum": 1}
+                                      }
+                                    }
+                                  },
+                                  "own_process_share": {"type": "number", "minimum": 0, "maximum": 1},
+                                  "unattributed_share": {"type": "number", "minimum": 0, "maximum": 1}
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
                     }
                   }
                 }

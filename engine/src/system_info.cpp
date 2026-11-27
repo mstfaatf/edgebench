@@ -6,8 +6,12 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <filesystem>
+#include <map>
 #include <thread>
 #include <vector>
+
+#include "edgebench/ort_loader.hpp"
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -429,13 +433,156 @@ std::optional<std::uint64_t> query_process_cpu_time() {
 }
 
 LoadSample sample_cpu_load(std::chrono::milliseconds window) {
-    using Clock = std::chrono::steady_clock;
-    const CpuTimes start = query_cpu_times();
-    const Clock::time_point t0 = Clock::now();
+    const LoadProbe probe = start_load_probe();
     std::this_thread::sleep_for(window);
-    const CpuTimes end = query_cpu_times();
-    const double seconds = std::chrono::duration<double>(Clock::now() - t0).count();
-    return {cpu_utilization(start, end).value_or(0.0), seconds};
+    if (std::optional<LoadSample> s = finish_load_probe(probe))
+        return *s;
+    return {0.0,
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - probe.started).count(),
+            std::nullopt};
+}
+
+namespace {
+
+// The SystemProcessInformation record layout (winternl.h declares a reduced one):
+// only the fields read here, at their documented offsets.
+struct ProcessRecord {
+    ULONG NextEntryOffset;
+    ULONG NumberOfThreads;
+    LARGE_INTEGER WorkingSetPrivateSize;
+    ULONG HardFaultCount;
+    ULONG NumberOfThreadsHighWatermark;
+    ULONGLONG CycleTime;
+    LARGE_INTEGER CreateTime;
+    LARGE_INTEGER UserTime;
+    LARGE_INTEGER KernelTime;
+    USHORT NameLength;
+    USHORT NameMaximumLength;
+    PWSTR NameBuffer;
+    LONG BasePriority;
+    HANDLE UniqueProcessId;
+};
+
+using NtQuerySystemInformationFn = LONG(WINAPI*)(ULONG, PVOID, ULONG, PULONG);
+
+}  // namespace
+
+std::optional<std::vector<ProcessCpuTime>> query_all_process_cpu_times() {
+    static const auto query = reinterpret_cast<NtQuerySystemInformationFn>(reinterpret_cast<void*>(
+        GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQuerySystemInformation")));
+    if (!query)
+        return std::nullopt;
+    constexpr ULONG kSystemProcessInformation = 5;
+    constexpr LONG kInfoLengthMismatch = static_cast<LONG>(0xC0000004L);
+    std::vector<std::byte> buffer(512 * 1024);
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        ULONG needed = 0;
+        const LONG status = query(kSystemProcessInformation, buffer.data(),
+                                  static_cast<ULONG>(buffer.size()), &needed);
+        if (status == kInfoLengthMismatch) {
+            buffer.resize(std::max<std::size_t>(needed, buffer.size()) * 2);
+            continue;
+        }
+        if (status < 0)
+            return std::nullopt;
+        std::vector<ProcessCpuTime> out;
+        std::size_t offset = 0;
+        while (true) {
+            const auto* p = reinterpret_cast<const ProcessRecord*>(buffer.data() + offset);
+            ProcessCpuTime t;
+            t.pid =
+                static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(p->UniqueProcessId));
+            if (p->NameBuffer && p->NameLength > 0) {
+                const std::wstring name(p->NameBuffer, p->NameLength / sizeof(wchar_t));
+                t.name = path_to_utf8(std::filesystem::path(name));
+            } else {
+                t.name = t.pid == 0 ? "Idle" : "System";
+            }
+            t.cpu = static_cast<std::uint64_t>(p->UserTime.QuadPart) +
+                    static_cast<std::uint64_t>(p->KernelTime.QuadPart);
+            out.push_back(std::move(t));
+            if (p->NextEntryOffset == 0)
+                break;
+            offset += p->NextEntryOffset;
+            if (offset + sizeof(ProcessRecord) > buffer.size())
+                return std::nullopt;
+        }
+        return out;
+    }
+    return std::nullopt;
+}
+
+LoadAttribution attribute_cpu_load(const std::vector<ProcessCpuTime>& start,
+                                   const std::vector<ProcessCpuTime>& end, std::uint64_t busy,
+                                   std::uint64_t total, std::uint32_t own_pid, std::size_t top) {
+    LoadAttribution out;
+    if (total == 0)
+        return out;
+    std::map<std::pair<std::uint32_t, std::string>, std::uint64_t> before;
+    for (const ProcessCpuTime& p : start)
+        before[{p.pid, p.name}] = p.cpu;
+    std::map<std::string, std::uint64_t> by_name;
+    std::uint64_t own = 0, attributed = 0;
+    for (const ProcessCpuTime& p : end) {
+        if (p.pid == 0)
+            continue;  // the idle process: idle time, not load
+        const auto it = before.find({p.pid, p.name});
+        const std::uint64_t was = it == before.end() ? 0 : it->second;
+        const std::uint64_t delta = p.cpu > was ? p.cpu - was : 0;
+        attributed += delta;
+        if (p.pid == own_pid)
+            own += delta;
+        else if (delta > 0)
+            by_name[p.name] += delta;
+    }
+    std::vector<ProcessShare> shares;
+    for (const auto& [name, cpu] : by_name)
+        shares.push_back({name, static_cast<double>(cpu) / static_cast<double>(total)});
+    std::sort(shares.begin(), shares.end(), [](const ProcessShare& a, const ProcessShare& b) {
+        return a.cpu_share != b.cpu_share ? a.cpu_share > b.cpu_share : a.name < b.name;
+    });
+    if (shares.size() > top)
+        shares.resize(top);
+    out.top_processes = std::move(shares);
+    out.own_share = std::min(1.0, static_cast<double>(own) / static_cast<double>(total));
+    out.unattributed_share =
+        busy > attributed ? static_cast<double>(busy - attributed) / static_cast<double>(total)
+                          : 0.0;
+    return out;
+}
+
+LoadProbe start_load_probe() {
+    LoadProbe p;
+    p.processes = query_all_process_cpu_times();
+    p.own = query_process_cpu_time();
+    p.system = query_cpu_times();
+    p.started = std::chrono::steady_clock::now();
+    return p;
+}
+
+std::optional<LoadSample> finish_load_probe(const LoadProbe& probe, std::size_t top) {
+    const auto finished = std::chrono::steady_clock::now();
+    const CpuTimes system = query_cpu_times();
+    const std::optional<std::uint64_t> own = query_process_cpu_time();
+    const std::optional<std::vector<ProcessCpuTime>> processes = query_all_process_cpu_times();
+    if (!probe.own || !own)
+        return std::nullopt;
+    const std::optional<double> others =
+        background_cpu_utilization(probe.system, system, *probe.own, *own);
+    if (!others)
+        return std::nullopt;
+    LoadSample s{*others, std::chrono::duration<double>(finished - probe.started).count(),
+                 std::nullopt};
+    if (probe.processes && processes) {
+        const std::uint64_t kernel = system.kernel - probe.system.kernel;
+        const std::uint64_t idle = system.idle - probe.system.idle;
+        const std::uint64_t total = kernel + (system.user - probe.system.user);
+        const std::uint64_t busy =
+            (kernel >= idle ? kernel - idle : 0) + (system.user - probe.system.user);
+        s.attribution = attribute_cpu_load(*probe.processes, *processes, busy, total,
+                                           GetCurrentProcessId(), top);
+    }
+    return s;
 }
 
 ProcessMemory query_process_memory() {

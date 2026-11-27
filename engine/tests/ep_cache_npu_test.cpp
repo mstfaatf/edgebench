@@ -152,7 +152,9 @@ TEST_F(EpCacheNpu, UseBuildsAMissingCacheOnce) {
     write_and_validate(r, work_);
 }
 
-TEST_F(EpCacheNpu, ChangedKeyFieldsDeleteTheStaleEntryOfTheModel) {
+// Another EP option is another configuration of the same model: it gets its own
+// entry, and the first one survives (and is still a hit afterwards).
+TEST_F(EpCacheNpu, AnotherOptionOfTheSameModelKeepsTheFirstEntry) {
     eb::RunConfig first = cache_config(cache_, eb::EpCacheMode::build);
     const eb::BenchmarkResult a = eb::run_benchmark(shared_runtime(), first);
     ASSERT_FALSE(a.failure) << failure(a);
@@ -163,17 +165,20 @@ TEST_F(EpCacheNpu, ChangedKeyFieldsDeleteTheStaleEntryOfTheModel) {
     ASSERT_FALSE(b.failure) << failure(b);
     EXPECT_NE(a.ep_cache.key_id, b.ep_cache.key_id);
     EXPECT_EQ(b.ep_cache.hit, false);
-    EXPECT_EQ(b.ep_cache.state, "regenerated");
-    ASSERT_EQ(b.ep_cache.deleted_stale.size(), 3u);  // two context files and the manifest
-    for (const fs::path& p : b.ep_cache.deleted_stale)
-        EXPECT_EQ(p.parent_path(), cache_ / *a.ep_cache.key_id);
-    EXPECT_FALSE(fs::exists(cache_ / *a.ep_cache.key_id));
-    ASSERT_EQ(entries(cache_).size(), 1u);
-    EXPECT_EQ(entries(cache_).front().filename(), *b.ep_cache.key_id);
-    const json doc = eb::to_result_json(b, std::nullopt);
-    EXPECT_EQ(doc.at("execution").at("verification_details").at("deleted_stale_cache_files").size(),
-              3u);
+    EXPECT_EQ(b.ep_cache.state, "generated");
+    EXPECT_TRUE(b.ep_cache.deleted_stale.empty());
+    EXPECT_EQ(entries(cache_).size(), 2u);
+    EXPECT_TRUE(fs::exists(cache_ / *a.ep_cache.key_id / eb::kEpCacheManifestName));
+
+    eb::RunConfig again = first;
+    again.ep_cache = eb::EpCacheMode::use;
+    const eb::BenchmarkResult c = eb::run_benchmark(shared_runtime(), again);
+    ASSERT_FALSE(c.failure) << failure(c);
+    EXPECT_EQ(c.ep_cache.key_id, a.ep_cache.key_id);
+    EXPECT_EQ(c.ep_cache.hit, true);
+    EXPECT_EQ(c.ep_cache.state, "loaded");
     write_and_validate(b, work_);
+    write_and_validate(c, work_);
 }
 
 TEST_F(EpCacheNpu, UseWithATruncatedContextExits3WithoutRebuilding) {

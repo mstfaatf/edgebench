@@ -11,9 +11,7 @@ new directory ``<output-root>/<UTC stamp>/``:
     logs/<run>.log     stdout and stderr of every edgebench call
 
 Each NPU run's cache entry is built right before the run, so the timed run must
-find it (a cache hit); building just before matters because a build deletes the
-entries of the same model file with another key (e.g. another
---htp-graph-finalization-mode). The run stops before anything is timed if
+find it (a cache hit). The run stops before anything is timed if
 doctor fails, or if its power or background_load check is not a pass (unless
 --allow-doctor-warnings). Check the results with ``scripts/check_matrix.py``.
 

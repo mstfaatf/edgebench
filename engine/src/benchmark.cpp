@@ -273,7 +273,7 @@ Result<void> prepare_ep_cache(Provider& provider, const RunConfig& config, Bench
     c.key = key;
 
     Result<std::vector<std::filesystem::path>> stale =
-        delete_stale_cache_entries(cache_dir, fields.model_sha256, key_id);
+        delete_stale_cache_entries(cache_dir, fields);
     if (!stale)
         return stale.error();
     c.deleted_stale = std::move(stale).value();
@@ -555,10 +555,9 @@ Result<TrialResult> run_trial(Provider& provider, const RunConfig& config, const
 
     out.failed_stage = "measurement";
     trial.latencies_ms.reserve(static_cast<std::size_t>(config.iterations));
-    // Background load across the measured iterations, read outside the timed brackets.
-    const CpuTimes system_start = query_cpu_times();
-    const std::optional<std::uint64_t> own_start = query_process_cpu_time();
-    const Clock::time_point measured_start = Clock::now();
+    // Background load across the measured iterations (other processes only), read
+    // outside the timed brackets.
+    const LoadProbe load_probe = start_load_probe();
     for (int i = 0; i < config.iterations; ++i) {
         if (should_stop(hook, StopPoint::measured, st.trial_index, i)) {
             out.discarded_iterations = i;
@@ -572,19 +571,7 @@ Result<TrialResult> run_trial(Provider& provider, const RunConfig& config, const
         }
         trial.latencies_ms.push_back(ms_between(t0, t1));
     }
-    {
-        const Clock::time_point measured_end = Clock::now();
-        const CpuTimes system_end = query_cpu_times();
-        const std::optional<std::uint64_t> own_end = query_process_cpu_time();
-        if (own_start && own_end) {
-            if (const std::optional<double> background =
-                    background_cpu_utilization(system_start, system_end, *own_start, *own_end)) {
-                trial.during = LoadSample{
-                    *background,
-                    std::chrono::duration<double>(measured_end - measured_start).count()};
-            }
-        }
-    }
+    trial.during = finish_load_probe(load_probe);
 
     for (std::size_t i = 0; i < session->outputs().size(); ++i) {
         if (const auto bad = first_non_finite(session->output(i))) {
@@ -879,12 +866,14 @@ BenchmarkResult run_benchmark(Runtime& runtime, Provider& provider, const RunCon
             report("idle " + std::to_string(wait.count()) + " ms before " + before +
                    " (sampling background CPU load)");
             // Waits on the stop event, so an interrupt ends the idle period at once.
-            const CpuTimes start = query_cpu_times();
-            const auto t0 = Clock::now();
+            // Other processes only: this process's own CPU time (e.g. a session
+            // still being torn down) is not background load.
+            const LoadProbe probe = start_load_probe();
             const bool hook_stop = should_stop(hook, StopPoint::idle, st.trial_index, 0);
             const bool cut = hook_stop || wait_or_stop(wait);
-            idle = LoadSample{cpu_utilization(start, query_cpu_times()).value_or(0.0),
-                              std::chrono::duration<double>(Clock::now() - t0).count()};
+            idle = finish_load_probe(probe).value_or(
+                LoadSample{0.0, std::chrono::duration<double>(Clock::now() - probe.started).count(),
+                           std::nullopt});
             if (st.sequence == 0 && first_idle && !cut)
                 r.system.load = idle;
             first_idle = false;
@@ -1113,21 +1102,46 @@ void finish_result(BenchmarkResult& r) {
                               std::string("/system/power")});
     }
 
+    // Background load: every sample above the threshold, with where its CPU time went.
+    for (const TrialResult& trial : r.timing.trials) {
+        if (trial.idle_before && trial.idle_before->cpu_utilization_ratio > kHighBackgroundLoad)
+            r.background_load_samples.push_back(
+                {"idle_before_trial", trial.trial_index, *trial.idle_before});
+        if (trial.during && trial.during->cpu_utilization_ratio > kHighBackgroundLoad)
+            r.background_load_samples.push_back(
+                {"measured_iterations", trial.trial_index, *trial.during});
+    }
+    const auto top_text = [](const LoadSample& s) {
+        if (!s.attribution)
+            return std::string();
+        std::string out;
+        for (const ProcessShare& p : s.attribution->top_processes) {
+            if (out.size() > 0)
+                out += ", ";
+            out += p.name + " " + fmt(p.cpu_share * 100.0, 1) + "%";
+            if (std::count(out.begin(), out.end(), ',') >= 2)
+                break;
+        }
+        return out.empty() ? std::string() : " (top: " + out + ")";
+    };
     // Background load: the highest idle sample.
     {
+        const LoadSample* highest_sample = nullptr;
         double highest = -1.0;
         std::string when;
         for (const TrialResult& trial : r.timing.trials) {
             if (trial.idle_before && trial.idle_before->cpu_utilization_ratio > highest) {
                 highest = trial.idle_before->cpu_utilization_ratio;
+                highest_sample = &*trial.idle_before;
                 when = "before " + trial_label(trial.trial_index, config.trials);
             }
         }
         if (highest > kHighBackgroundLoad) {
             r.warnings.push_back({"background_cpu_load_high",
-                                  "Background CPU load reached " + fmt(highest * 100.0, 1) + "% (" +
-                                      when +
-                                      "); other processes may have distorted the measurement.",
+                                  "Background CPU load from other processes reached " +
+                                      fmt(highest * 100.0, 1) + "% (" + when + ")" +
+                                      top_text(*highest_sample) +
+                                      "; other processes may have distorted the measurement.",
                                   std::string("/system/load")});
         }
     }
@@ -1141,14 +1155,14 @@ void finish_result(BenchmarkResult& r) {
                 worst = &trial;
         }
         if (worst && worst->during->cpu_utilization_ratio > kHighBackgroundLoad) {
-            r.warnings.push_back(
-                {"background_cpu_load_high",
-                 "Background CPU load from other processes reached " +
-                     fmt(worst->during->cpu_utilization_ratio * 100.0, 1) + "% during " +
-                     trial_label(worst->trial_index, config.trials) +
-                     " (this process's own CPU time excluded); other processes may have "
-                     "distorted the measurement.",
-                 std::nullopt});
+            r.warnings.push_back({"background_cpu_load_high",
+                                  "Background CPU load from other processes reached " +
+                                      fmt(worst->during->cpu_utilization_ratio * 100.0, 1) +
+                                      "% during " + trial_label(worst->trial_index, config.trials) +
+                                      " (this process's own CPU time excluded)" +
+                                      top_text(*worst->during) +
+                                      "; other processes may have distorted the measurement.",
+                                  std::nullopt});
         }
     }
 
@@ -1213,12 +1227,10 @@ void finish_result(BenchmarkResult& r) {
     // Batch equivalence, from the committed reference data (needs the batch size and
     // the compute precision; recorded for runs that created a session).
     if (r.known.session && r.batch_size > 0 && r.effective_precision) {
-        r.batch_equivalence =
-            lookup_batch_equivalence(r.model.file.path, r.model.file.sha256,
-                                     config.provider == ProviderKind::npu ? "npu" : "cpu",
-                                     r.effective_precision->compute,
-                                     compile_relevant_ep_options(r.runtime.provider.ep_options),
-                                     r.batch_size);
+        r.batch_equivalence = lookup_batch_equivalence(
+            r.model.file.path, r.model.file.sha256,
+            config.provider == ProviderKind::npu ? "npu" : "cpu", r.effective_precision->compute,
+            compile_relevant_ep_options(r.runtime.provider.ep_options), r.batch_size);
         const BatchEquivalence& be = *r.batch_equivalence;
         const std::string on =
             std::string(config.provider == ProviderKind::npu ? "the NPU" : "the CPU") + " (" +

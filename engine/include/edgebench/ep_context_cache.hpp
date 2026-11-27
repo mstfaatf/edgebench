@@ -18,6 +18,12 @@
 // Deletion is restricted: the engine deletes only files listed in a manifest it
 // wrote (plus that manifest), and only in direct subdirectories of the cache
 // directory. A directory without a valid manifest is never touched.
+//
+// Staleness: an entry is stale when its environment key fields (ONNX Runtime,
+// QNN EP, QNN SDK and backend file versions, device) differ from the current
+// ones: it can never be loaded again. Entries that differ only in the model or
+// its configuration (EP options, session config, graph optimization) are not
+// stale: entries for different options of the same model coexist.
 #pragma once
 
 #include <nlohmann/json.hpp>
@@ -72,6 +78,31 @@ struct CacheKeyFields {
     std::optional<CacheDevice> device;
     bool operator==(const CacheKeyFields&) const = default;
 };
+
+/// The environment key fields of a cache key (as opposed to the model and its
+/// configuration). Unknown values (nullopt) are not compared.
+struct CacheEnvironment {
+    std::optional<std::string> ort_version;
+    std::optional<std::string> ep_version;
+    std::optional<std::string> qnn_sdk_version;
+    std::optional<std::string> qnn_backend_file_version;
+    std::optional<nlohmann::json> device;  // {"device_type", "vendor_id", "device_id"}
+};
+
+/// The environment fields of `key`.
+CacheEnvironment cache_environment(const CacheKeyFields& key);
+
+/// The environment key fields in which `key_fields` (a cache manifest's key)
+/// differs from `current`, e.g. {"qnn_sdk_version"}; empty if the entry is not
+/// stale. Fields unknown in `current` are not compared. The one definition of a
+/// stale entry, used by runs and by doctor (--prune-cache).
+std::vector<std::string> stale_key_fields(const nlohmann::json& key_fields,
+                                          const CacheEnvironment& current);
+
+/// Whether two cache keys are for the same model and configuration: model
+/// SHA256, compile-relevant EP options (compile_relevant_ep_options()), session
+/// config and graph optimization level. Only such an entry can be stale for a run.
+bool same_model_configuration(const nlohmann::json& a, const nlohmann::json& b);
 
 /// The session config entries that affect compilation: all of `session_config`
 /// except kEpContextEnableKey and kEpContextFilePathKey.
@@ -134,12 +165,13 @@ Result<std::vector<std::filesystem::path>> delete_cache_entry(
     const std::filesystem::path& cache_dir, const std::filesystem::path& entry_dir);
 
 /// Deletes every entry of `cache_dir` (a subdirectory named by its manifest's key
-/// id) whose key fields have model SHA256 `model_sha256` and whose key id is not
-/// `keep_key_id`: caches of the same model whose key changed. Returns the paths
-/// deleted.
+/// id) other than `current`'s own that is for the same model and configuration
+/// (same_model_configuration()) and stale (stale_key_fields() against
+/// `current`'s environment): contexts of this run's configuration built by
+/// another runtime, backend or device. Entries for other options are kept.
+/// Returns the paths deleted.
 Result<std::vector<std::filesystem::path>> delete_stale_cache_entries(
-    const std::filesystem::path& cache_dir, std::string_view model_sha256,
-    std::string_view keep_key_id);
+    const std::filesystem::path& cache_dir, const CacheKeyFields& current);
 
 enum class CacheEntryState {
     missing,  // no directory for the key

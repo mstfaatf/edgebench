@@ -477,28 +477,6 @@ DoctorCheck check_npu_context(const ContextFacts& f) {
     return c;
 }
 
-std::vector<std::string> stale_key_fields(const nlohmann::json& k,
-                                          const CurrentCacheEnvironment& cur) {
-    std::vector<std::string> stale;
-    auto compare = [&](const char* field, const std::optional<std::string>& value) {
-        if (!value)
-            return;
-        const auto it = k.find(field);
-        if (it == k.end() || !it->is_string() || it->get<std::string>() != *value)
-            stale.emplace_back(field);
-    };
-    compare("ort_version", cur.ort_version);
-    compare("ep_version", cur.ep_version);
-    compare("qnn_sdk_version", cur.qnn_sdk_version);
-    compare("qnn_backend_file_version", cur.qnn_backend_file_version);
-    if (cur.device) {
-        const auto it = k.find("device");
-        if (it == k.end() || *it != *cur.device)
-            stale.emplace_back("device");
-    }
-    return stale;
-}
-
 DoctorCheck check_ep_cache_dir(const CacheDirFacts& f) {
     DoctorCheck c = make("ep_cache_dir");
     json entries = json::array();

@@ -223,30 +223,103 @@ TEST(EpCacheEntries, ManifestsWithPathsAreIgnored) {
     EXPECT_TRUE(fs::exists(entry / "m_ctx.onnx"));
 }
 
-TEST(EpCacheEntries, StaleEntriesAreThoseOfTheSameModelWithAnotherKey) {
+// The default and another graph finalization mode of the same model are two
+// configurations: building or using one never deletes the other.
+TEST(EpCacheEntries, EntriesForOtherOptionsOfTheSameModelCoexist) {
     TempCache cache;
-    const eb::CacheKeyFields current = base_key();
-    eb::CacheKeyFields older = current;
-    older.ep_version = "2.7.0";
-    eb::CacheKeyFields other_model = current;
-    other_model.model_sha256 = std::string(64, 'c');
-    const fs::path keep = make_entry(cache.dir, current);
-    const fs::path stale = make_entry(cache.dir, older);
-    const fs::path unrelated = make_entry(cache.dir, other_model);
-    const fs::path foreign = cache.dir / "something-else";
-    fs::create_directories(foreign);
-    write_file(foreign / "m_ctx.onnx", "user file");
+    const eb::CacheKeyFields defaults = base_key();
+    eb::CacheKeyFields mode1 = defaults;
+    mode1.ep_options["htp_graph_finalization_optimization_mode"] = "1";
+    eb::CacheKeyFields balanced = defaults;  // a run-time option: also another key
+    balanced.ep_options["htp_performance_mode"] = "balanced";
+    const fs::path a = make_entry(cache.dir, defaults);
+    const fs::path b = make_entry(cache.dir, mode1);
+    const fs::path c = make_entry(cache.dir, balanced);
+    for (const eb::CacheKeyFields& current : {defaults, mode1, balanced}) {
+        const auto deleted = eb::delete_stale_cache_entries(cache.dir, current);
+        ASSERT_TRUE(deleted) << deleted.error().message;
+        EXPECT_TRUE(deleted.value().empty());
+    }
+    for (const fs::path& entry : {a, b, c})
+        EXPECT_TRUE(fs::exists(entry / "m_ctx_qnn.bin")) << eb::path_to_utf8(entry);
+}
 
-    const auto deleted =
-        eb::delete_stale_cache_entries(cache.dir, current.model_sha256, eb::cache_key_id(current));
-    ASSERT_TRUE(deleted) << deleted.error().message;
-    EXPECT_EQ(deleted.value().size(), 3u);
-    for (const fs::path& p : deleted.value())
-        EXPECT_EQ(p.parent_path(), stale) << eb::path_to_utf8(p);
-    EXPECT_FALSE(fs::exists(stale));
-    EXPECT_TRUE(fs::exists(keep / "m_ctx_qnn.bin"));
-    EXPECT_TRUE(fs::exists(unrelated / "m_ctx_qnn.bin"));
-    EXPECT_TRUE(fs::exists(foreign / "m_ctx.onnx"));
+// An entry of this run's model and configuration built by another runtime,
+// backend or device can never be loaded again: it is stale and deleted, by
+// manifest only. Entries of other models or options and foreign directories stay.
+TEST(EpCacheEntries, AVersionOrDeviceChangeMakesTheOldEntryStale) {
+    using Change = void (*)(eb::CacheKeyFields&);
+    const std::vector<std::pair<const char*, Change>> changes = {
+        {"ort_version", [](eb::CacheKeyFields& k) { k.ort_version = "1.31.0"; }},
+        {"ep_version", [](eb::CacheKeyFields& k) { k.ep_version = "2.7.0"; }},
+        {"qnn_sdk_version", [](eb::CacheKeyFields& k) { k.qnn_sdk_version = "2.51.0"; }},
+        {"qnn_backend_file_version",
+         [](eb::CacheKeyFields& k) { k.qnn_backend_file_version = "2.51.0.1"; }},
+        {"device", [](eb::CacheKeyFields& k) { k.device->device_id = 0x1234; }},
+    };
+    for (const auto& [field, change] : changes) {
+        SCOPED_TRACE(field);
+        TempCache cache;
+        eb::CacheKeyFields current = base_key();
+        current.qnn_sdk_version = "2.52.0";
+        eb::CacheKeyFields older = current;
+        change(older);
+        EXPECT_EQ(eb::stale_key_fields(eb::cache_key_json(older), eb::cache_environment(current)),
+                  std::vector<std::string>{field});
+        eb::CacheKeyFields older_other_model = older;
+        older_other_model.model_sha256 = std::string(64, 'c');
+        eb::CacheKeyFields older_other_options = older;
+        older_other_options.ep_options["htp_graph_finalization_optimization_mode"] = "1";
+        const fs::path keep = make_entry(cache.dir, current);
+        const fs::path stale = make_entry(cache.dir, older);
+        const fs::path other_model = make_entry(cache.dir, older_other_model);
+        const fs::path other_options = make_entry(cache.dir, older_other_options);
+        const fs::path foreign = cache.dir / "something-else";
+        fs::create_directories(foreign);
+        write_file(foreign / "m_ctx.onnx", "user file");
+        write_file(stale / "not-in-the-manifest.txt", "user file");
+
+        const auto deleted = eb::delete_stale_cache_entries(cache.dir, current);
+        ASSERT_TRUE(deleted) << deleted.error().message;
+        EXPECT_EQ(deleted.value().size(), 3u);  // two context files and the manifest
+        for (const fs::path& p : deleted.value())
+            EXPECT_EQ(p.parent_path(), stale) << eb::path_to_utf8(p);
+        // Manifest-only deletion: a file the manifest does not list stays, and so
+        // does its directory.
+        EXPECT_TRUE(fs::exists(stale / "not-in-the-manifest.txt"));
+        EXPECT_FALSE(fs::exists(stale / "m_ctx_qnn.bin"));
+        EXPECT_TRUE(fs::exists(keep / "m_ctx_qnn.bin"));
+        EXPECT_TRUE(fs::exists(other_model / "m_ctx_qnn.bin"));
+        EXPECT_TRUE(fs::exists(other_options / "m_ctx_qnn.bin"));
+        EXPECT_TRUE(fs::exists(foreign / "m_ctx.onnx"));
+    }
+}
+
+TEST(EpCacheEntries, StaleFieldsAndConfigurations) {
+    const eb::CacheKeyFields k = base_key();
+    // Unknown current values are not compared; an entry without a value is stale
+    // against a known one.
+    EXPECT_TRUE(eb::stale_key_fields(eb::cache_key_json(k), eb::CacheEnvironment{}).empty());
+    eb::CacheKeyFields known = k;
+    known.qnn_sdk_version = "2.52.0";
+    EXPECT_EQ(eb::stale_key_fields(eb::cache_key_json(k), eb::cache_environment(known)),
+              std::vector<std::string>{"qnn_sdk_version"});
+    // Same configuration: backend path, performance mode and the FP16 flag aside.
+    eb::CacheKeyFields moved = k;
+    moved.ep_options["backend_path"] = "D:\\other\\QnnHtp.dll";
+    moved.ep_options["htp_performance_mode"] = "balanced";
+    EXPECT_TRUE(eb::same_model_configuration(eb::cache_key_json(k), eb::cache_key_json(moved)));
+    for (auto change :
+         {+[](eb::CacheKeyFields& c) { c.model_sha256 = std::string(64, 'd'); },
+          +[](eb::CacheKeyFields& c) { c.ep_options["vtcm_mb"] = "8"; },
+          +[](eb::CacheKeyFields& c) { c.session_config["session.disable_cpu_ep_fallback"] = "0"; },
+          +[](eb::CacheKeyFields& c) { c.graph_optimization_level = "basic"; }}) {
+        eb::CacheKeyFields other = k;
+        change(other);
+        EXPECT_FALSE(
+            eb::same_model_configuration(eb::cache_key_json(k), eb::cache_key_json(other)));
+    }
+    EXPECT_FALSE(eb::same_model_configuration(json::object(), eb::cache_key_json(k)));
 }
 
 TEST(EpCacheEntries, LookupTellsMissingValidCorruptAndForeign) {

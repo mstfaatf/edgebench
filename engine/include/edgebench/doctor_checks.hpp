@@ -15,6 +15,7 @@
 #include <string_view>
 #include <vector>
 
+#include "edgebench/ep_context_cache.hpp"
 #include "edgebench/ep_devices.hpp"
 #include "edgebench/exit_codes.hpp"
 #include "edgebench/module_paths.hpp"
@@ -170,22 +171,9 @@ struct ContextFacts {
 /// info, or a temporary directory that could not be removed, warns.
 DoctorCheck check_npu_context(const ContextFacts& facts);
 
-/// The fields of an EP context cache key that describe the environment (as
-/// opposed to the model and its options): a cache entry whose values differ from
-/// the current ones can never be used again.
-struct CurrentCacheEnvironment {
-    std::optional<std::string> ort_version;
-    std::optional<std::string> ep_version;
-    std::optional<std::string> qnn_sdk_version;
-    std::optional<std::string> qnn_backend_file_version;
-    std::optional<nlohmann::json> device;  // {"device_type", "vendor_id", "device_id"}
-};
-
-/// The environment key fields in which `key_fields` (a cache manifest's key)
-/// differs from `current`, e.g. {"qnn_sdk_version"}. Fields unknown in `current`
-/// are not compared.
-std::vector<std::string> stale_key_fields(const nlohmann::json& key_fields,
-                                          const CurrentCacheEnvironment& current);
+/// The environment of this machine's NPU runs, against which doctor finds stale
+/// cache entries (stale_key_fields(), the same rule runs use).
+using CurrentCacheEnvironment = CacheEnvironment;
 
 struct CacheEntryFacts {
     std::filesystem::path dir;

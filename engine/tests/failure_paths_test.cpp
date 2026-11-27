@@ -536,10 +536,26 @@ TEST(FailurePaths, TrialSpreadIsAWarningInTheResultAndSummary) {
 
 TEST(FailurePaths, BackgroundLoadDuringATrialIsAWarning) {
     std::vector<eb::TrialResult> trials{fake_trial(0, 4.0), fake_trial(1, 4.0)};
-    trials[0].during = eb::LoadSample{0.02, 0.8};
-    trials[1].during = eb::LoadSample{0.18, 0.8};
+    trials[0].during = eb::LoadSample{0.02, 0.8, std::nullopt};
+    trials[1].during = eb::LoadSample{
+        0.18, 0.8,
+        eb::LoadAttribution{
+            {{"MsMpEng.exe", 0.12}, {"Code.exe", 0.04}, {"dwm.exe", 0.01}, {"a.exe", 0.005}},
+            0.4,
+            0.01}};
+    trials[1].idle_before = eb::LoadSample{0.15, 1.0, std::nullopt};
     eb::BenchmarkResult r = result_with_trials(std::move(trials));
     eb::finish_result(r);
+    // Every sample above the threshold is recorded with its attribution, and the
+    // warning names the top other processes.
+    ASSERT_EQ(r.background_load_samples.size(), 2u);
+    EXPECT_EQ(r.background_load_samples[0].phase, "idle_before_trial");
+    EXPECT_EQ(r.background_load_samples[1].phase, "measured_iterations");
+    EXPECT_EQ(r.background_load_samples[1].trial_index, 1);
+    ASSERT_TRUE(r.background_load_samples[1].sample.attribution);
+    EXPECT_EQ(r.background_load_samples[1].sample.attribution->top_processes.at(0).name,
+              "MsMpEng.exe");
+    EXPECT_FALSE(r.background_load_samples[0].sample.attribution);
     const eb::ResultWarning* w = nullptr;
     for (const eb::ResultWarning& x : r.warnings) {
         if (x.code == "background_cpu_load_high" && x.message.find("during") != std::string::npos)
@@ -547,13 +563,17 @@ TEST(FailurePaths, BackgroundLoadDuringATrialIsAWarning) {
     }
     ASSERT_NE(w, nullptr);
     EXPECT_NE(w->message.find("18.0% during trial 2 of 2"), std::string::npos) << w->message;
+    EXPECT_NE(w->message.find("(top: MsMpEng.exe 12.0%, Code.exe 4.0%, dwm.exe 1.0%)"),
+              std::string::npos)
+        << w->message;
     EXPECT_NE(eb::format_summary(r).find("highest during trials 18.0% (trial 2"), std::string::npos)
         << eb::format_summary(r);
 
     std::vector<eb::TrialResult> quiet{fake_trial(0, 4.0)};
-    quiet[0].during = eb::LoadSample{0.10, 0.8};  // not above the threshold
+    quiet[0].during = eb::LoadSample{0.10, 0.8, std::nullopt};  // not above the threshold
     eb::BenchmarkResult q = result_with_trials(std::move(quiet));
     eb::finish_result(q);
+    EXPECT_TRUE(q.background_load_samples.empty());
     for (const eb::ResultWarning& x : q.warnings) {
         if (x.code == "background_cpu_load_high")
             ADD_FAILURE() << x.message;

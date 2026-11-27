@@ -3,6 +3,12 @@
 
 #include <gtest/gtest.h>
 
+#include <windows.h>
+
+#include <algorithm>
+#include <atomic>
+#include <thread>
+
 #include "edgebench/benchmark.hpp"
 #include "edgebench/system_info.hpp"
 
@@ -157,6 +163,62 @@ TEST(CpuUtilization, LiveSampleIsARatio) {
     // A lower bound only: the sample never ends early, but a loaded machine can make
     // it end late by any amount.
     EXPECT_GE(s.sample_window_s, 0.045);
+}
+
+TEST(LoadAttribution, SharesByProcessOwnAndUnattributed) {
+    // total 1000 units over the window; busy 600.
+    const std::vector<eb::ProcessCpuTime> start = {
+        {0, "Idle", 5000},       {4, "System", 100},     {10, "svchost.exe", 50},
+        {11, "svchost.exe", 10}, {20, "MsMpEng.exe", 0}, {30, "edgebench.exe", 200},
+        {40, "quiet.exe", 7}};
+    const std::vector<eb::ProcessCpuTime> end = {
+        {0, "Idle", 5400},       {4, "System", 120},       {10, "svchost.exe", 90},
+        {11, "svchost.exe", 30}, {20, "MsMpEng.exe", 150}, {30, "edgebench.exe", 400},
+        {40, "quiet.exe", 7},    {50, "new.exe", 25}};  // new.exe started in the window
+    const eb::LoadAttribution a = eb::attribute_cpu_load(start, end, 600, 1000, 30, 3);
+    // Same-named processes are summed; the idle process and this process are not listed.
+    ASSERT_EQ(a.top_processes.size(), 3u);
+    EXPECT_EQ(a.top_processes[0], (eb::ProcessShare{"MsMpEng.exe", 0.15}));
+    EXPECT_EQ(a.top_processes[1], (eb::ProcessShare{"svchost.exe", 0.06}));
+    EXPECT_EQ(a.top_processes[2], (eb::ProcessShare{"new.exe", 0.025}));
+    EXPECT_DOUBLE_EQ(a.own_share, 0.2);
+    // attributed: 20 + 60 + 150 + 200 + 25 = 455 of 600 busy
+    EXPECT_DOUBLE_EQ(a.unattributed_share, 0.145);
+    EXPECT_TRUE(eb::attribute_cpu_load(start, end, 0, 0, 30, 3).top_processes.empty());
+}
+
+TEST(LoadAttribution, ProcessListIsReadableAndHoldsThisProcess) {
+    const auto processes = eb::query_all_process_cpu_times();
+    ASSERT_TRUE(processes);
+    const DWORD own = GetCurrentProcessId();
+    EXPECT_TRUE(std::any_of(processes->begin(), processes->end(),
+                            [own](const eb::ProcessCpuTime& p) { return p.pid == own; }));
+    EXPECT_GT(processes->size(), 10u);
+}
+
+// The measuring process's own CPU time is never background load: a thread of this
+// process spinning through the whole sample shows up as own_process_share, not in
+// the load (other test processes running in parallel may of course appear among
+// the top processes under their own names).
+TEST(LoadAttribution, OwnWorkIsNotBackgroundLoad) {
+    const eb::LoadProbe probe = eb::start_load_probe();
+    std::atomic<bool> stop{false};
+    std::thread spin([&stop] {
+        volatile double sink = 0;
+        while (!stop.load())
+            sink = sink + 1.0;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    stop = true;
+    spin.join();
+    const std::optional<eb::LoadSample> s = eb::finish_load_probe(probe);
+    ASSERT_TRUE(s);
+    ASSERT_TRUE(s->attribution);
+    const double one_core = 1.0 / std::thread::hardware_concurrency();
+    EXPECT_GE(s->attribution->own_share, 0.5 * one_core);  // the spinning thread
+    // The busy time is split into other processes, this process and the rest, so
+    // the load can never include the spinning thread.
+    EXPECT_LE(s->cpu_utilization_ratio + s->attribution->own_share, 1.0 + 1e-9);
 }
 
 TEST(IdleBeforeTrial, CooldownOrOneSecondBeforeTheFirstTrial) {
