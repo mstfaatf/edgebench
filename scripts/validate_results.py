@@ -832,13 +832,15 @@ def collect_files(paths: Iterable[Path]) -> list[Path]:
 
 
 def is_accuracy_document(path: Path) -> bool:
-    """An accuracy result (scripts/eval_accuracy.py), which has its own schema and validator."""
+    """An accuracy result (scripts/eval_accuracy.py) or a doctor report: each has its own schema
+    and validator."""
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
     return isinstance(doc, dict) and ("accuracy_schema_version" in doc
-                                      or "anomaly_schema_version" in doc)
+                                      or "anomaly_schema_version" in doc
+                                      or "doctor_schema_version" in doc)
 
 
 def make_output_safe() -> None:

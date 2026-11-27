@@ -1,6 +1,11 @@
 #include "test_runtime.hpp"
 
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+
 #include <algorithm>
+#include <cstdio>
 #include <memory>
 #include <stdexcept>
 
@@ -38,6 +43,24 @@ public:
 
 [[maybe_unused]] ::testing::Environment* const kReleaseSharedRuntime =
     ::testing::AddGlobalTestEnvironment(new ReleaseSharedRuntime);
+
+// A crash outside a test body (gtest reports those inside one itself), e.g. in
+// a global environment or while the process exits: print the exception code to
+// stderr, which ctest --output-on-failure shows, and let the process end with
+// that code (no Windows error dialog), so the ctest log names it.
+LONG WINAPI report_unhandled_exception(EXCEPTION_POINTERS* info) {
+    std::fprintf(stderr, "test process: unhandled exception 0x%08lX at %p\n",
+                 static_cast<unsigned long>(info->ExceptionRecord->ExceptionCode),
+                 info->ExceptionRecord->ExceptionAddress);
+    std::fflush(stderr);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+[[maybe_unused]] const bool kCrashReporting = [] {
+    SetErrorMode(SetErrorMode(0) | SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+    SetUnhandledExceptionFilter(report_unhandled_exception);
+    return true;
+}();
 
 }  // namespace
 

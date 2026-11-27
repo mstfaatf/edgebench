@@ -194,17 +194,23 @@ int run_command(const eb::RunConfig& config) {
 
 int doctor_command(const eb::DoctorOptions& options) {
     eb::install_interrupt_handler(eb::InterruptMode::exit_immediately);
-    const eb::DoctorReport report =
-        eb::run_doctor(std::chrono::milliseconds(options.load_sample_ms));
+    eb::DoctorConfig config;
+    config.load_sample = std::chrono::milliseconds(options.load_sample_ms);
+    config.ep_cache_dir = options.ep_cache_dir;
+    config.prune_cache = options.prune_cache;
+    config.quick = options.quick;
+    const eb::DoctorReport report = eb::run_doctor(config);
     if (options.json)
         std::printf("%s\n", eb::to_json(report).dump(2).c_str());
     else
         std::fputs(eb::format_text(report).c_str(), stdout);
     std::fflush(stdout);
-    // Warnings are part of the report (text or JSON) only; problems are also
+    // Warnings are part of the report (text or JSON) only; failed checks are also
     // printed to stderr, because they decide the exit code.
-    for (const eb::DoctorProblem& p : report.problems)
-        eb::print_error(p.code, p.message, p.hint);
+    for (const eb::DoctorCheck& c : report.checks) {
+        if (c.status == eb::CheckStatus::fail)
+            eb::print_error(c.code.value_or(c.name), c.name + ": " + c.summary, c.hint);
+    }
     return eb::to_int(report.exit_code);
 }
 

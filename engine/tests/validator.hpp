@@ -1,4 +1,4 @@
-// Running scripts/validate_results.py from the C++ tests.
+// Running scripts/validate_results.py and scripts/validate_doctor.py from the C++ tests.
 //
 // The validator needs the Python interpreter configured as EDGEBENCH_PYTHON with
 // jsonschema installed. When it is not available, tests that would validate a
@@ -23,5 +23,9 @@ ProcessResult run_validator(const std::filesystem::path& result);
 /// records the current test as skipped with the reason. Assertions made before
 /// or after still count: a failure elsewhere still fails the test.
 void validate_or_skip(const std::filesystem::path& result);
+
+/// scripts/validate_doctor.py on a doctor report (with --runner if `runner`):
+/// expects it to pass, or skips like validate_or_skip().
+void validate_doctor_report_or_skip(const std::filesystem::path& report, bool runner = false);
 
 }  // namespace edgebench::test

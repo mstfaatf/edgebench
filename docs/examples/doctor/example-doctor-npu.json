@@ -1,0 +1,455 @@
+{
+  "doctor_schema_version": "1.0.0",
+  "tool": {
+    "name": "edgebench",
+    "version": "0.1.0",
+    "git_commit": "0e964f9ff138587eeab6787f9c25589203a7a7e0",
+    "git_dirty": true,
+    "build_type": "Release",
+    "compiler": "MSVC 19.42.34435.0",
+    "target_arch": "arm64"
+  },
+  "versions": {
+    "onnxruntime": {
+      "pinned": "1.32.0",
+      "loaded": "1.32.0"
+    },
+    "qnn_ep": {
+      "pinned": "2.8.0",
+      "reported": "2.8.0"
+    },
+    "qairt_sdk": {
+      "pinned": "2.52.0",
+      "reported": "2.52.0"
+    }
+  },
+  "bundle_dir": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release",
+  "system": {
+    "os": {
+      "name": "Windows 11 Home",
+      "version": "25H2",
+      "build": "26200.9974",
+      "architecture": "arm64"
+    },
+    "process_architecture": "arm64",
+    "cpu": {
+      "name": "Snapdragon(R) X 10-core X1P64100 @ 3.40 GHz",
+      "physical_cores": 10,
+      "logical_processors": 10
+    },
+    "memory_total_bytes": 16757260288,
+    "device": {
+      "manufacturer": "Microsoft Corporation",
+      "model": "Microsoft Surface Laptop, 7th Edition"
+    },
+    "power": {
+      "source": "ac",
+      "power_mode": "Balanced",
+      "power_plan": "Balanced",
+      "battery_percent": 100,
+      "battery_saver": false
+    },
+    "load": {
+      "cpu_utilization_ratio": 0.07751937984496124,
+      "sample_window_s": 1.0193481
+    }
+  },
+  "checks": [
+    {
+      "name": "ort_bundle",
+      "status": "pass",
+      "summary": "onnxruntime 1.32.0 (C API 32) from the bundle, 2 files match their SHA256 pins, 4 ONNX Runtime / QNN modules loaded, all from the bundle",
+      "code": null,
+      "hint": null,
+      "exit_code": null,
+      "duration_ms": 78.4591,
+      "details": {
+        "library_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime.dll",
+        "load_check": "full_path_verified",
+        "version": "1.32.0",
+        "api_version": 32,
+        "required_version": "1.32.0",
+        "required_api_version": 32,
+        "files": [
+          {
+            "name": "onnxruntime.dll",
+            "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime.dll",
+            "present": true,
+            "size_bytes": 19053920,
+            "sha256": "d9db6113549a3bd1eae55dbcb96bd95ee1f35c2823f39a42972664abab6517d2",
+            "product_version": "1.32.0.20261112.3.fab30a4",
+            "file_version": "1.32.0.1112",
+            "pinned_sha256": "d9db6113549a3bd1eae55dbcb96bd95ee1f35c2823f39a42972664abab6517d2",
+            "pinned_size_bytes": 19053920,
+            "matches_pin": true
+          },
+          {
+            "name": "onnxruntime_providers_shared.dll",
+            "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_shared.dll",
+            "present": true,
+            "size_bytes": 21344,
+            "sha256": "a63690de2f89942e3e3c4dbb9ed77c6b5bfa56def6dc89bff0bdf120df9e5a6d",
+            "product_version": "1.32.0.20261112.3.fab30a4",
+            "file_version": "1.32.0.1112",
+            "pinned_sha256": "a63690de2f89942e3e3c4dbb9ed77c6b5bfa56def6dc89bff0bdf120df9e5a6d",
+            "pinned_size_bytes": 21344,
+            "matches_pin": true
+          }
+        ],
+        "loaded_modules": [
+          {
+            "name": "QnnSystem.dll",
+            "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnSystem.dll"
+          },
+          {
+            "name": "onnxruntime.dll",
+            "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime.dll"
+          },
+          {
+            "name": "onnxruntime_providers_qnn.dll",
+            "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll"
+          },
+          {
+            "name": "onnxruntime_providers_shared.dll",
+            "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_shared.dll"
+          }
+        ],
+        "modules_outside_bundle": [],
+        "process_emulated": false
+      }
+    },
+    {
+      "name": "qnn_bundle",
+      "status": "pass",
+      "summary": "7 QNN files match their SHA256 pins; the QNN execution provider registers",
+      "code": null,
+      "hint": null,
+      "exit_code": null,
+      "duration_ms": 168.5004,
+      "details": {
+        "files": [
+          {
+            "name": "onnxruntime_providers_qnn.dll",
+            "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll",
+            "present": true,
+            "size_bytes": 4041728,
+            "sha256": "5c0ce1527ec04a17b7a31ef3a05b9dd3876a507fd0bd0375b77935a6a0b15421",
+            "product_version": "2.8.0",
+            "file_version": "2.8.0.0",
+            "pinned_sha256": "5c0ce1527ec04a17b7a31ef3a05b9dd3876a507fd0bd0375b77935a6a0b15421",
+            "pinned_size_bytes": 4041728,
+            "matches_pin": true
+          },
+          {
+            "name": "QnnHtp.dll",
+            "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtp.dll",
+            "present": true,
+            "size_bytes": 4459728,
+            "sha256": "8fbcb76891dac08380bf70dda67ad5c2998e1fb6d9fdd96d850828e949a5a46d",
+            "product_version": "2.52.0.261104115025",
+            "file_version": "2.52.0.0",
+            "pinned_sha256": "8fbcb76891dac08380bf70dda67ad5c2998e1fb6d9fdd96d850828e949a5a46d",
+            "pinned_size_bytes": 4459728,
+            "matches_pin": true
+          },
+          {
+            "name": "QnnHtpPrepare.dll",
+            "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtpPrepare.dll",
+            "present": true,
+            "size_bytes": 94657232,
+            "sha256": "3e3ff22cf61132365b2e88abcdc765c5e0eecb7c37bda9bd71d1d7b03f88c39f",
+            "product_version": "2.52.0.261104115025",
+            "file_version": "2.52.0.0",
+            "pinned_sha256": "3e3ff22cf61132365b2e88abcdc765c5e0eecb7c37bda9bd71d1d7b03f88c39f",
+            "pinned_size_bytes": 94657232,
+            "matches_pin": true
+          },
+          {
+            "name": "QnnHtpV68Stub.dll",
+            "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtpV68Stub.dll",
+            "present": true,
+            "size_bytes": 582352,
+            "sha256": "099514e391dfc7d2e876b2f585aa29db4769e1e4bcf1bab28f453500a62262f7",
+            "product_version": "2.52.0.261104115025",
+            "file_version": "2.52.0.0",
+            "pinned_sha256": "099514e391dfc7d2e876b2f585aa29db4769e1e4bcf1bab28f453500a62262f7",
+            "pinned_size_bytes": 582352,
+            "matches_pin": true
+          },
+          {
+            "name": "QnnHtpV73Stub.dll",
+            "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtpV73Stub.dll",
+            "present": true,
+            "size_bytes": 600272,
+            "sha256": "54bfe8c94ba4ece08decaad64d2099ef95e08f79c36d2ea4341eaf5b6c1cc04f",
+            "product_version": "2.52.0.261104115025",
+            "file_version": "2.52.0.0",
+            "pinned_sha256": "54bfe8c94ba4ece08decaad64d2099ef95e08f79c36d2ea4341eaf5b6c1cc04f",
+            "pinned_size_bytes": 600272,
+            "matches_pin": true
+          },
+          {
+            "name": "QnnHtpV81Stub.dll",
+            "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnHtpV81Stub.dll",
+            "present": true,
+            "size_bytes": 600784,
+            "sha256": "a739cab9fe8af0c85138367812eb55d50ca6726bcedc16ee1d8dd28d68f32d51",
+            "product_version": "2.52.0.261104115025",
+            "file_version": "2.52.0.0",
+            "pinned_sha256": "a739cab9fe8af0c85138367812eb55d50ca6726bcedc16ee1d8dd28d68f32d51",
+            "pinned_size_bytes": 600784,
+            "matches_pin": true
+          },
+          {
+            "name": "QnnSystem.dll",
+            "path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\QnnSystem.dll",
+            "present": true,
+            "size_bytes": 3714768,
+            "sha256": "cba68638b80ded912a58425dd00bbb9c60b57fe84ec2395a5aaf47b1745794f1",
+            "product_version": "2.52.0.261104115025",
+            "file_version": "2.52.0.0",
+            "pinned_sha256": "cba68638b80ded912a58425dd00bbb9c60b57fe84ec2395a5aaf47b1745794f1",
+            "pinned_size_bytes": 3714768,
+            "matches_pin": true
+          }
+        ],
+        "registration": "ok",
+        "error": null
+      }
+    },
+    {
+      "name": "backend_versions",
+      "status": "pass",
+      "summary": "backend build v2.52.0.261104115025, SDK 2.52.0 (reported by the QNN EP before any session)",
+      "code": null,
+      "hint": null,
+      "exit_code": null,
+      "duration_ms": 291.5783,
+      "details": {
+        "backend_build": "v2.52.0.261104115025",
+        "sdk_version": "2.52.0",
+        "source": "qnn_ep_log_backend_build_id",
+        "pinned_sdk_version": "2.52.0",
+        "backend_file_product_version": "2.52.0.261104115025"
+      }
+    },
+    {
+      "name": "devices",
+      "status": "pass",
+      "summary": "3 EP devices; NPU for runs: QNNExecutionProvider NPU (ep vendor Qualcomm, vendor (unset), vendor_id 0x4d4f4351, device_id 0x41304430)",
+      "code": null,
+      "hint": null,
+      "exit_code": null,
+      "duration_ms": 0.023,
+      "details": {
+        "ep_devices": [
+          {
+            "ep_name": "CPUExecutionProvider",
+            "ep_vendor": "Microsoft",
+            "device_type": "CPU",
+            "vendor": "Qualcomm",
+            "vendor_id": 1297040209,
+            "device_id": 7,
+            "metadata": {
+              "Description": "Snapdragon(R) X 10-core X1P64100 @ 3.42 GHz"
+            },
+            "ep_metadata": {
+              "version": "1.32.0"
+            }
+          },
+          {
+            "ep_name": "QNNExecutionProvider",
+            "ep_vendor": "Qualcomm",
+            "device_type": "NPU",
+            "vendor": "",
+            "vendor_id": 1297040209,
+            "device_id": 1093682224,
+            "metadata": {
+              "LUID": "78645"
+            },
+            "ep_metadata": {
+              "library_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll",
+              "version": "2.8.0"
+            }
+          },
+          {
+            "ep_name": "QNNExecutionProvider",
+            "ep_vendor": "Qualcomm",
+            "device_type": "GPU",
+            "vendor": "",
+            "vendor_id": 1297040209,
+            "device_id": 909329200,
+            "metadata": {
+              "Description": "Qualcomm(R) Adreno(TM) X1-85 GPU",
+              "Discrete": "0",
+              "DxgiAdapterNumber": "0",
+              "DxgiHighPerformanceIndex": "0",
+              "DxgiVideoMemory": "128 MB",
+              "LUID": "77477"
+            },
+            "ep_metadata": {
+              "library_path": "C:\\dev\\edgebench\\build\\arm64-release\\bin\\Release\\onnxruntime_providers_qnn.dll",
+              "version": "2.8.0"
+            }
+          }
+        ],
+        "npu_selection": {
+          "status": "selected",
+          "method": "by_device_type",
+          "candidate_count": 1,
+          "device_index": 1,
+          "failure": null,
+          "message": null
+        }
+      }
+    },
+    {
+      "name": "npu_probe",
+      "status": "pass",
+      "summary": "strict NPU sessions, outputs bit-identical to the reference: npu_probe_int8.onnx (int8), npu_probe_fp32.onnx (fp16); every module from the bundle",
+      "code": null,
+      "hint": null,
+      "exit_code": null,
+      "duration_ms": 4316.3899,
+      "details": {
+        "probes": [
+          {
+            "model": "npu_probe_int8.onnx",
+            "compute_precision": "int8",
+            "strict": true,
+            "session_create_ms": 1888.0181,
+            "elements": 256,
+            "differing_elements": 0,
+            "max_abs_diff": 0.0,
+            "equal": true,
+            "error": null
+          },
+          {
+            "model": "npu_probe_fp32.onnx",
+            "compute_precision": "fp16",
+            "strict": true,
+            "session_create_ms": 2113.1603,
+            "elements": 256,
+            "differing_elements": 0,
+            "max_abs_diff": 0.0,
+            "equal": true,
+            "error": null
+          }
+        ],
+        "modules_outside_bundle": []
+      }
+    },
+    {
+      "name": "npu_context",
+      "status": "pass",
+      "summary": "built in 2090 ms, loaded in 419 ms, outputs equal; HTP arch v73",
+      "code": null,
+      "hint": null,
+      "exit_code": null,
+      "duration_ms": 2754.7136,
+      "details": {
+        "build_ms": 2089.9046,
+        "load_ms": 419.1409,
+        "outputs_equal": true,
+        "compatibility_info": "v2:6:2.52.0:5.52.0:73:0:0:0",
+        "htp_arch": "v73",
+        "verdict": null,
+        "verdict_note": "the QNN EP cannot rate compatibility info once a QNN session has existed in the process, which building the context needs",
+        "error": null,
+        "cleanup_error": null
+      }
+    },
+    {
+      "name": "ep_cache_dir",
+      "status": "pass",
+      "summary": "C:\\Users\\you\\AppData\\Local\\EdgeBench\\qnn-context: 4 entries, 19.1 MiB",
+      "code": null,
+      "hint": null,
+      "exit_code": null,
+      "duration_ms": 4.7205,
+      "details": {
+        "path": "C:\\Users\\you\\AppData\\Local\\EdgeBench\\qnn-context",
+        "exists": true,
+        "writable": true,
+        "entry_count": 4,
+        "stale_count": 0,
+        "pruned_count": 0,
+        "total_bytes": 20074988,
+        "environment_known": true,
+        "entries": [
+          {
+            "key_id": "28eb1b68924a82926761b2d75ff76cd6d379ad25efd85d8668329cf3966486cb",
+            "model_sha256": "622f0adcba586dfa787a712bd59d1d17bf590fa56a5c1ce980cd61ee03504ec2",
+            "context_model": "mobilenetv2_int8_b8_ctx.onnx",
+            "size_bytes": 4295642,
+            "stale_fields": [],
+            "pruned": false
+          },
+          {
+            "key_id": "359422e638b5c52e4d5727ef79884baec063f87bf5cfbce7e97778a9b8b5bafd",
+            "model_sha256": "d4a9e1f6ee6512a2cae1c1f032cff1ba284717bc54ee9d32a8d95dd9385f1a4e",
+            "context_model": "efficientnet_lite0_fp32_b1_ctx.onnx",
+            "size_bytes": 11737264,
+            "stale_fields": [],
+            "pruned": false
+          },
+          {
+            "key_id": "4c992b58713aa2b366f79050b031ed76721d7884b288030d07f5c35e1752b9f6",
+            "model_sha256": "197ffa4d0b301e864fbbf1674c47a4c3f6df17363b267c6d93d5b7bb01819b03",
+            "context_model": "mobilenetv2_int8_b1_ctx.onnx",
+            "size_bytes": 3955676,
+            "stale_fields": [],
+            "pruned": false
+          },
+          {
+            "key_id": "b9ee82ef69ba8265e01d28ea762b825623766932466a0b9985686d2ab2c01eae",
+            "model_sha256": "9ef48a4297e3d1d12e42cf39a285667e09343939c4edc9d4d81b0e14ddb3068a",
+            "context_model": "conv1d_autoencoder_int8_b1_ctx.onnx",
+            "size_bytes": 86406,
+            "stale_fields": [],
+            "pruned": false
+          }
+        ],
+        "directories_without_manifest": [],
+        "prune_requested": false,
+        "error": null
+      }
+    },
+    {
+      "name": "power",
+      "status": "warn",
+      "summary": "power mode is Balanced, not Best performance",
+      "code": "power_mode_not_best_performance",
+      "hint": "Set the power mode to Best performance (Settings > System > Power). Published latency runs require AC power and the Windows power mode Best performance.",
+      "exit_code": null,
+      "duration_ms": 0.0,
+      "details": {
+        "source": "ac",
+        "battery_percent": 100,
+        "battery_saver": false,
+        "power_plan": "Balanced",
+        "power_mode": "Balanced",
+        "power_mode_known": true
+      }
+    },
+    {
+      "name": "background_load",
+      "status": "pass",
+      "summary": "system-wide CPU load 7.8% over 1.0 s",
+      "code": null,
+      "hint": null,
+      "exit_code": null,
+      "duration_ms": 1019.4078,
+      "details": {
+        "cpu_utilization_ratio": 0.07751937984496124,
+        "sample_window_s": 1.0193481,
+        "threshold_ratio": 0.1
+      }
+    }
+  ],
+  "overall": {
+    "status": "warn",
+    "exit_code": 0
+  },
+  "duration_ms": 8673.0757
+}

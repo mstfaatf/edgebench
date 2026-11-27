@@ -1,0 +1,44 @@
+{
+  "pins_version": "1.0.0",
+  "description": "The ONNX Runtime and QNN execution provider binaries EdgeBench is built with: the archives scripts/fetch_deps.ps1 downloads and the files it extracts, by SHA256. CMake reads this file at configure time and builds the file pins into edgebench.exe, whose doctor command compares the bundle next to the executable with them.",
+  "onnxruntime": {
+    "version": "1.32.0",
+    "api_version": 32,
+    "archive": {
+      "url": "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.32.0/microsoft.ml.onnxruntime.1.32.0.nupkg",
+      "file": "microsoft.ml.onnxruntime.1.32.0.nupkg",
+      "sha256": "a9150bc2992cbbb6722070da9910e1ffa989a8bfc67bdd5bb8e745ca755641db"
+    },
+    "files": {
+      "arm64": [
+        {"name": "onnxruntime.dll", "size_bytes": 19053920, "sha256": "d9db6113549a3bd1eae55dbcb96bd95ee1f35c2823f39a42972664abab6517d2"},
+        {"name": "onnxruntime_providers_shared.dll", "size_bytes": 21344, "sha256": "a63690de2f89942e3e3c4dbb9ed77c6b5bfa56def6dc89bff0bdf120df9e5a6d"}
+      ],
+      "x64": [
+        {"name": "onnxruntime.dll", "size_bytes": 20602168, "sha256": "348c3d29d6995eee37e3451825eaddb7ea7400be3afda6ca2286b12bc775f042"},
+        {"name": "onnxruntime_providers_shared.dll", "size_bytes": 21816, "sha256": "6caf57ac07c9cf72fb4e73c5bb0fe156f02dd60bbbd7385530c9a5654f10f950"}
+      ]
+    }
+  },
+  "onnxruntime_qnn": {
+    "version": "2.8.0",
+    "qairt_sdk_version": "2.52.0",
+    "archive": {
+      "url": "https://github.com/onnxruntime/onnxruntime-qnn/releases/download/v2.8.0/onnxruntime-qnn-2.8.0-win-arm64.zip",
+      "file": "onnxruntime-qnn-2.8.0-win-arm64.zip",
+      "sha256": "c63ffed1567c241dab60ec2af2251f73bc68e38b86fa0a8ac833d1b14af7d2d4"
+    },
+    "files": {
+      "arm64": [
+        {"name": "onnxruntime_providers_qnn.dll", "size_bytes": 4041728, "sha256": "5c0ce1527ec04a17b7a31ef3a05b9dd3876a507fd0bd0375b77935a6a0b15421"},
+        {"name": "QnnHtp.dll", "size_bytes": 4459728, "sha256": "8fbcb76891dac08380bf70dda67ad5c2998e1fb6d9fdd96d850828e949a5a46d"},
+        {"name": "QnnHtpPrepare.dll", "size_bytes": 94657232, "sha256": "3e3ff22cf61132365b2e88abcdc765c5e0eecb7c37bda9bd71d1d7b03f88c39f"},
+        {"name": "QnnHtpV68Stub.dll", "size_bytes": 582352, "sha256": "099514e391dfc7d2e876b2f585aa29db4769e1e4bcf1bab28f453500a62262f7"},
+        {"name": "QnnHtpV73Stub.dll", "size_bytes": 600272, "sha256": "54bfe8c94ba4ece08decaad64d2099ef95e08f79c36d2ea4341eaf5b6c1cc04f"},
+        {"name": "QnnHtpV81Stub.dll", "size_bytes": 600784, "sha256": "a739cab9fe8af0c85138367812eb55d50ca6726bcedc16ee1d8dd28d68f32d51"},
+        {"name": "QnnSystem.dll", "size_bytes": 3714768, "sha256": "cba68638b80ded912a58425dd00bbb9c60b57fe84ec2395a5aaf47b1745794f1"}
+      ],
+      "x64": []
+    }
+  }
+}

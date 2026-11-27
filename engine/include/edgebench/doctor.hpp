@@ -1,92 +1,74 @@
-// `edgebench doctor`: checks the build, the system and the ONNX Runtime installation.
+// `edgebench doctor`: every check a user needs before trusting a run, each with a
+// pass / warn / fail / not_applicable verdict (doctor_checks.hpp), as text or as a
+// JSON document (schemas/doctor-report.v1.0.0.schema.json).
+//
+// The checks run in an order that respects what the QNN execution provider
+// allows: everything that asks the EP about compatibility info (the backend build
+// id query inside QnnProvider creation) happens before the first QNN session in
+// the process (see qnn_provider.hpp); the probe sessions come after that.
 #pragma once
 
 #include <chrono>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
-#include "edgebench/ep_devices.hpp"
+#include "edgebench/doctor_checks.hpp"
 #include "edgebench/exit_codes.hpp"
-#include "edgebench/npu_selection.hpp"
-#include "edgebench/ort_loader.hpp"
 #include "edgebench/system_info.hpp"
 #include "edgebench/version.hpp"
 
 namespace edgebench {
 
-/// Something that makes the installation unusable; sets a nonzero exit code.
-struct DoctorProblem {
-    std::string code;  // e.g. "dll_not_found", "module_outside_bundle"
-    std::string message;
-    std::string hint;  // how to fix it; may be empty
-    ExitCode exit_code = ExitCode::ort_load_failure;
+/// Version of the doctor report document (schemas/doctor-report.v<version>.schema.json).
+inline constexpr std::string_view kDoctorSchemaVersion = "1.0.0";
+
+struct DoctorConfig {
+    std::chrono::milliseconds load_sample{1000};        // 0: no background load sample
+    std::optional<std::filesystem::path> ep_cache_dir;  // default: default_ep_cache_dir()
+    bool prune_cache = false;  // delete stale cache entries (manifest-only deletion)
+    /// Skip what needs the NPU backend (backend_versions, npu_probe, npu_context:
+    /// reported not_applicable): about 1 s instead of about 8 s on an NPU machine.
+    bool quick = false;
 };
 
-/// Something that distorts benchmarks but does not fail the check.
-struct DoctorWarning {
-    std::string code;  // e.g. "battery_power", "background_cpu_load_high"
-    std::string message;
-    std::string hint;
-};
+/// The summary of a check that --quick skipped.
+inline constexpr std::string_view kSkippedByQuick = "skipped (--quick)";
 
-struct ModuleCheck {
-    LoadedModule module;
-    bool inside_bundle = false;
+/// Versions the report names at the top: pinned (cmake/bundle-pins.json) and as
+/// found at run time (null if not found).
+struct DoctorVersions {
+    std::string onnxruntime_pinned;
+    std::optional<std::string> onnxruntime_loaded;
+    std::string qnn_ep_pinned;
+    std::optional<std::string> qnn_ep_reported;  // EP device metadata
+    std::string qairt_sdk_pinned;
+    std::optional<std::string> qairt_sdk_reported;  // backend build id
+    bool qnn_in_build = false;
 };
-
-/// The QNN execution provider: the bundled plugin library, its registration, and
-/// the device that NPU runs would use.
-struct QnnEpCheck {
-    enum class Registration {
-        not_attempted,  // ONNX Runtime could not be loaded
-        not_bundled,    // CPU-only build: the plugin is not part of it
-        ok,
-        failed,  // see error_kind and error_message
-    };
-    std::filesystem::path library_path;
-    bool bundled = false;  // the library file exists
-    Registration registration = Registration::not_attempted;
-    std::optional<std::string> error_kind;
-    std::string error_message;
-    std::optional<std::string> ep_version;  // "version" in the EP metadata of its devices
-    std::optional<NpuSelection> npu;        // set when the registration succeeded
-    std::optional<EpDeviceInfo> npu_device;
-};
-
-std::string_view to_string(QnnEpCheck::Registration registration);
 
 struct DoctorReport {
     BuildInfo build;
     SystemInfo system;
     std::filesystem::path bundle_dir;  // directory of the executable
-    OrtLoadResult onnxruntime;
-    std::vector<ModuleCheck> modules;  // every ORT/QNN module in the process
-    QnnEpCheck qnn;
-    std::optional<std::vector<EpDeviceInfo>> ep_devices;  // empty if ORT is not loaded
-    std::vector<DoctorProblem> problems;
-    std::vector<DoctorWarning> warnings;  // noteworthy but not failures (e.g. emulation)
+    DoctorVersions versions;
+    std::vector<DoctorCheck> checks;  // in kDoctorCheckNames order
+    CheckStatus status = CheckStatus::pass;
     ExitCode exit_code = ExitCode::success;
+    double duration_ms = 0;
 };
 
-/// Warnings about the system state that distorts timings: battery power, battery
-/// saver, background CPU load over 10%, an unknown power mode, emulation.
-std::vector<DoctorWarning> system_state_warnings(const SystemInfo& system);
+/// Runs every check (doctor_checks.hpp describes each one).
+DoctorReport run_doctor(const DoctorConfig& config);
 
-/// Runs every check. Sections that do not need ONNX Runtime are filled in even
-/// when it cannot be loaded. In builds that bundle the QNN execution provider, a
-/// missing or unregistrable plugin is a problem (exit code 4); no selectable NPU
-/// is a warning only (CPU runs still work), coded with the selection failure kind.
-DoctorReport run_doctor(std::chrono::milliseconds load_sample = std::chrono::seconds(1));
-
-/// Human-readable report (no color codes).
+/// Human-readable report: one line per check, then its details and hints.
 std::string format_text(const DoctorReport& report);
 
-/// Machine-readable report. `tool`, `system` and `runtime` use the results
-/// schema's field names where they overlap.
+/// The doctor report document.
 nlohmann::ordered_json to_json(const DoctorReport& report);
 
 }  // namespace edgebench

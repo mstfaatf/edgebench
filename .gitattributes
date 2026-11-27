@@ -46,6 +46,7 @@ LICENSE         text eol=lf
 *.npy           binary
 *.npz           binary
 *.bin           binary
+*.f32           binary
 *.pt            binary
 *.pth           binary
 *.h5            binary

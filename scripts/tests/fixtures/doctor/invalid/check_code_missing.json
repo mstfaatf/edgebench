@@ -1,0 +1,11 @@
+{
+  "description": "A warning that does not say what is wrong.",
+  "base": "docs/examples/doctor/example-doctor-npu.json",
+  "set": {
+    "/checks/7/code": null
+  },
+  "expect": {
+    "code": "check_code_missing",
+    "path": "/checks/7/code"
+  }
+}

@@ -16,6 +16,16 @@ bytes each):
   session is refused, and without strict mode Det runs on the CPU between two QNN
   partitions.
 
+Two more go to engine/resources/doctor/, where `edgebench doctor` embeds them
+for its NPU probe:
+
+- npu_probe_fp32.onnx: input "x" float32 [1, 3, 8, 8] -> Conv (4 filters 3x3, pads 1,
+  bias) -> Relu -> output "y" float32 [1, 4, 8, 8].
+- npu_probe_int8.onnx: the same convolution as a static INT8 QDQ model: uint8
+  activations (input scale 1/255, output scale 0.05, zero point 0), symmetric int8
+  weights (scale 1/64, every FP32 weight is an exact multiple of it) and an int32
+  bias, as the QNN HTP backend runs them.
+
 Weights are fixed constants, so the output is byte-identical on every run.
 Only needs the onnx package (no ONNX Runtime), so it runs on any platform:
 
@@ -114,6 +124,77 @@ def npu_unsupported_op() -> onnx.ModelProto:
     return _model(graph)
 
 
+# The probe convolution: 4 filters of 3x3x3. Every weight is k/64 for an integer
+# k in [-24, 24], so it is exact in float32 and in int8 with scale 1/64.
+PROBE_SHAPE = [1, 3, 8, 8]
+PROBE_OUT_SHAPE = [1, 4, 8, 8]
+PROBE_WEIGHT_INT = [((i % 7) - 3) * 8 for i in range(4 * 3 * 3 * 3)]
+PROBE_WEIGHT_SCALE = 1.0 / 64.0
+PROBE_BIAS = [-0.125, 0.0, 0.125, 0.25]
+PROBE_INPUT_SCALE = 1.0 / 255.0
+PROBE_OUTPUT_SCALE = 0.05
+
+
+def _probe_graph(name: str, nodes: list, initializers: list) -> onnx.ModelProto:
+    graph = helper.make_graph(
+        nodes, name,
+        [helper.make_tensor_value_info("x", TensorProto.FLOAT, PROBE_SHAPE)],
+        [helper.make_tensor_value_info("y", TensorProto.FLOAT, PROBE_OUT_SHAPE)],
+        initializer=initializers)
+    return _model(graph)
+
+
+def npu_probe_fp32() -> onnx.ModelProto:
+    weights = helper.make_tensor("W", TensorProto.FLOAT, [4, 3, 3, 3],
+                                 [k * PROBE_WEIGHT_SCALE for k in PROBE_WEIGHT_INT])
+    bias = helper.make_tensor("B", TensorProto.FLOAT, [4], PROBE_BIAS)
+    nodes = [
+        helper.make_node("Conv", ["x", "W", "B"], ["c"], name="conv", pads=[1, 1, 1, 1]),
+        helper.make_node("Relu", ["c"], ["y"], name="relu"),
+    ]
+    return _probe_graph("npu_probe_fp32", nodes, [weights, bias])
+
+
+def npu_probe_int8() -> onnx.ModelProto:
+    bias_scale = PROBE_INPUT_SCALE * PROBE_WEIGHT_SCALE
+    inits = [
+        helper.make_tensor("x_scale", TensorProto.FLOAT, [], [PROBE_INPUT_SCALE]),
+        helper.make_tensor("x_zero_point", TensorProto.UINT8, [], [0]),
+        helper.make_tensor("W_quantized", TensorProto.INT8, [4, 3, 3, 3], PROBE_WEIGHT_INT),
+        helper.make_tensor("W_scale", TensorProto.FLOAT, [], [PROBE_WEIGHT_SCALE]),
+        helper.make_tensor("W_zero_point", TensorProto.INT8, [], [0]),
+        helper.make_tensor("B_quantized", TensorProto.INT32, [4],
+                           [round(b / bias_scale) for b in PROBE_BIAS]),
+        helper.make_tensor("B_scale", TensorProto.FLOAT, [], [bias_scale]),
+        helper.make_tensor("B_zero_point", TensorProto.INT32, [], [0]),
+        helper.make_tensor("y_scale", TensorProto.FLOAT, [], [PROBE_OUTPUT_SCALE]),
+        helper.make_tensor("y_zero_point", TensorProto.UINT8, [], [0]),
+    ]
+    nodes = [
+        helper.make_node("QuantizeLinear", ["x", "x_scale", "x_zero_point"], ["x_q"],
+                         name="x_quantize"),
+        helper.make_node("DequantizeLinear", ["x_q", "x_scale", "x_zero_point"], ["x_dq"],
+                         name="x_dequantize"),
+        helper.make_node("DequantizeLinear", ["W_quantized", "W_scale", "W_zero_point"], ["W"],
+                         name="W_dequantize"),
+        helper.make_node("DequantizeLinear", ["B_quantized", "B_scale", "B_zero_point"], ["B"],
+                         name="B_dequantize"),
+        helper.make_node("Conv", ["x_dq", "W", "B"], ["c"], name="conv", pads=[1, 1, 1, 1]),
+        helper.make_node("Relu", ["c"], ["r"], name="relu"),
+        helper.make_node("QuantizeLinear", ["r", "y_scale", "y_zero_point"], ["y_q"],
+                         name="y_quantize"),
+        helper.make_node("DequantizeLinear", ["y_q", "y_scale", "y_zero_point"], ["y"],
+                         name="y_dequantize"),
+    ]
+    return _probe_graph("npu_probe_int8", nodes, inits)
+
+
+PROBE_DIR = REPO_ROOT / "engine" / "resources" / "doctor"
+PROBE_MODELS = {
+    "npu_probe_fp32.onnx": npu_probe_fp32,
+    "npu_probe_int8.onnx": npu_probe_int8,
+}
+
 MODELS = {
     "fixed_float32.onnx": lambda: dense_relu(1),
     "dynamic_batch.onnx": lambda: dense_relu("batch"),
@@ -127,12 +208,14 @@ MODELS = {
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--output-dir", type=Path, default=OUT_DIR)
+    parser.add_argument("--probe-dir", type=Path, default=PROBE_DIR)
     args = parser.parse_args(argv)
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    for name, build in MODELS.items():
-        path = args.output_dir / name
-        path.write_bytes(build().SerializeToString())
-        print(f"wrote {path} ({path.stat().st_size} bytes)")
+    for directory, models in ((args.output_dir, MODELS), (args.probe_dir, PROBE_MODELS)):
+        directory.mkdir(parents=True, exist_ok=True)
+        for name, build in models.items():
+            path = directory / name
+            path.write_bytes(build().SerializeToString())
+            print(f"wrote {path} ({path.stat().st_size} bytes)")
     return 0
 
 

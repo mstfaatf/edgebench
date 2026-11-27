@@ -1,0 +1,11 @@
+{
+  "description": "Overall pass although a check warned.",
+  "base": "docs/examples/doctor/example-doctor-npu.json",
+  "set": {
+    "/overall/status": "pass"
+  },
+  "expect": {
+    "code": "overall_status_mismatch",
+    "path": "/overall/status"
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mstfaatf/edgebench/schemas/doctor-report.v1.0.0.schema.json",
+  "title": "EdgeBench doctor report",
+  "description": "What `edgebench doctor --json` prints: the checks a user runs before trusting an EdgeBench run, each with a pass / warn / fail / not_applicable verdict. See docs/cli.md, `edgebench doctor`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["doctor_schema_version", "tool", "versions", "bundle_dir", "system", "checks", "overall", "duration_ms"],
+  "properties": {
+    "doctor_schema_version": {"const": "1.0.0"},
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "git_commit", "git_dirty", "build_type", "compiler", "target_arch"],
+      "properties": {
+        "name": {"const": "edgebench"},
+        "version": {"type": "string", "minLength": 1},
+        "git_commit": {"type": ["string", "null"]},
+        "git_dirty": {"type": ["boolean", "null"]},
+        "build_type": {"type": ["string", "null"]},
+        "compiler": {"type": "string"},
+        "target_arch": {"enum": ["arm64", "x64"]}
+      }
+    },
+    "versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["onnxruntime", "qnn_ep", "qairt_sdk"],
+      "properties": {
+        "onnxruntime": {"$ref": "#/$defs/version"},
+        "qnn_ep": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/reportedVersion"}], "description": "Null in builds without the QNN execution provider. reported: the EP's device metadata."},
+        "qairt_sdk": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/reportedVersion"}], "description": "pinned: what the QNN EP release declares; reported: from the backend build id."}
+      }
+    },
+    "bundle_dir": {"type": "string", "minLength": 1},
+    "system": {"type": "object", "description": "Operating system, CPU, memory, device, power and the load sample; the field names of the results schema's system block."},
+    "checks": {
+      "type": "array",
+      "minItems": 9,
+      "maxItems": 9,
+      "items": {"$ref": "#/$defs/check"},
+      "description": "Always these nine checks, in this order: ort_bundle, qnn_bundle, backend_versions, devices, npu_probe, npu_context, ep_cache_dir, power, background_load."
+    },
+    "overall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "exit_code"],
+      "properties": {
+        "status": {"enum": ["pass", "warn", "fail"], "description": "fail if a check failed, else warn if a check warned, else pass."},
+        "exit_code": {"type": "integer", "minimum": 0, "description": "0 unless a check failed; then the exit code of the first failing check."}
+      }
+    },
+    "duration_ms": {"type": "number", "minimum": 0}
+  },
+  "$defs": {
+    "version": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pinned", "loaded"],
+      "properties": {"pinned": {"type": "string"}, "loaded": {"type": ["string", "null"]}}
+    },
+    "reportedVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pinned", "reported"],
+      "properties": {"pinned": {"type": "string"}, "reported": {"type": ["string", "null"]}}
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "status", "summary", "code", "hint", "exit_code", "duration_ms", "details"],
+      "properties": {
+        "name": {"enum": ["ort_bundle", "qnn_bundle", "backend_versions", "devices", "npu_probe", "npu_context", "ep_cache_dir", "power", "background_load"]},
+        "status": {"enum": ["pass", "warn", "fail", "not_applicable"]},
+        "summary": {"type": "string", "minLength": 1},
+        "code": {"type": ["string", "null"], "description": "What is wrong (warn and fail)."},
+        "hint": {"type": ["string", "null"], "description": "What to do about it."},
+        "exit_code": {"type": ["integer", "null"], "minimum": 1, "description": "fail only: the exit code `edgebench run` gives for the same problem."},
+        "duration_ms": {"type": "number", "minimum": 0},
+        "details": {"type": "object"}
+      },
+      "if": {"properties": {"status": {"const": "fail"}}},
+      "then": {"properties": {"exit_code": {"type": "integer"}, "code": {"type": "string"}}},
+      "else": {"properties": {"exit_code": {"type": "null"}}}
+    }
+  }
+}

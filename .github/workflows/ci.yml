@@ -54,9 +54,13 @@ jobs:
           scripts/tests/test_autoencoder_pipeline.py
           scripts/tests/test_anomaly_eval.py
           scripts/tests/test_doc_numbers.py
+          scripts/tests/test_validate_doctor.py
 
       - name: Validate example and published results
         run: python scripts/validate_results.py --strict docs/examples benchmarks/results/published
+
+      - name: Validate example doctor reports
+        run: python scripts/validate_doctor.py docs/examples/doctor
 
       - name: Validate published accuracy results
         run: python scripts/validate_accuracy.py benchmarks/results/published/accuracy
@@ -114,7 +118,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ matrix.third_party }}
-          key: third-party-${{ matrix.arch }}-${{ hashFiles('scripts/fetch_deps.ps1') }}
+          key: third-party-${{ matrix.arch }}-${{ hashFiles('scripts/fetch_deps.ps1', 'cmake/bundle-pins.json') }}
 
       - name: Cache CMake downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -142,7 +146,7 @@ jobs:
         if: matrix.arch == 'arm64'
         shell: pwsh
         run: |
-          $lines = ctest --preset ${{ matrix.preset }} -L npu --no-tests=error --verbose 2>&1
+          $lines = ctest --preset ${{ matrix.preset }} -L npu --no-tests=error --verbose --output-on-failure 2>&1
           $code = $LASTEXITCODE
           $lines | Write-Output
           if ($code -ne 0) { exit $code }
@@ -153,6 +157,24 @@ jobs:
             Write-Error "expected every npu test to be skipped on a runner without an NPU: $skipped of $total skipped"
             exit 1
           }
+
+      # The full doctor on a machine without an NPU: nothing may fail, the NPU
+      # checks must come out not_applicable or warn, and the exit code must be 0.
+      - name: Doctor (no failures on a runner)
+        shell: pwsh
+        run: |
+          $exe = "build/${{ matrix.configure_preset }}/bin/Release/edgebench.exe"
+          $report = "$env:RUNNER_TEMP\doctor.json"
+          & $exe doctor --json | Out-File -Encoding utf8 $report
+          $code = $LASTEXITCODE
+          Get-Content $report | Write-Output
+          & $exe doctor --load-sample-ms 0
+          & "${{ env.EDGEBENCH_CI_PYTHON }}" scripts/validate_doctor.py --runner $report
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          if ($code -ne 0) { Write-Error "edgebench doctor exited with $code"; exit 1 }
+          $statuses = (Get-Content $report -Raw | ConvertFrom-Json).checks |
+            ForEach-Object { "$($_.name) $($_.status)" }
+          "doctor: $($statuses -join ', ')" >> $env:GITHUB_STEP_SUMMARY
 
       - name: Upload test log
         if: failure()
@@ -191,7 +213,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: third_party/onnxruntime-x64
-          key: third-party-x64-${{ hashFiles('scripts/fetch_deps.ps1') }}
+          key: third-party-x64-${{ hashFiles('scripts/fetch_deps.ps1', 'cmake/bundle-pins.json') }}
 
       - name: Cache CMake downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

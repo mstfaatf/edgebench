@@ -300,3 +300,13 @@ The timing, statistics and export code only use `Provider::describe()` and the
 - `dry_run.hpp`: `run --dry-run`.
 - `run_identity.hpp`: run IDs, RFC 3339 timestamps and the file stamp
   (`YYYYmmddTHHMMSS.mmmZ`).
+- `doctor.hpp`, `doctor_checks.hpp`: `edgebench doctor`. `doctor.cpp` gathers the
+  facts (files, versions, devices, probe sessions, the cache directory, the
+  system state) and `doctor_checks.cpp` turns each set of facts into a pass /
+  warn / fail / not_applicable verdict with the exit code `run` gives for the same
+  failure: pure functions, unit-tested with fakes. The gathering order follows the
+  QNN EP's constraint above: the NPU provider is created (and with it the
+  session-free backend query) before the first probe session. The probe models
+  and expected outputs (`engine/resources/doctor/`) and the bundle pins
+  (`cmake/bundle-pins.json`) are compiled into the executable as generated
+  headers (`cmake/EmbedFiles.cmake`, `cmake/BundlePins.cmake`).

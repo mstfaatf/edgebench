@@ -38,6 +38,7 @@ models/*
 *.keras
 *.bin
 !**/tests/fixtures/**
+!engine/resources/**
 !models/sources/**
 
 # Scratch benchmark results (published runs live in benchmarks/results/published/)

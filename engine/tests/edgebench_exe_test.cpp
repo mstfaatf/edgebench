@@ -10,8 +10,13 @@
 
 #include <fstream>
 #include <regex>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 #include "edgebench/cli.hpp"
+#include "edgebench/doctor.hpp"
+#include "edgebench/ep_context_cache.hpp"
 #include "edgebench/exit_codes.hpp"
 #include "edgebench/npu_selection.hpp"
 #include "edgebench/ort_loader.hpp"
@@ -79,90 +84,106 @@ struct IsolatedExe {
     }
 };
 
-// `doctor` could not load ONNX Runtime: exit 4, the error kind on stderr, and the
-// sections that do not need ONNX Runtime still on stdout.
+// `doctor` could not load ONNX Runtime: exit 4, the check and the error kind on
+// stderr, and the report still on stdout.
 void expect_doctor_load_failure(const ProcessResult& r, std::string_view kind) {
     expect_no_crash(r);
     EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
-    EXPECT_TRUE(contains(r.err, "error: [" + std::string(kind) + "]")) << describe(r);
-    EXPECT_TRUE(contains(r.out, "FAILED (" + std::string(kind) + ")")) << describe(r);
-    EXPECT_TRUE(contains(r.out, "\nSystem\n")) << describe(r);
+    EXPECT_TRUE(contains(r.err, "error: [" + std::string(kind) + "] ort_bundle: ")) << describe(r);
+    EXPECT_TRUE(contains(r.out, "FAIL  ort_bundle")) << describe(r);
+    EXPECT_TRUE(contains(r.out, "[" + std::string(kind) + "] exit code 4")) << describe(r);
     EXPECT_TRUE(contains(r.out, "Result: FAILED (exit 4, ort_load_failure)")) << describe(r);
+}
+
+// The check named `name` of a doctor --json report.
+const json& doctor_check(const json& report, std::string_view name) {
+    for (const json& c : report.at("checks"))
+        if (c.at("name").get<std::string>() == name)
+            return c;
+    throw std::runtime_error("no check " + std::string(name));
+}
+
+// stderr of a doctor run that failed nothing: no error lines (the QNN EP may write
+// its own diagnostics there).
+void expect_no_doctor_errors(const ProcessResult& r) {
+    EXPECT_FALSE(contains(r.err, "error: [")) << describe(r);
 }
 
 }  // namespace
 
 // --------------------------------------------------------------------------- doctor
+//
+// These run `doctor --quick`: the checks that use the NPU backend run only in the
+// DoctorNpu suite below, which holds the NPU test lock.
 
 TEST(Doctor, HappyPathReportsBundledOnnxRuntime) {
-    const ProcessResult r = run_process(kEdgebenchExe, {L"doctor", L"--load-sample-ms", L"0"},
-                                        kEdgebenchExe.parent_path());
+    const ProcessResult r =
+        run_process(kEdgebenchExe, {L"doctor", L"--quick", L"--load-sample-ms", L"0"},
+                    kEdgebenchExe.parent_path());
     expect_no_crash(r);
     ASSERT_EQ(r.exit_code, 0u) << describe(r);
-    // Warnings (e.g. process_emulated for an x64 build on ARM64 Windows) appear once,
-    // in the report on stdout; stderr carries only problems, and there are none.
-    EXPECT_TRUE(r.err.empty()) << describe(r);
-    if (eb::query_system_info().emulated())
-        EXPECT_TRUE(contains(r.out, "warning: [process_emulated]")) << describe(r);
+    expect_no_doctor_errors(r);
     const std::string expected(eb::expected_onnxruntime_version());
-    EXPECT_TRUE(contains(r.out, expected + " (C API " + std::to_string(ORT_API_VERSION) + ")"))
+    EXPECT_TRUE(contains(r.out, "ONNX Runtime " + expected + " (pinned " + expected + ")"))
         << r.out;
-    EXPECT_TRUE(contains(r.out, "full_path_verified")) << r.out;
-    EXPECT_TRUE(contains(r.out, eb::path_to_utf8(kEdgebenchExe.parent_path() / "onnxruntime.dll")))
+    // PASS natively; WARN (process_emulated) for an x64 build on ARM64 Windows.
+    const std::string status = eb::query_system_info().emulated() ? "WARN" : "PASS";
+    EXPECT_TRUE(contains(r.out, status + "  ort_bundle        onnxruntime " + expected +
+                                    " (C API " + std::to_string(ORT_API_VERSION) +
+                                    ") from the bundle"))
         << r.out;
-    EXPECT_TRUE(contains(r.out, "CPUExecutionProvider")) << r.out;
+    EXPECT_TRUE(contains(r.out, "match their SHA256 pins")) << r.out;
+    if (eb::query_system_info().emulated())
+        EXPECT_TRUE(contains(r.out, "[process_emulated]")) << r.out;
+    for (const char* name : {"qnn_bundle", "backend_versions", "devices", "npu_probe",
+                             "npu_context", "ep_cache_dir", "power", "background_load"})
+        EXPECT_TRUE(contains(r.out, std::string(name) + " ")) << name << "\n" << r.out;
     EXPECT_TRUE(contains(r.out, "Result: OK")) << r.out;
-    EXPECT_FALSE(contains(r.out, "OUTSIDE")) << r.out;
 }
 
-TEST(Doctor, JsonOutputParses) {
+TEST(Doctor, JsonReportFollowsTheSchema) {
+    TempDir out;
     const ProcessResult r =
-        run_process(kEdgebenchExe, {L"doctor", L"--json", L"--load-sample-ms", L"100"},
+        run_process(kEdgebenchExe, {L"doctor", L"--json", L"--quick", L"--load-sample-ms", L"100"},
                     kEdgebenchExe.parent_path());
     expect_no_crash(r);
     ASSERT_EQ(r.exit_code, 0u) << describe(r);
     const json j = json::parse(r.out);
-    EXPECT_EQ(j.at("result"), "ok");
-    EXPECT_EQ(j.at("exit_code"), 0);
+    EXPECT_EQ(j.at("doctor_schema_version"), "1.0.0");
     EXPECT_EQ(j.at("tool").at("version").get<std::string>(), eb::version());
-    EXPECT_EQ(j.at("tool").at("implementation"), "cpp");
-    EXPECT_EQ(j.at("results_schema_version").get<std::string>(), eb::results_schema_version());
-    const json& ort = j.at("runtime").at("onnxruntime");
-    EXPECT_EQ(ort.at("version").get<std::string>(), eb::expected_onnxruntime_version());
-    EXPECT_EQ(ort.at("api_version"), ORT_API_VERSION);
-    EXPECT_EQ(ort.at("load_check"), "full_path_verified");
-    for (const json& m : j.at("runtime").at("loaded_modules"))
-        EXPECT_TRUE(m.at("inside_bundle").get<bool>()) << m.dump();
-    bool cpu_ep = false;
-    for (const json& d : j.at("runtime").at("ep_devices"))
-        cpu_ep |= d.at("ep_name") == "CPUExecutionProvider" && d.at("device_type") == "CPU";
-    EXPECT_TRUE(cpu_ep) << j.at("runtime").at("ep_devices").dump();
-    const bool emulated = eb::query_system_info().emulated();
-    EXPECT_EQ(
-        j.at("system").at("process_architecture") == j.at("system").at("os").at("architecture"),
-        !emulated);
-    EXPECT_EQ(j.at("process_emulated"), emulated);
-    const json& power = j.at("system").at("power");
-    for (const char* key :
-         {"source", "power_mode", "power_plan", "battery_percent", "battery_saver"})
-        EXPECT_TRUE(power.contains(key)) << key;
-    EXPECT_FALSE(power.at("power_mode").is_null());
-    EXPECT_FALSE(power.at("power_plan").is_null());
-    // The structure of the load sample only: how long the sample took depends on
-    // the machine's load (CpuUtilization.LiveSampleIsARatio covers the window).
-    const json& load = j.at("system").at("load");
-    ASSERT_TRUE(load.at("sample_window_s").is_number()) << load.dump();
-    EXPECT_GT(load.at("sample_window_s").get<double>(), 0.0);
-    ASSERT_TRUE(load.at("cpu_utilization_ratio").is_number()) << load.dump();
-    EXPECT_GE(load.at("cpu_utilization_ratio").get<double>(), 0.0);
-    EXPECT_LE(load.at("cpu_utilization_ratio").get<double>(), 1.0);
-    EXPECT_FALSE(j.at("system").at("os").at("name").get<std::string>().empty());
+    EXPECT_EQ(j.at("versions").at("onnxruntime").at("loaded").get<std::string>(),
+              eb::expected_onnxruntime_version());
+    std::vector<std::string> names;
+    for (const json& c : j.at("checks"))
+        names.push_back(c.at("name"));
+    EXPECT_EQ(names, (std::vector<std::string>{"ort_bundle", "qnn_bundle", "backend_versions",
+                                               "devices", "npu_probe", "npu_context",
+                                               "ep_cache_dir", "power", "background_load"}));
+    const json& ort = doctor_check(j, "ort_bundle");
+    EXPECT_NE(ort.at("status"), "fail") << ort.dump(2);
+    for (const json& f : ort.at("details").at("files"))
+        EXPECT_TRUE(f.at("matches_pin").get<bool>()) << f.dump();
+    EXPECT_TRUE(ort.at("details").at("modules_outside_bundle").empty());
+    EXPECT_EQ(doctor_check(j, "qnn_bundle").at("status"),
+              eb::qnn_ep_in_build() ? "pass" : "not_applicable");
+    // --quick: the checks that need the NPU are skipped, and say so.
+    for (const char* name : {"backend_versions", "npu_probe", "npu_context"}) {
+        const json& c = doctor_check(j, name);
+        EXPECT_EQ(c.at("status"), "not_applicable") << c.dump(2);
+        if (eb::qnn_ep_in_build() && doctor_check(j, "devices").at("status") == "pass")
+            EXPECT_EQ(c.at("summary"), std::string(eb::kSkippedByQuick)) << c.dump(2);
+    }
+    const json& load = doctor_check(j, "background_load");
+    ASSERT_TRUE(load.at("details").at("cpu_utilization_ratio").is_number()) << load.dump();
+    EXPECT_EQ(j.at("overall").at("exit_code"), 0);
+    std::ofstream(out.path() / "doctor.json") << r.out;
+    eb::test::validate_doctor_report_or_skip(out.path() / "doctor.json");
 }
 
 TEST(Doctor, FromAnotherWorkingDirectory) {
     TempDir cwd;
     const ProcessResult r =
-        run_process(kEdgebenchExe, {L"doctor", L"--load-sample-ms", L"0"}, cwd.path());
+        run_process(kEdgebenchExe, {L"doctor", L"--quick", L"--load-sample-ms", L"0"}, cwd.path());
     expect_no_crash(r);
     EXPECT_EQ(r.exit_code, 0u) << describe(r);
 }
@@ -184,11 +205,17 @@ TEST(Doctor, MissingDllJson) {
     expect_no_crash(r);
     EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
     const json j = json::parse(r.out);
-    EXPECT_EQ(j.at("result"), "failed");
-    EXPECT_EQ(j.at("onnxruntime_load").at("error_kind"), "dll_not_found");
-    EXPECT_TRUE(j.at("runtime").at("onnxruntime").is_null());
-    EXPECT_TRUE(j.at("runtime").at("ep_devices").is_null());
+    EXPECT_EQ(j.at("overall").at("status"), "fail");
+    EXPECT_EQ(j.at("overall").at("exit_code"), 4);
+    const json& ort = doctor_check(j, "ort_bundle");
+    EXPECT_EQ(ort.at("status"), "fail");
+    EXPECT_EQ(ort.at("code"), "dll_not_found");
+    EXPECT_EQ(ort.at("exit_code"), 4);
+    EXPECT_TRUE(j.at("versions").at("onnxruntime").at("loaded").is_null());
     EXPECT_FALSE(j.at("system").at("cpu").at("name").is_null());  // still reported
+    TempDir out;
+    std::ofstream(out.path() / "doctor.json") << r.out;
+    eb::test::validate_doctor_report_or_skip(out.path() / "doctor.json");
 }
 
 TEST(Doctor, MissingDllIgnoresWorkingDirectoryAndPath) {
@@ -216,7 +243,6 @@ TEST(Doctor, WrongDllVersionIsReported) {
         << describe(r);
     RecordProperty("found_version", m[1].str());
     EXPECT_NE(m[1].str(), std::string(eb::expected_onnxruntime_version()));
-    EXPECT_TRUE(contains(r.out, "found version      " + m[1].str())) << r.out;
     EXPECT_TRUE(
         contains(r.err, "requires ONNX Runtime " + std::string(eb::expected_onnxruntime_version())))
         << describe(r);
@@ -242,7 +268,7 @@ TEST(Doctor, CorruptDllIsReported) {
     EXPECT_TRUE(contains(r.err, "LoadLibraryExW(")) << describe(r);
 }
 
-// --------------------------------------------------------------------------- doctor: QNN EP
+// --------------------------------------------------------------------------- doctor: bundle pins
 
 namespace {
 
@@ -264,90 +290,106 @@ struct CpuOnlyBundle {
 
 }  // namespace
 
-TEST(Doctor, ReportsTheQnnExecutionProviderAndTheNpuChoice) {
+TEST(Doctor, AModifiedBundleFileFailsItsPin) {
+    const CpuOnlyBundle bundle(kEdgebenchExe);
+    // Still a loadable DLL, but not the pinned file.
+    std::ofstream(bundle.dir.path() / "onnxruntime_providers_shared.dll",
+                  std::ios::binary | std::ios::app)
+        << "extra bytes";
     const ProcessResult r =
-        run_process(kEdgebenchExe, {L"doctor", L"--json", L"--load-sample-ms", L"0"},
-                    kEdgebenchExe.parent_path());
+        run_process(bundle.exe, {L"doctor", L"--json", L"--quick", L"--load-sample-ms", L"0"},
+                    bundle.dir.path());
     expect_no_crash(r);
-    ASSERT_EQ(r.exit_code, 0u) << describe(r);
+    EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
     const json j = json::parse(r.out);
-    const json& q = j.at("qnn_ep");
-    EXPECT_EQ(q.at("library_path").get<std::string>(),
-              eb::path_to_utf8(kEdgebenchExe.parent_path() / "onnxruntime_providers_qnn.dll"));
-    EXPECT_EQ(q.at("in_build"), eb::qnn_ep_in_build());
-    if (!eb::qnn_ep_in_build()) {
-        EXPECT_EQ(q.at("registration"), "not_bundled");
-        EXPECT_TRUE(q.at("npu_selection").is_null());
-        return;
-    }
-    EXPECT_EQ(q.at("bundled"), true);
-    ASSERT_EQ(q.at("registration"), "ok") << q.dump(2);
-    EXPECT_TRUE(q.at("error_kind").is_null());
-    // The plugin is listed among the loaded modules, inside the bundle.
-    bool plugin_listed = false;
-    for (const json& m : j.at("runtime").at("loaded_modules")) {
-        EXPECT_TRUE(m.at("inside_bundle").get<bool>()) << m.dump();
-        plugin_listed |= m.at("name") == "onnxruntime_providers_qnn.dll";
-    }
-    EXPECT_TRUE(plugin_listed) << j.at("runtime").at("loaded_modules").dump();
-    // Either an NPU is chosen, or the reason is a warning (not a problem).
-    const json& npu = q.at("npu_selection");
-    ASSERT_TRUE(npu.is_object()) << q.dump(2);
-    if (npu.at("status") == "selected") {
-        EXPECT_EQ(npu.at("candidate_count"), 1);
-        EXPECT_EQ(npu.at("device").at("ep_name"), "QNNExecutionProvider");
-        EXPECT_EQ(npu.at("device").at("device_type"), "NPU");
-        const json& listed = j.at("runtime").at("ep_devices").at(npu.at("device_index").get<int>());
-        EXPECT_EQ(listed, npu.at("device"));
-    } else {
-        bool warned = false;
-        for (const json& w : j.at("warnings"))
-            warned |= w.at("code") == npu.at("failure");
-        EXPECT_TRUE(warned) << j.at("warnings").dump();
-        EXPECT_TRUE(j.at("problems").empty()) << j.at("problems").dump();
-    }
-
-    const ProcessResult text = run_process(kEdgebenchExe, {L"doctor", L"--load-sample-ms", L"0"},
-                                           kEdgebenchExe.parent_path());
-    EXPECT_TRUE(contains(text.out, "\nQNN execution provider\n")) << text.out;
-    EXPECT_TRUE(contains(text.out, "registration       ok (as QNNExecutionProvider)")) << text.out;
-    EXPECT_TRUE(contains(text.out, "NPU for runs")) << text.out;
-    EXPECT_TRUE(contains(text.out, "EP devices (CPU EP and QNN EP)")) << text.out;
+    const json& ort = doctor_check(j, "ort_bundle");
+    EXPECT_EQ(ort.at("code"), "bundle_file_mismatch") << ort.dump(2);
+    EXPECT_TRUE(contains(ort.at("summary").get<std::string>(), "onnxruntime_providers_shared.dll"))
+        << ort.dump(2);
+    EXPECT_TRUE(contains(r.err, "error: [bundle_file_mismatch] ort_bundle: ")) << describe(r);
 }
 
-TEST(Doctor, MissingQnnEpFailsOnlyBuildsThatBundleIt) {
+TEST(Doctor, MissingQnnFilesFailOnlyBuildsThatBundleThem) {
     const CpuOnlyBundle bundle(kEdgebenchExe);
     const ProcessResult r =
-        run_process(bundle.exe, {L"doctor", L"--load-sample-ms", L"0"}, bundle.dir.path());
+        run_process(bundle.exe, {L"doctor", L"--json", L"--quick", L"--load-sample-ms", L"0"},
+                    bundle.dir.path());
     expect_no_crash(r);
+    const json j = json::parse(r.out);
+    const json& qnn = doctor_check(j, "qnn_bundle");
     if (!eb::qnn_ep_in_build()) {
         EXPECT_EQ(r.exit_code, 0u) << describe(r);
-        EXPECT_TRUE(contains(r.out, "not bundled (CPU-only build)")) << describe(r);
+        EXPECT_EQ(qnn.at("status"), "not_applicable") << qnn.dump(2);
         return;
     }
     EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
-    EXPECT_TRUE(contains(r.err, "error: [qnn_ep_not_bundled] the QNN execution provider "))
-        << describe(r);
+    EXPECT_EQ(qnn.at("code"), "qnn_bundle_mismatch") << qnn.dump(2);
+    EXPECT_TRUE(contains(qnn.at("summary").get<std::string>(), "QnnHtp.dll: missing"))
+        << qnn.dump(2);
+    EXPECT_TRUE(contains(r.err, "error: [qnn_bundle_mismatch] qnn_bundle: ")) << describe(r);
     EXPECT_TRUE(contains(r.err, "hint: ")) << describe(r);
-    EXPECT_TRUE(contains(r.out, "registration       FAILED (qnn_ep_not_bundled)")) << describe(r);
-    EXPECT_TRUE(contains(r.out, "Result: FAILED (exit 4, ort_load_failure)")) << describe(r);
-    // The CPU EP is still enumerated.
-    EXPECT_TRUE(contains(r.out, "CPUExecutionProvider")) << describe(r);
 }
 
 TEST(Doctor, QnnEpThatIsNotAnEpLibraryIsReported) {
     const CpuOnlyBundle bundle(kEdgebenchExe);
     bundle.add_qnn_ep_file(kSystemNonOrtDll);
     const ProcessResult r =
-        run_process(bundle.exe, {L"doctor", L"--load-sample-ms", L"0"}, bundle.dir.path());
+        run_process(bundle.exe, {L"doctor", L"--json", L"--quick", L"--load-sample-ms", L"0"},
+                    bundle.dir.path());
     expect_no_crash(r);
     EXPECT_EQ(r.exit_code, code(ExitCode::ort_load_failure)) << describe(r);
-    EXPECT_TRUE(contains(r.err,
-                         "error: [ep_registration_failed] registering the execution "
-                         "provider library "))
-        << describe(r);
-    EXPECT_TRUE(contains(r.out, "registration       FAILED (ep_registration_failed)"))
-        << describe(r);
+    const json j = json::parse(r.out);
+    const json& qnn = doctor_check(j, "qnn_bundle");
+    EXPECT_EQ(qnn.at("status"), "fail") << qnn.dump(2);
+    EXPECT_EQ(qnn.at("details").at("registration"), "failed") << qnn.dump(2);
+    // ARM64: the plugin is not the pinned file; x64: no pins, the registration fails.
+    EXPECT_EQ(qnn.at("code"),
+              eb::qnn_ep_in_build() ? "qnn_bundle_mismatch" : "ep_registration_failed")
+        << qnn.dump(2);
+}
+
+TEST(Doctor, CacheDirectoryIsReportedAndNeverChangedWithoutPrune) {
+    TempDir cache;
+    fs::create_directory(cache.path() / "not_ours");
+    std::ofstream(cache.path() / "not_ours" / "keep.txt") << "x";
+    const ProcessResult r = run_process(kEdgebenchExe,
+                                        {L"doctor", L"--json", L"--quick", L"--load-sample-ms",
+                                         L"0", L"--ep-cache-dir", cache.path().native()},
+                                        kEdgebenchExe.parent_path());
+    expect_no_crash(r);
+    EXPECT_EQ(r.exit_code, 0u) << describe(r);
+    const json j = json::parse(r.out);
+    const json& c = doctor_check(j, "ep_cache_dir");
+    EXPECT_EQ(c.at("status"), "warn") << c.dump(2);
+    EXPECT_EQ(c.at("code"), "cache_directories_without_manifest") << c.dump(2);
+    EXPECT_EQ(c.at("details").at("writable"), true);
+    EXPECT_EQ(c.at("details").at("entry_count"), 0);
+    EXPECT_TRUE(fs::is_regular_file(cache.path() / "not_ours" / "keep.txt"));
+}
+
+TEST(Doctor, CacheDirectoryThatCannotBeCreatedExits6) {
+    TempDir dir;
+    std::ofstream(dir.path() / "a_file") << "x";
+    const ProcessResult r =
+        run_process(kEdgebenchExe,
+                    {L"doctor", L"--json", L"--quick", L"--load-sample-ms", L"0", L"--ep-cache-dir",
+                     (dir.path() / "a_file" / "cache").native()},
+                    kEdgebenchExe.parent_path());
+    expect_no_crash(r);
+    EXPECT_EQ(r.exit_code, code(ExitCode::output_error)) << describe(r);
+    const json j = json::parse(r.out);
+    const json& c = doctor_check(j, "ep_cache_dir");
+    EXPECT_EQ(c.at("code"), "ep_cache_dir_not_writable") << c.dump(2);
+    EXPECT_EQ(c.at("exit_code"), 6);
+    EXPECT_FALSE(fs::exists(dir.path() / "a_file" / "cache"));
+}
+
+TEST(Doctor, EmptyCacheDirectoryIsAUsageError) {
+    const ProcessResult r = run_process(kEdgebenchExe, {L"doctor", L"--ep-cache-dir", L""},
+                                        kEdgebenchExe.parent_path());
+    expect_no_crash(r);
+    EXPECT_EQ(r.exit_code, code(ExitCode::usage_error)) << describe(r);
+    EXPECT_TRUE(contains(r.err, "--ep-cache-dir: must not be empty")) << describe(r);
 }
 
 // --------------------------------------------------------------------------- CLI
@@ -796,27 +838,161 @@ TEST(OrtProbe, NpuTargetWithoutASingleNpuExits3) {
 
 // --------------------------------------------------------------------------- doctor on the NPU
 
-TEST(DoctorNpu, SelectsTheQnnNpu) {
+TEST(DoctorNpu, FullReportPassesTheNpuChecks) {
     const eb::test::QnnNpuProbe probe = eb::test::probe_qnn_npu();
     if (const std::optional<std::string> reason = eb::test::npu_skip_reason(probe))
         GTEST_SKIP() << *reason;
-    const ProcessResult r =
-        run_process(kEdgebenchExe, {L"doctor", L"--json", L"--load-sample-ms", L"0"},
-                    kEdgebenchExe.parent_path());
+    TempDir cache;
+    const ProcessResult r = run_process(
+        kEdgebenchExe,
+        {L"doctor", L"--json", L"--load-sample-ms", L"0", L"--ep-cache-dir", cache.path().native()},
+        kEdgebenchExe.parent_path());
     expect_no_crash(r);
     ASSERT_EQ(r.exit_code, 0u) << describe(r);
     const json j = json::parse(r.out);
-    const json& npu = j.at("qnn_ep").at("npu_selection");
-    ASSERT_TRUE(npu.is_object()) << j.at("qnn_ep").dump(2);
-    ASSERT_EQ(npu.at("status"), "selected") << npu.dump(2);
-    EXPECT_EQ(npu.at("device").at("device_type"), "NPU");
-    EXPECT_EQ(npu.at("device").at("ep_name"), "QNNExecutionProvider");
-    EXPECT_EQ(npu.at("device").at("device_id").get<std::uint32_t>(),
-              probe.devices[*probe.selection->index].device_id);
-    for (const json& w : j.at("warnings")) {
-        for (const char* kind : {"no_qnn_ep_devices", "no_npu_device", "multiple_npu_devices"})
-            EXPECT_NE(w.at("code"), kind) << w.dump();
+    for (const char* name : {"ort_bundle", "qnn_bundle", "backend_versions", "devices", "npu_probe",
+                             "npu_context", "ep_cache_dir"})
+        EXPECT_EQ(doctor_check(j, name).at("status"), "pass") << doctor_check(j, name).dump(2);
+
+    const json& devices = doctor_check(j, "devices").at("details").at("npu_selection");
+    EXPECT_EQ(devices.at("status"), "selected");
+    EXPECT_EQ(devices.at("candidate_count"), 1);
+    const json& backend = doctor_check(j, "backend_versions").at("details");
+    EXPECT_EQ(backend.at("sdk_version"), j.at("versions").at("qairt_sdk").at("reported"));
+    EXPECT_EQ(backend.at("source"), "qnn_ep_log_backend_build_id");
+    const json& probes = doctor_check(j, "npu_probe").at("details").at("probes");
+    ASSERT_EQ(probes.size(), 2u);
+    for (const json& p : probes) {
+        EXPECT_EQ(p.at("equal"), true) << p.dump(2);
+        EXPECT_EQ(p.at("differing_elements"), 0);
+        EXPECT_EQ(p.at("elements"), 256);
     }
+    EXPECT_EQ(probes[0].at("compute_precision"), "int8");
+    EXPECT_EQ(probes[1].at("compute_precision"), "fp16");
+    const json& ctx = doctor_check(j, "npu_context").at("details");
+    EXPECT_EQ(ctx.at("outputs_equal"), true);
+    EXPECT_TRUE(std::regex_match(ctx.at("htp_arch").get<std::string>(), std::regex(R"(v\d+)")))
+        << ctx.dump(2);
+    EXPECT_TRUE(ctx.at("verdict").is_null());  // not askable after a session (see qnn_provider.hpp)
+    EXPECT_FALSE(ctx.at("verdict_note").is_null());
+    EXPECT_TRUE(ctx.at("cleanup_error").is_null());
+    // Nothing was written to the cache directory given (the context lives in %TEMP%).
+    EXPECT_TRUE(fs::is_empty(cache.path()));
+    std::ofstream(cache.path().parent_path() / (cache.path().filename().wstring() + L".json"))
+        << r.out;
+    eb::test::validate_doctor_report_or_skip(cache.path().parent_path() /
+                                             (cache.path().filename().wstring() + L".json"));
+}
+
+// --prune-cache deletes the stale entry (another QNN SDK version in its key) and
+// keeps the current one; without it doctor only warns.
+TEST(DoctorNpu, PruneCacheDeletesOnlyStaleEntries) {
+    const eb::test::QnnNpuProbe probe = eb::test::probe_qnn_npu();
+    if (const std::optional<std::string> reason = eb::test::npu_skip_reason(probe))
+        GTEST_SKIP() << *reason;
+    TempDir work;
+    const fs::path cache = work.path() / "cache";
+    const ProcessResult built = run_process(kEdgebenchExe,
+                                            {L"run",
+                                             L"--model",
+                                             (kFixtureDir / "fixed_float32.onnx").native(),
+                                             L"--provider",
+                                             L"npu",
+                                             L"--npu-fp16",
+                                             L"--trials",
+                                             L"1",
+                                             L"--warmup",
+                                             L"1",
+                                             L"--iterations",
+                                             L"2",
+                                             L"--cooldown-ms",
+                                             L"0",
+                                             L"--load-sample-ms",
+                                             L"0",
+                                             L"--ep-cache",
+                                             L"build",
+                                             L"--ep-cache-dir",
+                                             cache.native(),
+                                             L"--output-dir",
+                                             (work.path() / "out").native()},
+                                            kSourceDir);
+    ASSERT_EQ(built.exit_code, 0u) << describe(built);
+    std::vector<fs::path> entries;
+    for (const fs::directory_entry& e : fs::directory_iterator(cache))
+        entries.push_back(e.path());
+    ASSERT_EQ(entries.size(), 1u);
+    const fs::path current = entries.front();
+    const std::optional<eb::CacheManifest> m = eb::read_cache_manifest(current);
+    ASSERT_TRUE(m);
+    // The same entry under a key with another SDK version: stale.
+    std::optional<eb::CacheKeyFields> fields = eb::cache_key_from_json(m->key_fields);
+    ASSERT_TRUE(fields);
+    fields->qnn_sdk_version = "2.0.0";
+    const std::string stale_id = eb::cache_key_id(*fields);
+    const fs::path stale = cache / stale_id;
+    fs::create_directory(stale);
+    for (const eb::CacheFile& f : m->files)
+        fs::copy_file(current / f.name, stale / f.name);
+    ASSERT_TRUE(eb::write_cache_manifest(stale, stale_id, eb::cache_key_json(*fields),
+                                         m->context_model, "2026-01-01T00:00:00.000Z"));
+
+    const std::vector<std::wstring> args = {L"doctor", L"--json",         L"--load-sample-ms",
+                                            L"0",      L"--ep-cache-dir", cache.native()};
+    const ProcessResult warned = run_process(kEdgebenchExe, args, kEdgebenchExe.parent_path());
+    ASSERT_EQ(warned.exit_code, 0u) << describe(warned);
+    const json warned_report = json::parse(warned.out);
+    const json& w = doctor_check(warned_report, "ep_cache_dir");
+    EXPECT_EQ(w.at("code"), "stale_cache_entries") << w.dump(2);
+    EXPECT_EQ(w.at("details").at("stale_count"), 1);
+    EXPECT_TRUE(fs::exists(stale));  // never deleted without --prune-cache
+
+    std::vector<std::wstring> prune = args;
+    prune.push_back(L"--prune-cache");
+    const ProcessResult pruned = run_process(kEdgebenchExe, prune, kEdgebenchExe.parent_path());
+    ASSERT_EQ(pruned.exit_code, 0u) << describe(pruned);
+    const json pruned_report = json::parse(pruned.out);
+    const json& p = doctor_check(pruned_report, "ep_cache_dir");
+    EXPECT_EQ(p.at("status"), "pass") << p.dump(2);
+    EXPECT_EQ(p.at("details").at("pruned_count"), 1);
+    EXPECT_FALSE(fs::exists(stale));
+    EXPECT_TRUE(fs::is_regular_file(current / eb::kEpCacheManifestName));
+}
+
+// Failures exit with the code `run` gives for the same problem.
+TEST(DoctorNpu, ExitCodesFollowTheFirstFailure) {
+    const eb::test::QnnNpuProbe probe = eb::test::probe_qnn_npu();
+    if (const std::optional<std::string> reason = eb::test::npu_skip_reason(probe))
+        GTEST_SKIP() << *reason;
+    // A bundle without one HTP stub: qnn_bundle fails first, exit code 4.
+    TempDir bundle;
+    for (const fs::directory_entry& e : fs::directory_iterator(kEdgebenchExe.parent_path())) {
+        const std::wstring name = e.path().filename().wstring();
+        if (e.is_regular_file() && name != L"QnnHtpV81Stub.dll" &&
+            (name.ends_with(L".dll") || name.ends_with(L".so") || name.ends_with(L".cat") ||
+             name == kEdgebenchExe.filename().wstring()))
+            fs::copy_file(e.path(), bundle.path() / e.path().filename());
+    }
+    const ProcessResult r4 =
+        run_process(bundle.path() / kEdgebenchExe.filename(),
+                    {L"doctor", L"--json", L"--load-sample-ms", L"0"}, bundle.path());
+    expect_no_crash(r4);
+    EXPECT_EQ(r4.exit_code, code(ExitCode::ort_load_failure)) << describe(r4);
+    const json j4 = json::parse(r4.out);
+    EXPECT_EQ(doctor_check(j4, "qnn_bundle").at("code"), "qnn_bundle_mismatch");
+    // The NPU itself still works without that stub (it is another HTP generation's).
+    EXPECT_EQ(doctor_check(j4, "npu_probe").at("status"), "pass")
+        << doctor_check(j4, "npu_probe").dump(2);
+
+    // An EP context cache directory that cannot be created: exit code 6.
+    TempDir dir;
+    std::ofstream(dir.path() / "a_file") << "x";
+    const ProcessResult r6 =
+        run_process(kEdgebenchExe,
+                    {L"doctor", L"--json", L"--load-sample-ms", L"0", L"--ep-cache-dir",
+                     (dir.path() / "a_file" / "cache").native()},
+                    kEdgebenchExe.parent_path());
+    EXPECT_EQ(r6.exit_code, code(ExitCode::output_error)) << describe(r6);
+    EXPECT_EQ(json::parse(r6.out).at("overall").at("exit_code"), 6);
 }
 
 // --------------------------------------------------------------------------- preload

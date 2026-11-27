@@ -30,7 +30,7 @@ FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "results"
 INVALID_FIXTURES = FIXTURE_ROOT / "v1.1.0" / "invalid"
 INVALID_FIXTURES_120 = FIXTURE_ROOT / "v1.2.0" / "invalid"
 
-ALL_EXAMPLES = sorted(EXAMPLES.rglob("*.json"))
+ALL_EXAMPLES = sorted(p for p in EXAMPLES.rglob("*.json") if not vr.is_accuracy_document(p))
 V100_EXAMPLES = sorted(V100.glob("*.json"))
 V110_EXAMPLES = sorted(V110.glob("*.json"))
 FIXTURES_110 = sorted(INVALID_FIXTURES.glob("*.json"))

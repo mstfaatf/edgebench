@@ -68,11 +68,16 @@ powershell -ExecutionPolicy Bypass -File scripts\fetch_deps.ps1
 # Configure, build and test
 cmake --preset arm64-release
 cmake --build --preset arm64-release
-ctest --preset arm64-release -L "unit|ort"
+ctest --preset arm64-release -L "unit|ort" --output-on-failure
 
 # Check the machine and the runtime
 .\build\arm64-release\bin\Release\edgebench.exe doctor
 ```
+
+Run `edgebench doctor` first on every machine, and again before any run whose
+numbers you want to trust: it checks the bundle against its pinned hashes, runs a
+tiny model on the NPU and compares the output bit for bit, and reports power and
+background load ([docs/cli.md](docs/cli.md#edgebench-doctor)).
 
 Until the Python environment (`.venv`, see the setup guide) exists, the tests
 that check written result files with the Python validator skip that check, and

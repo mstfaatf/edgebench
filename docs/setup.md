@@ -45,7 +45,7 @@ The ARM64 build is the one tagged `-arm64`. Confirm it with `sysconfig`:
 >
 > | Kind of script | Behaviour on a non-native interpreter | Examples |
 > |---|---|---|
-> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `scripts/export_models.py`, `scripts/export_mobilenetv2.py`, `scripts/fold_models.py`, `scripts/quantize_models.py`, `scripts/make_references.py` (except `--check`), `scripts/eval_accuracy.py`, `scripts/prepare_autoencoder.py`, `scripts/eval_anomaly.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `scripts/npu_overhead.py`, `scripts/check_autoencoder_npu.py`, `tools/qnn_rejection_check.py`, `tools/ort_probe/reference.py`, `tools/ort_probe/make_reference.py` |
+> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `scripts/export_models.py`, `scripts/export_mobilenetv2.py`, `scripts/fold_models.py`, `scripts/quantize_models.py`, `scripts/make_references.py` (except `--check`), `scripts/eval_accuracy.py`, `scripts/prepare_autoencoder.py`, `scripts/eval_anomaly.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `scripts/npu_overhead.py`, `scripts/check_autoencoder_npu.py`, `scripts/make_probe_references.py`, `tools/qnn_rejection_check.py`, `tools/ort_probe/reference.py`, `tools/ort_probe/make_reference.py` |
 > | Environment diagnostic | Runs and reports the problem prominently | `scripts/check_env.py` |
 > | Downloads and platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/get_data.py`, `scripts/get_aihub_baseline.py`, `scripts/validate_results.py`, `scripts/make_test_models.py`, `scripts/check_hygiene.py`, `scripts/coverage_summary.py`, `scripts/validate_accuracy.py`, `scripts/check_doc_numbers.py`, `scripts/model_recipes.py`, `scripts/model_info.py` (they read model files with onnx but never run them), and the tests in `scripts/tests/` |
 > | Shared modules in `scripts/common/` | Not checked themselves. `npu_harness.py` and `ort_qnn.py` load ONNX Runtime and are imported only by guarded scripts, after the check; `onnx_export.py` and `onnx_quantize.py` import torch, onnx and ONNX Runtime inside their functions and are used by `export_models.py`, `fold_models.py`, `quantize_models.py` and their tests; `onnx_fold.py` needs onnx and NumPy only; `model_recipe.py` imports onnx inside the functions that read model files; `reference_outputs.py` imports NumPy only to generate the SplitMix64 input; `timeseries.py` is standard library only except for the two functions that build NumPy arrays; `autoencoder.py`, `autoencoder_pipeline.py` and `onnx_cleanup.py` import onnx and NumPy (the pipeline also ONNX Runtime) inside their functions, so the source-bundle checks of `autoencoder_pipeline.py` run anywhere; `anomaly_stats.py` is standard library only; `imagenet_eval.py` needs NumPy and Pillow; `accuracy_stats.py` is standard library only; the others (`preprocess.py`, `manifests.py`, `model_registry.py`, `accuracy.py`, `qnn_log.py`, `onnx_prune.py`, `qdq_inspect.py`, `results_io.py`, `cli.py`) do not | – |
@@ -472,6 +472,13 @@ is maintained by Qualcomm and is the official source of the QNN plugin
 execution provider and the QNN backend DLLs (`QnnHtp.dll` and friends). The
 Python package `onnxruntime-qnn` ships the same files.
 
+The versions, archive URLs and SHA256 pins, of the archives and of every DLL
+`edgebench doctor` checks, live in [`cmake/bundle-pins.json`](../cmake/bundle-pins.json):
+the script reads it and checks the pinned files after every run, and CMake reads
+it at configure time (`cmake/BundlePins.cmake`: the ONNX Runtime version of the
+build, and a generated header with the file pins that doctor compares the bundle
+with). One committed file for both, so a pin cannot be updated in one place only.
+
 The script is safe to re-run. Use `-Force` to re-extract. CMake finds these
 packages through `cmake/FindOnnxRuntime.cmake`; to use a different location,
 set `OnnxRuntime_ROOT` / `QnnEp_ROOT` when configuring.
@@ -481,13 +488,19 @@ set `OnnxRuntime_ROOT` / `QnnEp_ROOT` when configuring.
 ```powershell
 cmake --preset arm64-release          # or arm64-debug
 cmake --build --preset arm64-release
-ctest --preset arm64-release
+ctest --preset arm64-release --output-on-failure
 .\build\arm64-release\bin\Release\edgebench.exe doctor
 ```
 
-`edgebench doctor` checks the build, the machine and the bundled ONNX Runtime
-(see [How the executables find ONNX Runtime](#how-the-executables-find-onnx-runtime));
-[cli.md](cli.md) describes every command and exit code.
+`edgebench doctor` checks everything a run depends on: the bundle against its
+pins, the backend versions, the devices, a strict probe session on the NPU, an
+EP context, the context cache directory, power and background load (see
+[cli.md](cli.md#edgebench-doctor) and
+[How the executables find ONNX Runtime](#how-the-executables-find-onnx-runtime));
+[cli.md](cli.md) describes every command and exit code. Its probe models and
+their expected NPU outputs are in `engine/resources/doctor/` (made by
+`scripts/make_test_models.py` and `scripts/make_probe_references.py`) and built
+into the executable.
 
 #### Test labels
 
@@ -505,14 +518,19 @@ select the tests it can run:
 In the ONNX Runtime test program the label follows the test suite name (see
 `edgebench_discover_ort_tests()` in `engine/CMakeLists.txt`): suites ending in
 `Models` get `models`, suites ending in `Npu` get `npu`, all others `ort`. Name
-new suites accordingly. Commands per environment:
+new suites accordingly. `npu` tests also share the ctest resource lock `npu`,
+so they run one at a time even with `-j` (the others still run in parallel),
+and have a 300 s timeout (about 8x the slowest one), so a hang is reported as
+a timeout. A test process that crashes prints the exception code on stderr,
+which `--output-on-failure` shows next to ctest's own `***Exception` line.
+Commands per environment:
 
 | Environment | Command |
 |---|---|
-| Snapdragon device, everything prepared | `ctest --preset arm64-release` |
-| ARM64 without models or NPU | `ctest --preset arm64-release -L "unit\|ort\|schema"` |
-| x64 build (CI, or an x64 machine) | `ctest --preset x64-release -L "unit\|ort"` |
-| No ONNX Runtime at all | `ctest --preset <preset> -L unit` |
+| Snapdragon device, everything prepared | `ctest --preset arm64-release --output-on-failure` |
+| ARM64 without models or NPU | `ctest --preset arm64-release -L "unit\|ort\|schema" --output-on-failure` |
+| x64 build (CI, or an x64 machine) | `ctest --preset x64-release -L "unit\|ort" --output-on-failure` |
+| No ONNX Runtime at all | `ctest --preset <preset> -L unit --output-on-failure` |
 
 Tests that need a model or reference file skip (not fail) when it is missing;
 tests that send console control events skip without a console.
@@ -560,7 +578,7 @@ the repository root:
 powershell -ExecutionPolicy Bypass -File scripts\fetch_deps.ps1 -Arch x64
 cmake --preset x64
 cmake --build --preset x64-release      # or x64-debug
-ctest --preset x64-release -L "unit|ort"
+ctest --preset x64-release -L "unit|ort" --output-on-failure
 ```
 
 `arm64-ninja` / `arm64-ninja-release` work the same way from an ARM64 developer
@@ -663,11 +681,11 @@ the `unit` and `ort` labels only, never `models` or `npu`.
 |---|---|---|
 | `python (validator, hygiene)` | `ubuntu-latest`, Python 3.12 | Installs `requirements-ci.txt` (jsonschema and pytest, pinned); runs the validator, hygiene-check, coverage-summary, dataset-manifest, model-registry, model-manifest/recipe, reference-output, accuracy, time-series, autoencoder (source bundle, recipes, lineage), anomaly-detection and documented-numbers tests; checks the numbers quoted in the docs against the published results (`scripts/check_doc_numbers.py`); validates `benchmarks/results/published/accuracy/` (classification and anomaly-detection results) with `scripts/validate_accuracy.py`; validates `docs/examples/` and `benchmarks/results/published/` with `--strict`; runs the hygiene check |
 | `windows-x64` | `windows-latest` | MSVC x64 environment (`scripts/msvc_dev_env.ps1`: `vcvarsall.bat` of the newest Visual Studio, exported to the following steps); fetches the x64 ONNX Runtime; `x64` preset, Release, `/W4 /WX`; `ctest -L "unit\|ort"`; uploads the CTest log on failure |
-| `windows-arm64` | `windows-11-arm` | The same for ARM64 (`arm64-ninja` preset). The QNN files are bundled and the QNN EP is registered by the `ort` tests, but the runner has no Qualcomm hardware: the job also runs `ctest -L npu` and fails unless every `npu` test reports itself skipped (the reasons are in the log, the count in the job summary) |
+| `windows-arm64` | `windows-11-arm` | The same for ARM64 (`arm64-ninja` preset). The QNN files are bundled and the QNN EP is registered by the `ort` tests, but the runner has no Qualcomm hardware: the job also runs `ctest -L npu` and fails unless every `npu` test reports itself skipped (the reasons are in the log, the count in the job summary). Both Windows jobs then run `edgebench doctor --json` and require exit code 0, no failed check and the NPU checks N/A or warning (`scripts/validate_doctor.py --runner`) |
 | `coverage (x64)` | `windows-latest` | x64 Debug build; the `unit` and `ort` tests under [OpenCppCoverage](https://github.com/OpenCppCoverage/OpenCppCoverage) 0.9.9.0 (installer pinned by SHA256), including child processes, filtered to `engine/src`; uploads the HTML and Cobertura report (`coverage-x64` artifact) and prints per-file line coverage in the job summary. Report only, no threshold |
 
 `third_party/` is cached per architecture, keyed by the hash of
-`scripts/fetch_deps.ps1`; `build/_downloads/` is cached keyed by the CMake files.
+`scripts/fetch_deps.ps1` and `cmake/bundle-pins.json`; `build/_downloads/` is cached keyed by the CMake files.
 The Windows jobs pass a venv with `requirements-ci.txt` as `EDGEBENCH_PYTHON`, so
 the engine tests that validate the result files they write run there too.
 Third-party actions are pinned to full commit SHAs.
@@ -676,7 +694,7 @@ To run the same checks locally:
 
 ```powershell
 # python job (any OS; with the full .venv or a venv with requirements-ci.txt)
-python -m pytest scripts/tests/test_validate_results.py scripts/tests/test_check_hygiene.py scripts/tests/test_coverage_summary.py scripts/tests/test_manifests.py scripts/tests/test_export_models.py scripts/tests/test_model_recipes.py scripts/tests/test_references.py scripts/tests/test_accuracy_eval.py scripts/tests/test_timeseries.py scripts/tests/test_autoencoder.py scripts/tests/test_autoencoder_pipeline.py scripts/tests/test_anomaly_eval.py scripts/tests/test_doc_numbers.py
+python -m pytest scripts/tests/test_validate_results.py scripts/tests/test_check_hygiene.py scripts/tests/test_coverage_summary.py scripts/tests/test_manifests.py scripts/tests/test_export_models.py scripts/tests/test_model_recipes.py scripts/tests/test_references.py scripts/tests/test_accuracy_eval.py scripts/tests/test_timeseries.py scripts/tests/test_autoencoder.py scripts/tests/test_autoencoder_pipeline.py scripts/tests/test_anomaly_eval.py scripts/tests/test_doc_numbers.py scripts/tests/test_validate_doctor.py
 python scripts/validate_accuracy.py benchmarks/results/published/accuracy
 python scripts/validate_results.py --strict docs/examples benchmarks/results/published
 python scripts/check_doc_numbers.py

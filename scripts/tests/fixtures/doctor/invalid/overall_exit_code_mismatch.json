@@ -1,0 +1,11 @@
+{
+  "description": "A nonzero exit code without a failed check.",
+  "base": "docs/examples/doctor/example-doctor-npu.json",
+  "set": {
+    "/overall/exit_code": 3
+  },
+  "expect": {
+    "code": "overall_exit_code_mismatch",
+    "path": "/overall/exit_code"
+  }
+}

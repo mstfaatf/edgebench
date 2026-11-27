@@ -1,0 +1,12 @@
+{
+  "description": "The first two checks in the wrong order.",
+  "base": "docs/examples/doctor/example-doctor-npu.json",
+  "set": {
+    "/checks/0/name": "qnn_bundle",
+    "/checks/1/name": "ort_bundle"
+  },
+  "expect": {
+    "code": "check_order",
+    "path": "/checks"
+  }
+}

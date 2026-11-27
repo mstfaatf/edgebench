@@ -1,0 +1,73 @@
+{
+  "probes_version": "1.0.0",
+  "versions": {
+    "onnxruntime": "1.32.0",
+    "onnxruntime_qnn": "2.8.0",
+    "qnn_backend": "2.52.0.261104115025"
+  },
+  "probes": [
+    {
+      "model": "npu_probe_int8.onnx",
+      "model_sha256": "6e67d229e4f1edc7ead77c68c6ccf6aeb33680d4502411ed2bfd70d03aaf3ebe",
+      "device": "npu",
+      "compute_precision": "int8",
+      "input": {
+        "kind": "splitmix64",
+        "seed": 0,
+        "shape": [
+          1,
+          3,
+          8,
+          8
+        ]
+      },
+      "output": {
+        "file": "npu_probe_int8.npu.f32",
+        "shape": [
+          1,
+          4,
+          8,
+          8
+        ],
+        "dtype": "float32",
+        "sha256": "fefba7742c4032aa0b96b635c77f963553a5ab77dfdc6a130fdbc015c68c7300"
+      },
+      "provider_options": {
+        "htp_performance_mode": "burst"
+      },
+      "strict": true
+    },
+    {
+      "model": "npu_probe_fp32.onnx",
+      "model_sha256": "b957324abb8bab26f7e052b90da8424408417d5e83674e48697dbbfdf407fec7",
+      "device": "npu_fp16",
+      "compute_precision": "fp16",
+      "input": {
+        "kind": "splitmix64",
+        "seed": 0,
+        "shape": [
+          1,
+          3,
+          8,
+          8
+        ]
+      },
+      "output": {
+        "file": "npu_probe_fp32.npu_fp16.f32",
+        "shape": [
+          1,
+          4,
+          8,
+          8
+        ],
+        "dtype": "float32",
+        "sha256": "d267e1b57764d9eb2cd9a15939f20eff1da88577105234ea41215a97a7d527cc"
+      },
+      "provider_options": {
+        "htp_performance_mode": "burst",
+        "enable_htp_fp16_precision": "1"
+      },
+      "strict": true
+    }
+  ]
+}

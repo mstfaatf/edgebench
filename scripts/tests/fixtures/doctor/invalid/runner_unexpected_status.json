@@ -1,0 +1,12 @@
+{
+  "description": "A runner (no NPU) reporting a passed NPU probe.",
+  "base": "docs/examples/doctor/example-doctor-x64.json",
+  "runner": true,
+  "set": {
+    "/checks/4/status": "pass"
+  },
+  "expect": {
+    "code": "runner_unexpected_status",
+    "path": "/checks/4/status"
+  }
+}

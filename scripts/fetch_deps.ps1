@@ -18,9 +18,14 @@
                                         NuGet package; the QNN execution provider
                                         exists for ARM64 only and is not fetched
 
+    Versions, URLs and SHA256 pins (of the archives and of the extracted DLLs)
+    come from cmake/bundle-pins.json, which CMake also reads, so edgebench doctor
+    checks the bundle against the same pins.
+
     Safe to re-run: a directory already extracted from the expected archive is
     left alone (the archive is not even downloaded), and archives already present
-    with the expected SHA256 are not downloaded again. Use -Force to re-extract.
+    with the expected SHA256 are not downloaded again. Every run checks the pinned
+    files of the extracted directories. Use -Force to re-extract.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\fetch_deps.ps1
@@ -39,18 +44,20 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # Invoke-WebRequest is much faster without the progress bar
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-# Keep the onnxruntime version in sync with requirements.txt and CMakeLists.txt.
-$OrtVersion = '1.32.0'
-$QnnVersion = '2.8.0'
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+# The single source of the versions and SHA256 pins (also read by CMake). Keep the
+# onnxruntime version in sync with requirements.txt.
+$Pins = Get-Content -LiteralPath (Join-Path $RepoRoot 'cmake\bundle-pins.json') -Raw | ConvertFrom-Json
 
 # One NuGet package holds the ONNX Runtime binaries for both architectures.
 function New-OrtDependency([string]$Name, [string]$Runtime) {
+    $ort = $Pins.onnxruntime
     return @{
         Name    = $Name
-        Version = $OrtVersion
-        Url     = "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/$OrtVersion/microsoft.ml.onnxruntime.$OrtVersion.nupkg"
-        File    = "microsoft.ml.onnxruntime.$OrtVersion.nupkg"
-        Sha256  = 'a9150bc2992cbbb6722070da9910e1ffa989a8bfc67bdd5bb8e745ca755641db'
+        Version = $ort.version
+        Url     = $ort.archive.url
+        File    = $ort.archive.file
+        Sha256  = $ort.archive.sha256
         # Archive prefix -> destination subdirectory
         Extract = [ordered]@{
             'build/native/include/'         = 'include'
@@ -58,24 +65,28 @@ function New-OrtDependency([string]$Name, [string]$Runtime) {
             'LICENSE'                       = '.'
             'ThirdPartyNotices.txt'         = '.'
         }
+        # Pinned files, relative to the destination
+        PinnedDir = 'lib'
+        Pinned    = $ort.files.$Arch
     }
 }
 
 $Deps = if ($Arch -eq 'x64') { @(New-OrtDependency 'onnxruntime-x64' 'win-x64') } else { @(
     (New-OrtDependency 'onnxruntime' 'win-arm64'),
     @{
-        Name    = 'onnxruntime-qnn'
-        Version = $QnnVersion
-        Url     = "https://github.com/onnxruntime/onnxruntime-qnn/releases/download/v$QnnVersion/onnxruntime-qnn-$QnnVersion-win-arm64.zip"
-        File    = "onnxruntime-qnn-$QnnVersion-win-arm64.zip"
-        Sha256  = 'c63ffed1567c241dab60ec2af2251f73bc68e38b86fa0a8ac833d1b14af7d2d4'
-        Extract = [ordered]@{
+        Name      = 'onnxruntime-qnn'
+        Version   = $Pins.onnxruntime_qnn.version
+        Url       = $Pins.onnxruntime_qnn.archive.url
+        File      = $Pins.onnxruntime_qnn.archive.file
+        Sha256    = $Pins.onnxruntime_qnn.archive.sha256
+        Extract   = [ordered]@{
             ''  = '.'   # everything, flat
         }
+        PinnedDir = '.'
+        Pinned    = $Pins.onnxruntime_qnn.files.$Arch
     }
 ) }
 
-$RepoRoot    = Split-Path -Parent $PSScriptRoot
 $ThirdParty  = Join-Path $RepoRoot 'third_party'
 $DownloadDir = Join-Path $ThirdParty 'downloads'
 New-Item -ItemType Directory -Force -Path $DownloadDir | Out-Null
@@ -156,14 +167,31 @@ function Expand-Dependency($Dep, [string]$Archive) {
     Write-Host "  extracted $count files -> third_party\$($Dep.Name)"
 }
 
+# The pinned files of an extracted dependency must match cmake/bundle-pins.json.
+function Test-PinnedFiles($Dep) {
+    $dir = Join-Path (Join-Path $ThirdParty $Dep.Name) $Dep.PinnedDir
+    foreach ($file in $Dep.Pinned) {
+        $path = Join-Path $dir $file.name
+        if (-not (Test-Path -LiteralPath $path)) {
+            throw "Pinned file missing: $path (re-extract with -Force)"
+        }
+        $actual = Get-Sha256 $path
+        if ($actual -ne $file.sha256) {
+            throw "SHA256 mismatch for $path`n  expected $($file.sha256)`n  actual   $actual"
+        }
+    }
+    Write-Host "  $(@($Dep.Pinned).Count) pinned files match cmake\bundle-pins.json"
+}
+
 Write-Host "Architecture: $Arch"
 foreach ($dep in $Deps) {
     Write-Host "$($dep.Name) $($dep.Version)"
     if (-not $Force -and (Test-Extracted $dep)) {
         Write-Host "  up to date: third_party\$($dep.Name) ($($dep.Version))"
-        continue
+    } else {
+        $archive = Get-VerifiedArchive $dep
+        Expand-Dependency $dep $archive
     }
-    $archive = Get-VerifiedArchive $dep
-    Expand-Dependency $dep $archive
+    Test-PinnedFiles $dep
 }
 Write-Host "Done."

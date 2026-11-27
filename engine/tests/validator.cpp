@@ -2,6 +2,9 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
+#include <vector>
+
 #include "edgebench/ort_loader.hpp"
 
 namespace fs = std::filesystem;
@@ -42,6 +45,17 @@ void validate_or_skip(const fs::path& result) {
     if (const std::string& reason = validator_unavailable_reason(); !reason.empty())
         GTEST_SKIP() << reason;
     const ProcessResult v = run_validator(result);
+    EXPECT_EQ(v.exit_code, 0u) << v.output;
+}
+
+void validate_doctor_report_or_skip(const fs::path& report, bool runner) {
+    if (const std::string& reason = validator_unavailable_reason(); !reason.empty())
+        GTEST_SKIP() << reason;
+    std::vector<std::wstring> args = {(kSourceDir / "scripts" / "validate_doctor.py").native()};
+    if (runner)
+        args.push_back(L"--runner");
+    args.push_back(report.native());
+    const ProcessResult v = run_process(kPython, args, kSourceDir);
     EXPECT_EQ(v.exit_code, 0u) << v.output;
 }
 

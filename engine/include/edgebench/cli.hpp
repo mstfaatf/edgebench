@@ -1,6 +1,7 @@
 // Command-line parsing for edgebench: `edgebench run ...`, `edgebench doctor ...`.
 #pragma once
 
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -15,6 +16,9 @@ enum class Command { none, run, doctor };
 struct DoctorOptions {
     bool json = false;
     int load_sample_ms = 1000;  // background-load sample length; 0: no sample
+    std::optional<std::filesystem::path> ep_cache_dir;  // --ep-cache-dir
+    bool prune_cache = false;                           // --prune-cache
+    bool quick = false;                                 // --quick
 };
 
 /// Outcome of parsing. If `exit` is set, the program prints `out` to stdout and

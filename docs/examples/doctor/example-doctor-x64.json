@@ -1,0 +1,287 @@
+{
+  "doctor_schema_version": "1.0.0",
+  "tool": {
+    "name": "edgebench",
+    "version": "0.1.0",
+    "git_commit": "0e964f9ff138587eeab6787f9c25589203a7a7e0",
+    "git_dirty": true,
+    "build_type": "Release",
+    "compiler": "MSVC 19.42.34435.0",
+    "target_arch": "x64"
+  },
+  "versions": {
+    "onnxruntime": {
+      "pinned": "1.32.0",
+      "loaded": "1.32.0"
+    },
+    "qnn_ep": null,
+    "qairt_sdk": null
+  },
+  "bundle_dir": "C:\\dev\\edgebench\\build\\x64\\bin\\Release",
+  "system": {
+    "os": {
+      "name": "Windows 11 Home",
+      "version": "25H2",
+      "build": "26200.9974",
+      "architecture": "arm64"
+    },
+    "process_architecture": "x64",
+    "cpu": {
+      "name": "Snapdragon(R) X 10-core X1P64100 @ 3.40 GHz",
+      "physical_cores": 10,
+      "logical_processors": 10
+    },
+    "memory_total_bytes": 16757260288,
+    "device": {
+      "manufacturer": "Microsoft Corporation",
+      "model": "Microsoft Surface Laptop, 7th Edition"
+    },
+    "power": {
+      "source": "ac",
+      "power_mode": "Balanced",
+      "power_plan": "Balanced",
+      "battery_percent": 80,
+      "battery_saver": false
+    },
+    "load": {
+      "cpu_utilization_ratio": 0.18335901386748846,
+      "sample_window_s": 1.0140748
+    }
+  },
+  "checks": [
+    {
+      "name": "ort_bundle",
+      "status": "warn",
+      "summary": "onnxruntime 1.32.0 (C API 32) from the bundle, 2 files match their SHA256 pins, 1 ONNX Runtime / QNN modules loaded, all from the bundle; this build runs under emulation, so timings would not represent native performance",
+      "code": "process_emulated",
+      "hint": "Use the native build for this machine's architecture.",
+      "exit_code": null,
+      "duration_ms": 66.817,
+      "details": {
+        "library_path": "C:\\dev\\edgebench\\build\\x64\\bin\\Release\\onnxruntime.dll",
+        "load_check": "full_path_verified",
+        "version": "1.32.0",
+        "api_version": 32,
+        "required_version": "1.32.0",
+        "required_api_version": 32,
+        "files": [
+          {
+            "name": "onnxruntime.dll",
+            "path": "C:\\dev\\edgebench\\build\\x64\\bin\\Release\\onnxruntime.dll",
+            "present": true,
+            "size_bytes": 20602168,
+            "sha256": "348c3d29d6995eee37e3451825eaddb7ea7400be3afda6ca2286b12bc775f042",
+            "product_version": "1.32.0.20261112.3.fab30a4",
+            "file_version": "1.32.0.1112",
+            "pinned_sha256": "348c3d29d6995eee37e3451825eaddb7ea7400be3afda6ca2286b12bc775f042",
+            "pinned_size_bytes": 20602168,
+            "matches_pin": true
+          },
+          {
+            "name": "onnxruntime_providers_shared.dll",
+            "path": "C:\\dev\\edgebench\\build\\x64\\bin\\Release\\onnxruntime_providers_shared.dll",
+            "present": true,
+            "size_bytes": 21816,
+            "sha256": "6caf57ac07c9cf72fb4e73c5bb0fe156f02dd60bbbd7385530c9a5654f10f950",
+            "product_version": "1.32.0.20261112.3.fab30a4",
+            "file_version": "1.32.0.1112",
+            "pinned_sha256": "6caf57ac07c9cf72fb4e73c5bb0fe156f02dd60bbbd7385530c9a5654f10f950",
+            "pinned_size_bytes": 21816,
+            "matches_pin": true
+          }
+        ],
+        "loaded_modules": [
+          {
+            "name": "onnxruntime.dll",
+            "path": "C:\\dev\\edgebench\\build\\x64\\bin\\Release\\onnxruntime.dll"
+          }
+        ],
+        "modules_outside_bundle": [],
+        "process_emulated": true
+      }
+    },
+    {
+      "name": "qnn_bundle",
+      "status": "not_applicable",
+      "summary": "this build has no QNN execution provider (the NPU needs an ARM64 build)",
+      "code": null,
+      "hint": null,
+      "exit_code": null,
+      "duration_ms": 67.5013,
+      "details": {
+        "files": [],
+        "registration": "not_attempted",
+        "error": null
+      }
+    },
+    {
+      "name": "backend_versions",
+      "status": "not_applicable",
+      "summary": "this build has no QNN execution provider",
+      "code": null,
+      "hint": null,
+      "exit_code": null,
+      "duration_ms": 2.2393,
+      "details": {
+        "backend_build": null,
+        "sdk_version": null,
+        "source": null,
+        "pinned_sdk_version": "2.52.0",
+        "backend_file_product_version": null
+      }
+    },
+    {
+      "name": "devices",
+      "status": "pass",
+      "summary": "1 EP device(s); CPU only (this build has no QNN execution provider)",
+      "code": null,
+      "hint": null,
+      "exit_code": null,
+      "duration_ms": 0.6846,
+      "details": {
+        "ep_devices": [
+          {
+            "ep_name": "CPUExecutionProvider",
+            "ep_vendor": "Microsoft",
+            "device_type": "CPU",
+            "vendor": "AMD",
+            "vendor_id": 4130,
+            "device_id": 7,
+            "metadata": {
+              "Description": "Snapdragon(R) X 10-core X1P64100 @ 3.42 GHz"
+            },
+            "ep_metadata": {
+              "version": "1.32.0"
+            }
+          }
+        ],
+        "npu_selection": null
+      }
+    },
+    {
+      "name": "npu_probe",
+      "status": "not_applicable",
+      "summary": "this build has no QNN execution provider",
+      "code": null,
+      "hint": null,
+      "exit_code": null,
+      "duration_ms": 0.0276,
+      "details": {
+        "probes": [],
+        "modules_outside_bundle": []
+      }
+    },
+    {
+      "name": "npu_context",
+      "status": "not_applicable",
+      "summary": "this build has no QNN execution provider",
+      "code": null,
+      "hint": null,
+      "exit_code": null,
+      "duration_ms": 0.0299,
+      "details": {
+        "build_ms": null,
+        "load_ms": null,
+        "outputs_equal": null,
+        "compatibility_info": null,
+        "htp_arch": null,
+        "verdict": null,
+        "verdict_note": null,
+        "error": null,
+        "cleanup_error": null
+      }
+    },
+    {
+      "name": "ep_cache_dir",
+      "status": "pass",
+      "summary": "C:\\Users\\you\\AppData\\Local\\EdgeBench\\qnn-context: 4 entries, 19.1 MiB",
+      "code": null,
+      "hint": null,
+      "exit_code": null,
+      "duration_ms": 4.7238,
+      "details": {
+        "path": "C:\\Users\\you\\AppData\\Local\\EdgeBench\\qnn-context",
+        "exists": true,
+        "writable": true,
+        "entry_count": 4,
+        "stale_count": 0,
+        "pruned_count": 0,
+        "total_bytes": 20074988,
+        "environment_known": false,
+        "entries": [
+          {
+            "key_id": "28eb1b68924a82926761b2d75ff76cd6d379ad25efd85d8668329cf3966486cb",
+            "model_sha256": "622f0adcba586dfa787a712bd59d1d17bf590fa56a5c1ce980cd61ee03504ec2",
+            "context_model": "mobilenetv2_int8_b8_ctx.onnx",
+            "size_bytes": 4295642,
+            "stale_fields": [],
+            "pruned": false
+          },
+          {
+            "key_id": "359422e638b5c52e4d5727ef79884baec063f87bf5cfbce7e97778a9b8b5bafd",
+            "model_sha256": "d4a9e1f6ee6512a2cae1c1f032cff1ba284717bc54ee9d32a8d95dd9385f1a4e",
+            "context_model": "efficientnet_lite0_fp32_b1_ctx.onnx",
+            "size_bytes": 11737264,
+            "stale_fields": [],
+            "pruned": false
+          },
+          {
+            "key_id": "4c992b58713aa2b366f79050b031ed76721d7884b288030d07f5c35e1752b9f6",
+            "model_sha256": "197ffa4d0b301e864fbbf1674c47a4c3f6df17363b267c6d93d5b7bb01819b03",
+            "context_model": "mobilenetv2_int8_b1_ctx.onnx",
+            "size_bytes": 3955676,
+            "stale_fields": [],
+            "pruned": false
+          },
+          {
+            "key_id": "b9ee82ef69ba8265e01d28ea762b825623766932466a0b9985686d2ab2c01eae",
+            "model_sha256": "9ef48a4297e3d1d12e42cf39a285667e09343939c4edc9d4d81b0e14ddb3068a",
+            "context_model": "conv1d_autoencoder_int8_b1_ctx.onnx",
+            "size_bytes": 86406,
+            "stale_fields": [],
+            "pruned": false
+          }
+        ],
+        "directories_without_manifest": [],
+        "prune_requested": false,
+        "error": null
+      }
+    },
+    {
+      "name": "power",
+      "status": "warn",
+      "summary": "power mode is Balanced, not Best performance",
+      "code": "power_mode_not_best_performance",
+      "hint": "Set the power mode to Best performance (Settings > System > Power). Published latency runs require AC power and the Windows power mode Best performance.",
+      "exit_code": null,
+      "duration_ms": 0.0,
+      "details": {
+        "source": "ac",
+        "battery_percent": 80,
+        "battery_saver": false,
+        "power_plan": "Balanced",
+        "power_mode": "Balanced",
+        "power_mode_known": true
+      }
+    },
+    {
+      "name": "background_load",
+      "status": "warn",
+      "summary": "background CPU load is 18.3% (over 10%), which distorts timings",
+      "code": "background_cpu_load_high",
+      "hint": "Close background apps before benchmarking.",
+      "exit_code": null,
+      "duration_ms": 1015.1718,
+      "details": {
+        "cpu_utilization_ratio": 0.18335901386748846,
+        "sample_window_s": 1.0140748,
+        "threshold_ratio": 0.1
+      }
+    }
+  ],
+  "overall": {
+    "status": "warn",
+    "exit_code": 0
+  },
+  "duration_ms": 1178.8681
+}

@@ -2,7 +2,8 @@
 
 ```text
 edgebench run --model <file.onnx> [options]    benchmark a model
-edgebench doctor [--json] [--load-sample-ms N] check the build, the machine and ONNX Runtime
+edgebench doctor [--json] [--quick] [--prune-cache] [--ep-cache-dir PATH] [--load-sample-ms N]
+                                                check everything a run depends on
 edgebench --version | --help
 edgebench <command> --help
 ```
@@ -668,123 +669,105 @@ def edgebench_random(seed: int, count: int) -> np.ndarray:
 
 ## `edgebench doctor`
 
-Checks everything a benchmark depends on and reports it:
-
-- **Build**: edgebench version, git commit and whether the tree had uncommitted
-  changes at build time, build type, compiler, results schema version.
-- **Power**: power source, battery charge, battery saver, power plan (name and
-  GUID) and Windows power mode (name and overlay GUID; an unknown overlay is
-  shown as its GUID), plus system-wide CPU load sampled over 1 s. Doctor warns,
-  without changing the exit code, when the machine runs on battery, battery
-  saver is on, or the background load is above 10%, because each of them
-  distorts benchmarks. It never changes a power setting.
-- **System**: OS name, version and build; OS and process architecture; CPU name,
-  physical cores and logical processors; total physical memory; device
-  manufacturer and model. An x64 (or ARM64EC) build running under emulation on
-  ARM64 Windows is reported as `EMULATED` with a warning, because its timings
-  would not represent native performance.
-- **ONNX Runtime**: the load result (version, C API version, library path,
-  `load_check`), or the loader's error kind and message.
-- **Loaded modules**: every ONNX Runtime and QNN DLL in the process, with its
-  path, and whether it is inside the bundle directory (the executable's
-  directory).
-- **QNN execution provider**: the plugin library's path
-  (`onnxruntime_providers_qnn.dll` next to the executable), the result of
-  registering it with ONNX Runtime (by that absolute path, never through the DLL
-  search path), the EP version from its device metadata, and the device NPU runs
-  would use: the single device of the `QNNExecutionProvider` with hardware type
-  `NPU`, or why there is none (`no_qnn_ep_devices`, `no_npu_device`,
-  `multiple_npu_devices`). x64 builds are CPU-only and show `not bundled`.
-  Registration loads the plugin DLL, so the module check above runs after it.
-- **EP devices**: every device ONNX Runtime enumerates once the QNN EP is
-  registered (on this machine: the CPU, the Hexagon NPU and the Adreno GPU), with
-  EP name and vendor, hardware type, vendor, vendor and device IDs, and the
-  device and EP metadata as reported. The device selected for NPU runs is
-  marked.
+Checks everything a run depends on, before you trust one. Run it on every new
+machine and before any run whose numbers you want to keep. Each check reports
+`PASS`, `WARN`, `FAIL` or `N/A` (not applicable to this build or machine) with
+one summary line, details below it, and for a warning or failure what is wrong
+(`[code]`) and what to do (`hint:`). Doctor never changes a setting and, without
+`--prune-cache`, never deletes anything.
 
 | Option | Meaning |
 |---|---|
-| `--load-sample-ms N` | Length of the background CPU load sample, default `1000`; `0` skips it (`system.load` is null) |
-| `--json` | Print the report as JSON instead of text. `tool`, `system` and `runtime` use the [results schema](results-schema.md)'s field names where they overlap; `onnxruntime_load`, `problems`, `warnings`, `result` and `exit_code` summarize the checks |
+| `--json` | Print the report as JSON ([schema](../schemas/doctor-report.v1.0.0.schema.json); check it with `scripts/validate_doctor.py`) instead of text |
+| `--load-sample-ms N` | Length of the background CPU load sample, default `1000`; `0` skips it (`background_load` is N/A) |
+| `--ep-cache-dir PATH` | The EP context cache directory to check, default `%LOCALAPPDATA%\EdgeBench\qnn-context` |
+| `--prune-cache` | Delete the stale cache entries (see `ep_cache_dir`), with the same manifest-only deletion as runs: only files a manifest edgebench wrote lists |
+| `--quick` | Skip the three checks that use the NPU backend (`backend_versions`, `npu_probe`, `npu_context`, reported N/A, `skipped (--quick)`): about 1 s instead of about 8 s |
 
-Exit code 0 when every check passes. Exit code 4 when ONNX Runtime cannot be
-loaded (the report still contains every section that does not need it), when an
-ONNX Runtime/QNN module is loaded from outside the bundle directory (the module
-is named), or, in ARM64 builds, when the QNN execution provider is missing from
-the bundle (`qnn_ep_not_bundled`) or ONNX Runtime refuses to register it
-(`ep_registration_failed`). No selectable NPU is a warning coded with the
-selection failure (for example `warning: [no_qnn_ep_devices] ...` on an ARM64
-machine without Qualcomm hardware): CPU runs still work, so the exit code is 0. Each problem is also printed to stderr as
-`error: [<kind>] <message>`, with a `hint:` line when there is a fix to suggest.
-Warnings (battery power, battery saver, background load over 10%, an unknown
-power mode, emulation, no NPU for NPU runs) appear once, in the report (text or JSON), as
-`warning: [<code>] <message>`; they are not repeated on stderr and do not
-change the exit code.
+The checks, in report order. They also run in an order that respects the QNN
+execution provider: the session-free backend query (`backend_versions`) runs
+before the first QNN session in the process, because the EP crashes when asked
+about compatibility info after one (see [architecture.md](architecture.md)).
+
+| Check | What it checks | Warn / fail, and what to do |
+|---|---|---|
+| `ort_bundle` | `onnxruntime.dll` loads from the executable's directory (long path, file version, C API version), every pinned ONNX Runtime file matches its size and SHA256 in [`cmake/bundle-pins.json`](../cmake/bundle-pins.json), and every ONNX Runtime / QNN module loaded by all the checks comes from the bundle | Fail (exit 4): ONNX Runtime cannot be loaded (the loader's error kind, e.g. `dll_not_found`, `version_mismatch`), `bundle_file_mismatch`, `module_outside_bundle`. Rebuild, or rerun `scripts/fetch_deps.ps1 -Force` and rebuild. Warn: `process_emulated` (use the native build) |
+| `qnn_bundle` | The QNN EP plugin, `QnnHtp.dll`, `QnnHtpPrepare.dll`, the HTP stubs and `QnnSystem.dll` against their pins (and their file versions); the plugin registers with ONNX Runtime | N/A in x64 builds (no QNN EP). Fail (exit 4): `qnn_bundle_mismatch` (a missing or changed file), or the registration's error kind |
+| `backend_versions` | The backend build id and SDK version the QNN EP reports before any session, as recorded in results (`runtime.qnn`), against the SDK version the QNN EP release declares and the version resource of `QnnHtp.dll` | Never fails. Warn: `qnn_sdk_version_disagreement`, `qnn_backend_version_disagreement` (check that the bundle comes from the pinned release), `backend_build_unavailable`. N/A without an NPU |
+| `devices` | Every EP device ONNX Runtime enumerates, and the NPU an NPU run would select (the single `QNNExecutionProvider` device of type NPU) | Fail (exit 3): `multiple_npu_devices`, `ep_enumeration_failed`. Warn: `no_qnn_ep_devices`, `no_npu_device` (CPU runs still work) |
+| `npu_probe` | Two tiny probe models, built into the executable ([`engine/resources/doctor/`](../engine/resources/doctor/)): a 3x3 convolution as static INT8 QDQ, and in FP32 run with FP16 compute (`--npu-fp16` semantics). Each runs once in a strict NPU session, with the generated input of `run` (SplitMix64, seed 0), and its output must be byte-identical to the expected output made with the Python reference sessions (`scripts/make_probe_references.py`). The modules are checked while each session exists | Fail: a session failure with its `run` exit code (backend 4, strict refusal 5, other ONNX Runtime errors 3), `npu_probe_mismatch` (1: the NPU computes something else than the reference: check the QNN files and the NPU driver), `module_outside_bundle` (4) |
+| `npu_context` | An EP context of the INT8 probe built in a temporary directory under `%TEMP%` (never in the user's cache), loaded, and run: its output must equal the compiled session's. Reports the HTP arch from the context's compatibility info. The EP's verdict on it is not available: it can only be asked before the first QNN session | Fail: the error's exit code (a context that cannot be loaded: 3), `ep_context_outputs_differ` (1: do not use `--ep-cache`). Warn: `htp_arch_unavailable`, `temporary_directory_left` |
+| `ep_cache_dir` | The cache directory: exists (missing is fine: the first `--ep-cache` run creates it), writable, size, entries, and stale entries: their key's ONNX Runtime, QNN EP or QNN SDK version, HTP backend file version or device differs from this machine's, so no run will ever use them | Fail (exit 6): `ep_cache_dir_not_writable` (pass a writable `--ep-cache-dir`). Warn: `stale_cache_entries` (delete them with `--prune-cache`), `cache_directories_without_manifest` (never touched by edgebench: remove them yourself) |
+| `power` | AC or battery, battery saver, the Windows power mode | Warn: `battery_power`, `battery_saver_on`, `power_mode_not_best_performance`, `power_source_unknown`. Published latency runs require AC power and the power mode Best performance |
+| `background_load` | System-wide CPU load over `--load-sample-ms`, sampled first, before doctor does any work | Warn: `background_cpu_load_high` above 10% (close background apps) |
+
+**Exit code.** 0 when no check fails (warnings allowed). When a check fails,
+the exit code of the first failing check in report order, which is the code
+`edgebench run` gives for the same problem (the one a run would hit first):
+
+| Exit | Failures |
+|---|---|
+| 1 | `npu_probe_mismatch`, `ep_context_outputs_differ` |
+| 3 | `multiple_npu_devices`, `ep_enumeration_failed`, probe or context sessions ONNX Runtime refuses (`ep_context_load_failed` included) |
+| 4 | ONNX Runtime load failures, `bundle_file_mismatch`, `qnn_bundle_mismatch`, `module_outside_bundle`, QNN EP registration failures, backend load failures |
+| 5 | A strict-mode refusal of a probe |
+| 6 | `ep_cache_dir_not_writable` |
+
+Failed checks are also printed to stderr as
+`error: [<code>] <check>: <summary>` with their hint. With `--json` the report
+has `checks[]` (`name`, `status`, `summary`, `code`, `hint`, `exit_code` for a
+failure, `duration_ms`, `details`), `overall` (`status`, `exit_code`), the tool,
+the pinned and found versions, the system block (results schema field names)
+and `duration_ms`. The CI jobs run the full doctor on runners without an NPU
+and require exit code 0 with the NPU checks N/A or warning
+(`scripts/validate_doctor.py --runner`).
+
+A full doctor takes about 8 s on a Surface Laptop 7: four NPU session creations
+(two probes, the context build and its load, about 2 s each but the load)
+make up almost all of it. `--quick` takes about 1 s.
 
 Sample output (Surface Laptop 7, development build):
 
 ```text
-Build
-  edgebench          0.1.0
-  git commit         ee9fffbb54e7e9574f513f4a4737c5c18555dd91 (dirty)
-  build type         Release
-  compiler           MSVC 19.42.34435.0
-  results schema     1.2.0
+edgebench 0.1.0 (0e964f9ff138587eeab6787f9c25589203a7a7e0, dirty, Release)
+ONNX Runtime 1.32.0 (pinned 1.32.0), QNN EP 2.8.0 (pinned 2.8.0), QAIRT SDK 2.52.0 (release declares 2.52.0)
+Windows 11 Home 25H2 (build 26200.9974, arm64), Snapdragon(R) X 10-core X1P64100 @ 3.40 GHz, Microsoft Corporation Microsoft Surface Laptop, 7th Edition
+bundle C:\dev\edgebench\build\arm64-release\bin\Release
 
-System
-  OS                 Windows 11 Home
-  OS version         25H2 (build 26200.9974)
-  OS architecture    arm64
-  process            arm64 (native)
-  CPU                Snapdragon(R) X 10-core X1P64100 @ 3.40 GHz
-  cores              10 physical, 10 logical
-  memory             15.6 GiB (16757260288 bytes)
-  device             Microsoft Corporation / Microsoft Surface Laptop, 7th Edition
+PASS  ort_bundle        onnxruntime 1.32.0 (C API 32) from the bundle, 2 files match their SHA256 pins, 4 ONNX Runtime / QNN modules loaded, all from the bundle
+                        file version 1.32.0.20261112.3.fab30a4, C:\dev\edgebench\build\arm64-release\bin\Release\onnxruntime.dll
+PASS  qnn_bundle        7 QNN files match their SHA256 pins; the QNN execution provider registers
+                        onnxruntime_providers_qnn.dll, QnnHtp.dll, QnnHtpPrepare.dll, QnnHtpV68Stub.dll, QnnHtpV73Stub.dll, QnnHtpV81Stub.dll, QnnSystem.dll
+                        QnnHtp.dll version 2.52.0.261104115025
+PASS  backend_versions  backend build v2.52.0.261104115025, SDK 2.52.0 (reported by the QNN EP before any session)
+                        agrees with the release's SDK 2.52.0 and QnnHtp.dll 2.52.0.261104115025
+PASS  devices           3 EP devices; NPU for runs: QNNExecutionProvider NPU (ep vendor Qualcomm, vendor (unset), vendor_id 0x4d4f4351, device_id 0x41304430)
+                        CPUExecutionProvider CPU (ep vendor Microsoft, vendor Qualcomm, vendor_id 0x4d4f4351, device_id 0x7)
+                        QNNExecutionProvider NPU (ep vendor Qualcomm, vendor (unset), vendor_id 0x4d4f4351, device_id 0x41304430)
+                        QNNExecutionProvider GPU (ep vendor Qualcomm, vendor (unset), vendor_id 0x4d4f4351, device_id 0x36334330)
+PASS  npu_probe         strict NPU sessions, outputs bit-identical to the reference: npu_probe_int8.onnx (int8), npu_probe_fp32.onnx (fp16); every module from the bundle
+                        npu_probe_int8.onnx: 256 values bit-identical, session 1850 ms
+                        npu_probe_fp32.onnx: 256 values bit-identical, session 2039 ms
+PASS  npu_context       built in 1894 ms, loaded in 418 ms, outputs equal; HTP arch v73
+                        compatibility info v2:6:2.52.0:5.52.0:73:0:0:0
+                        verdict (not rated): the QNN EP cannot rate compatibility info once a QNN session has existed in the process, which building the context needs
+PASS  ep_cache_dir      C:\Users\you\AppData\Local\EdgeBench\qnn-context: 4 entries, 19.1 MiB
+                        28eb1b68924a  mobilenetv2_int8_b8_ctx.onnx  4.1 MiB
+                        359422e638b5  efficientnet_lite0_fp32_b1_ctx.onnx  11.2 MiB
+                        4c992b58713a  mobilenetv2_int8_b1_ctx.onnx  3.8 MiB
+                        b9ee82ef69ba  conv1d_autoencoder_int8_b1_ctx.onnx  0.1 MiB
+WARN  power             power mode is Balanced, not Best performance
+                        [power_mode_not_best_performance]
+                        hint: Set the power mode to Best performance (Settings > System > Power). Published latency runs require AC power and the Windows power mode Best performance.
+PASS  background_load   system-wide CPU load 4.7% over 1.0 s
 
-Power
-  source             ac
-  battery            80%
-  battery saver      off
-  power plan         Balanced (381b4222-f694-41f0-9685-ff5bb260df2e)
-  power mode         Balanced (overlay 00000000-0000-0000-0000-000000000000)
-  background CPU     5.7% over 1.0 s
-
-ONNX Runtime
-  required           1.32.0 (C API 32)
-  library            C:\dev\edgebench\build\arm64-release\bin\Release\onnxruntime.dll
-  version            1.32.0 (C API 32)
-  load check         full_path_verified
-
-QNN execution provider
-  library            C:\dev\edgebench\build\arm64-release\bin\Release\onnxruntime_providers_qnn.dll
-  registration       ok (as QNNExecutionProvider)
-  version            2.8.0
-  NPU for runs       QNNExecutionProvider NPU (ep vendor Qualcomm, vendor (unset), vendor_id 0x4d4f4351, device_id 0x41304430), 1 candidate
-
-Loaded ONNX Runtime / QNN modules (bundle: C:\dev\edgebench\build\arm64-release\bin\Release)
-  C:\dev\edgebench\build\arm64-release\bin\Release\onnxruntime.dll
-  C:\dev\edgebench\build\arm64-release\bin\Release\onnxruntime_providers_qnn.dll
-  C:\dev\edgebench\build\arm64-release\bin\Release\onnxruntime_providers_shared.dll
-
-EP devices (CPU EP and QNN EP)
-  CPUExecutionProvider  type CPU  ep vendor Microsoft  vendor Qualcomm  vendor_id 0x4d4f4351  device_id 0x7
-      device metadata: {Description=Snapdragon(R) X 10-core X1P64100 @ 3.42 GHz}
-      ep metadata:     {version=1.32.0}
-  QNNExecutionProvider  type NPU  ep vendor Qualcomm  vendor (unset)  vendor_id 0x4d4f4351  device_id 0x41304430   <-- selected for NPU runs
-      device metadata: {LUID=78645}
-      ep metadata:     {library_path=C:\dev\edgebench\build\arm64-release\bin\Release\onnxruntime_providers_qnn.dll, version=2.8.0}
-  QNNExecutionProvider  type GPU  ep vendor Qualcomm  vendor (unset)  vendor_id 0x4d4f4351  device_id 0x36334330
-      device metadata: {Description=Qualcomm(R) Adreno(TM) X1-85 GPU, Discrete=0, DxgiAdapterNumber=0, DxgiHighPerformanceIndex=0, DxgiVideoMemory=128 MB, LUID=77477}
-      ep metadata:     {library_path=C:\dev\edgebench\build\arm64-release\bin\Release\onnxruntime_providers_qnn.dll, version=2.8.0}
-
-Result: OK
+Result: OK with 1 warning in 8.4 s
 ```
 
-With a copy of `C:\Windows\System32\onnxruntime.dll` next to the executable, the
-ONNX Runtime section reads `load check FAILED (version_mismatch)` and
-`found version 1.17.1`, stderr has
-`error: [version_mismatch] ...\onnxruntime.dll is ONNX Runtime 1.17.1, but EdgeBench requires ONNX Runtime 1.32.0. ...`,
-and the exit code is 4.
+Loading the probe's EP context makes ONNX Runtime print its "supported but
+suboptimal" warning on stderr (see
+[EP context cache and initialization](#ep-context-cache-and-initialization));
+the QNN EP's own diagnostics (`DSP_INFO ...`) may appear there too.
 
 ## Exit codes
 
@@ -914,18 +897,26 @@ not triggered on this hardware; validator fixtures `accelerator_exceeds_latency_
 `power_state_changed`, `unknown_power_mode`, `value_unavailable` (for the QNN
 values: `QnnBackendInfoNpu.WithoutAContextTheHtpArchIsUnavailable`).
 
-`edgebench doctor`:
+`edgebench doctor` (the check and its code; see [`edgebench doctor`](#edgebench-doctor)):
 
 | Case | Kind | Exit | Test |
 |---|---|---|---|
-| ONNX Runtime cannot be loaded | loader kind | 4 | `Doctor.MissingDllIsReported`, `Doctor.WrongDllVersionIsReported`, `Doctor.CorruptDllIsReported`, ... |
-| An ONNX Runtime/QNN module is loaded from outside the bundle | `module_outside_bundle` | 4 | not triggerable (the loader refuses a foreign `onnxruntime.dll` first) |
-| EP devices cannot be enumerated | `ep_enumeration_failed` | 3 | not triggerable |
-| ARM64 build without `onnxruntime_providers_qnn.dll` next to the executable (x64 builds: reported as `not bundled`, exit 0) | `qnn_ep_not_bundled` | 4 | `Doctor.MissingQnnEpFailsOnlyBuildsThatBundleIt` |
-| ONNX Runtime refuses to register the QNN EP library (not an EP library, wrong architecture, damaged) | `ep_registration_failed` | 4 | `Doctor.QnnEpThatIsNotAnEpLibraryIsReported`, `EpLibraryRegistration.ADllThatIsNotAnEpLibraryIsALoadFailure` |
-| After registering the QNN EP, an ONNX Runtime/QNN module is loaded from outside the bundle (the registration is undone) | `module_outside_bundle` | 4 | `QnnEpRegistration.AForeignQnnModuleFailsTheRegistration` |
-| No QNN EP device, no QNN device of type NPU, more than one QNN NPU | warning `no_qnn_ep_devices`, `no_npu_device`, `multiple_npu_devices` (the report names the reason, the device list shows what was enumerated) | 0 | `Doctor.ReportsTheQnnExecutionProviderAndTheNpuChoice`, `NpuSelection.*` |
-| Battery, battery saver, load over 10%, unknown power mode, emulation | warning only, printed once in the report (not on stderr) | 0 | `DoctorWarnings.*`, `Doctor.HappyPathReportsBundledOnnxRuntime` |
+| ONNX Runtime cannot be loaded (`ort_bundle`) | loader kind | 4 | `Doctor.MissingDllIsReported`, `Doctor.MissingDllJson`, `Doctor.WrongDllVersionIsReported`, `Doctor.DllWithoutOrtEntryPointIsReported`, `Doctor.CorruptDllIsReported` |
+| A bundled ONNX Runtime file differs from its pin (`ort_bundle`) | `bundle_file_mismatch` | 4 | `Doctor.AModifiedBundleFileFailsItsPin`, `DoctorOrtBundle.PassWarnAndFail` |
+| An ONNX Runtime/QNN module is loaded from outside the bundle (`ort_bundle`, `npu_probe`) | `module_outside_bundle` | 4 | `DoctorOrtBundle.PassWarnAndFail`, `DoctorNpuProbe.Outcomes` (not triggerable end to end: the loader refuses a foreign `onnxruntime.dll` first) |
+| ARM64 build with a QNN file missing or changed (x64: `qnn_bundle` N/A, exit 0) | `qnn_bundle_mismatch` | 4 | `Doctor.MissingQnnFilesFailOnlyBuildsThatBundleThem`, `DoctorNpu.ExitCodesFollowTheFirstFailure`, `DoctorQnnBundle.FilesAndRegistration` |
+| ONNX Runtime refuses to register the QNN EP library | `ep_registration_failed` | 4 | `Doctor.QnnEpThatIsNotAnEpLibraryIsReported` (x64), `DoctorQnnBundle.FilesAndRegistration` |
+| EP devices cannot be enumerated | `ep_enumeration_failed` | 3 | `DoctorDevices.NpuSelectionOutcomes` (not triggerable end to end) |
+| More than one QNN NPU | `multiple_npu_devices` | 3 | `DoctorDevices.NpuSelectionOutcomes` (not triggerable on real hardware) |
+| No QNN EP device, none of type NPU | warning `no_qnn_ep_devices`, `no_npu_device` | 0 | `DoctorDevices.NpuSelectionOutcomes`, CI doctor step (ARM64 runner) |
+| A probe session is refused or fails | the session's kind | 3, 4 or 5 | `DoctorNpuProbe.Outcomes` (not triggerable end to end: the probe models are built in) |
+| A probe output differs from the expected one | `npu_probe_mismatch` | 1 | `DoctorNpuProbe.Outcomes`, `DoctorNpuProbe.ByteComparison` (not triggerable end to end) |
+| The probe's EP context cannot be loaded, or computes other outputs | `ep_context_load_failed`, `ep_context_outputs_differ` | 3, 1 | `DoctorNpuContext.Outcomes` (not triggerable end to end) |
+| The cache directory cannot be created or written | `ep_cache_dir_not_writable` | 6 | `Doctor.CacheDirectoryThatCannotBeCreatedExits6`, `DoctorNpu.ExitCodesFollowTheFirstFailure`, `DoctorEpCacheDir.Outcomes` |
+| Stale cache entries; directories without a manifest | warning `stale_cache_entries`, `cache_directories_without_manifest` | 0 | `DoctorNpu.PruneCacheDeletesOnlyStaleEntries`, `Doctor.CacheDirectoryIsReportedAndNeverChangedWithoutPrune` |
+| Battery, battery saver, not Best performance; load over 10%; emulation; backend version disagreement | warnings | 0 | `DoctorPower.OnlyAcAndBestPerformancePass`, `DoctorBackgroundLoad.ThresholdAndNoSample`, `DoctorOrtBundle.PassWarnAndFail`, `DoctorBackendVersions.AgreementAndDisagreement` |
+| Several checks fail | the first failing check's | its code | `DoctorOverall.StatusAndExitCodeOfTheFirstFailure`, `DoctorNpu.ExitCodesFollowTheFirstFailure` |
+| `--ep-cache-dir ""` | `usage_error` | 2 | `Doctor.EmptyCacheDirectoryIsAUsageError` |
 | Ctrl+C or Ctrl+Break | none | 130 | same handler mode as the `ort_probe` test |
 
 `ort_probe`:

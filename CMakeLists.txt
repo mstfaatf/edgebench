@@ -22,10 +22,11 @@ include(EdgeBenchWarnings)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 # The ONNX Runtime version the C++ code is built against and accepts at run time
-# (generated into engine/src/version_config.hpp). Must match the onnxruntime
-# version in requirements.txt (and scripts/fetch_deps.ps1), so the C++ engine and
-# the Python tooling run the same ONNX Runtime.
-set(EDGEBENCH_ONNXRUNTIME_VERSION 1.32.0)
+# (generated into engine/src/version_config.hpp) comes from cmake/bundle-pins.json,
+# like the versions and SHA256 pins scripts/fetch_deps.ps1 uses. It must match the
+# onnxruntime version in requirements.txt, so the C++ engine and the Python
+# tooling run the same ONNX Runtime.
+include(BundlePins)
 # The QNN execution provider (NPU) exists for ARM64 only; x64 builds are CPU-only.
 if(EDGEBENCH_TARGET_ARCH STREQUAL "arm64")
   find_package(OnnxRuntime ${EDGEBENCH_ONNXRUNTIME_VERSION} EXACT REQUIRED COMPONENTS QNN)

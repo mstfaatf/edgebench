@@ -173,7 +173,9 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
 
     // ---------------------------------------------------------------- doctor
     CLI::App* doctor = app.add_subcommand(
-        "doctor", "Check the build, the system and the ONNX Runtime installation.");
+        "doctor",
+        "Check everything a run depends on: the ONNX Runtime and QNN bundle, the backend, "
+        "the devices, the NPU (probe sessions), the EP context cache, power and load.");
     doctor->add_flag("--json", result.doctor.json, "Print the report as JSON");
     doctor
         ->add_option("--load-sample-ms", result.doctor.load_sample_ms,
@@ -181,6 +183,19 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
         ->type_name("N")
         ->check(CLI::NonNegativeNumber)
         ->capture_default_str();
+    std::string doctor_cache_dir;
+    CLI::Option* doctor_cache_opt =
+        doctor
+            ->add_option("--ep-cache-dir", doctor_cache_dir,
+                         "EP context cache directory to check "
+                         "[default: %LOCALAPPDATA%\\EdgeBench\\qnn-context]")
+            ->type_name("PATH");
+    doctor->add_flag("--quick", result.doctor.quick,
+                     "Skip the checks that use the NPU (backend versions, probe sessions, EP "
+                     "context): about a second instead of several");
+    doctor->add_flag("--prune-cache", result.doctor.prune_cache,
+                     "Delete stale EP context cache entries (only files their manifest lists); "
+                     "without it doctor deletes nothing");
 
     std::vector<std::string> reversed(args.rbegin(), args.rend());  // CLI11 consumes from the back
     try {
@@ -254,6 +269,16 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
     }
     if (doctor->parsed()) {
         result.command = Command::doctor;
+        if (doctor_cache_opt->count() > 0) {
+            if (doctor_cache_dir.empty()) {
+                result.err = format_error("usage_error", "--ep-cache-dir: must not be empty",
+                                          "Run 'edgebench doctor --help' for the options.");
+                result.exit = ExitCode::usage_error;
+                return result;
+            }
+            result.doctor.ep_cache_dir = std::filesystem::path(
+                std::u8string(doctor_cache_dir.begin(), doctor_cache_dir.end()));
+        }
         return result;
     }
     result.err = format_error("usage_error", "no command given",

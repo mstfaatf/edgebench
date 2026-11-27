@@ -6,6 +6,19 @@
 configure_file(src/version_config.hpp.in
   "${CMAKE_CURRENT_BINARY_DIR}/generated/version_config.hpp" @ONLY)
 
+# The pinned bundle files (cmake/bundle-pins.json) and the doctor's NPU probe
+# models with their expected outputs (engine/resources/doctor/), built into the
+# binary so `edgebench doctor` needs no files besides the bundle.
+edgebench_generate_bundle_pins("${CMAKE_CURRENT_BINARY_DIR}/generated/bundle_pins.hpp")
+include(EmbedFiles)
+set(_doctor_resources "${CMAKE_CURRENT_SOURCE_DIR}/resources/doctor")
+edgebench_embed_files("${CMAKE_CURRENT_BINARY_DIR}/generated/doctor_probes.hpp"
+  edgebench::doctor_resources
+  kNpuProbeInt8Model "${_doctor_resources}/npu_probe_int8.onnx"
+  kNpuProbeInt8Expected "${_doctor_resources}/npu_probe_int8.npu.f32"
+  kNpuProbeFp32Model "${_doctor_resources}/npu_probe_fp32.onnx"
+  kNpuProbeFp32Expected "${_doctor_resources}/npu_probe_fp32.npu_fp16.f32")
+
 # Git commit and dirty flag, regenerated on every build (the header only changes
 # when the values do).
 set(EDGEBENCH_BUILD_INFO_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/build_info.hpp")
@@ -28,6 +41,7 @@ add_library(edgebench_core STATIC
   src/crash_handler.cpp
   src/diagnostics.cpp
   src/doctor.cpp
+  src/doctor_checks.cpp
   src/dry_run.cpp
   src/ep_context_cache.cpp
   src/ep_devices.cpp
@@ -96,6 +110,12 @@ onnxruntime_copy_runtime_files(edgebench QNN)
 # ending in "Models" get `models`, suites ending in "Npu" get `npu`, all others
 # `ort`. CI runs `ctest -L "unit|ort"`.
 
+# NPU tests share the one NPU: the RESOURCE_LOCK keeps ctest from running two of
+# them at the same time even with -j (other tests still run in parallel). The
+# timeout is about 8x the slowest NPU test (~40 s), so a hang shows up as a
+# timeout instead of a stuck run.
+set(EDGEBENCH_NPU_TEST_TIMEOUT 300)
+
 # Registers the tests of an ONNX Runtime test program under the ort/models/npu labels.
 function(edgebench_discover_ort_tests target)
   gtest_discover_tests(${target} DISCOVERY_MODE PRE_TEST
@@ -103,7 +123,8 @@ function(edgebench_discover_ort_tests target)
   gtest_discover_tests(${target} DISCOVERY_MODE PRE_TEST
     TEST_FILTER "*Models.*" PROPERTIES LABELS models)
   gtest_discover_tests(${target} DISCOVERY_MODE PRE_TEST
-    TEST_FILTER "*Npu.*" PROPERTIES LABELS npu)
+    TEST_FILTER "*Npu.*" PROPERTIES LABELS npu RESOURCE_LOCK npu
+    TIMEOUT ${EDGEBENCH_NPU_TEST_TIMEOUT})
 endfunction()
 
 if(EDGEBENCH_BUILD_TESTS)
@@ -111,6 +132,7 @@ if(EDGEBENCH_BUILD_TESTS)
     tests/batch_equivalence_test.cpp
     tests/ep_context_cache_test.cpp
     tests/cli_test.cpp
+    tests/doctor_checks_test.cpp
     tests/core_types_test.cpp
     tests/exit_codes_test.cpp
     tests/interrupt_test.cpp
