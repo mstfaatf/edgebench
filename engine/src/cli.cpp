@@ -178,6 +178,19 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
     run->add_flag("--dry-run", cfg.dry_run,
                   "Validate, create the session, run one inference, print the resolved "
                   "configuration as JSON");
+    // Hidden: set by `edgebench suite` for the runs it launches (results: the suite block).
+    SuiteLink link;
+    CLI::Option* suite_name_opt = run->add_option("--suite-name", link.suite_name)->group("");
+    CLI::Option* suite_hash_opt =
+        run->add_option("--suite-config-hash", link.config_hash)->group("");
+    CLI::Option* suite_run_opt = run->add_option("--suite-run-id", link.run_id)->group("");
+    CLI::Option* suite_rep_opt = run->add_option("--suite-repetition", link.repetition)->group("");
+    CLI::Option* suite_order_opt =
+        run->add_option("--suite-order-index", link.order_index)->group("");
+    CLI::Option* suite_cooldown_opt =
+        run->add_option("--suite-cooldown-s-before", link.cooldown_s_before)->group("");
+    CLI::Option* suite_skipped_opt =
+        run->add_flag("--suite-preflight-skipped", link.preflight_skipped)->group("");
 
     // ---------------------------------------------------------------- doctor
     CLI::App* doctor = app.add_subcommand(
@@ -204,6 +217,43 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
     doctor->add_flag("--prune-cache", result.doctor.prune_cache,
                      "Delete stale EP context cache entries (only files their manifest lists); "
                      "without it doctor deletes nothing");
+
+    // ---------------------------------------------------------------- suite
+    CLI::App* suite = app.add_subcommand(
+        "suite",
+        "Run an experiment plan from a configuration file (docs/suite.md): every run in its "
+        "own `edgebench run` process, in a rotated order with cooldowns, after a pre-flight "
+        "check; resumable after an interruption.");
+    std::string suite_config, suite_resume, suite_output, suite_python;
+    CLI::Option* suite_config_opt =
+        suite->add_option("config", suite_config, "Suite configuration file (.json)")
+            ->type_name("CONFIG");
+    CLI::Option* suite_resume_opt =
+        suite
+            ->add_option("--resume", suite_resume,
+                         "Continue the suite in DIR: keep its finished runs and run the rest "
+                         "(CONFIG defaults to the configuration file the suite was started with)")
+            ->type_name("DIR");
+    CLI::Option* suite_output_opt =
+        suite
+            ->add_option("--output-dir", suite_output,
+                         "Create the suite directory here instead of the configuration's "
+                         "output_dir")
+            ->type_name("PATH");
+    CLI::Option* suite_python_opt =
+        suite
+            ->add_option("--python", suite_python,
+                         "Python interpreter that runs scripts/validate_results.py on every "
+                         "result [default: .venv\\Scripts\\python.exe of the repository]")
+            ->type_name("PATH");
+    suite->add_flag("--dry-run", result.suite.dry_run,
+                    "Print the expanded, ordered run plan and the estimated duration; run nothing");
+    suite->add_flag("--fail-fast", result.suite.fail_fast,
+                    "Stop at the first failed run (the rest are marked skipped); by default "
+                    "failures are recorded and the suite continues");
+    suite->add_flag("--skip-preflight", result.suite.skip_preflight,
+                    "Development only: skip the pre-flight check. The suite and every result "
+                    "from it are marked as not publishable");
 
     std::vector<std::string> reversed(args.rbegin(), args.rend());  // CLI11 consumes from the back
     try {
@@ -263,6 +313,27 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
         cfg.output_dir = std::filesystem::path(std::u8string(output_dir.begin(), output_dir.end()));
         if (profile_iterations_opt->count() > 0)
             cfg.profile_iterations = profile_iterations;
+        const std::size_t suite_given = suite_name_opt->count() + suite_hash_opt->count() +
+                                        suite_run_opt->count() + suite_rep_opt->count() +
+                                        suite_order_opt->count() + suite_cooldown_opt->count();
+        if (suite_given > 0 && suite_given != 6) {
+            result.err = format_error(
+                "usage_error",
+                "--suite-name, --suite-config-hash, --suite-run-id, --suite-repetition, "
+                "--suite-order-index and --suite-cooldown-s-before go together",
+                "They are set by 'edgebench suite'.");
+            result.exit = ExitCode::usage_error;
+            return result;
+        }
+        if (suite_given == 0 && suite_skipped_opt->count() > 0) {
+            result.err = format_error("usage_error",
+                                      "--suite-preflight-skipped needs the other --suite options",
+                                      "They are set by 'edgebench suite'.");
+            result.exit = ExitCode::usage_error;
+            return result;
+        }
+        if (suite_given > 0)
+            cfg.suite = link;
 
         const std::vector<ConfigError> errors = validate(cfg);
         if (!errors.empty()) {
@@ -288,6 +359,37 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
             }
             result.doctor.ep_cache_dir = std::filesystem::path(
                 std::u8string(doctor_cache_dir.begin(), doctor_cache_dir.end()));
+        }
+        return result;
+    }
+    if (suite->parsed()) {
+        result.command = Command::suite;
+        auto path = [](const std::string& s) {
+            return std::filesystem::path(std::u8string(s.begin(), s.end()));
+        };
+        SuiteOptions& o = result.suite;
+        if (suite_config_opt->count() > 0)
+            o.config = path(suite_config);
+        if (suite_resume_opt->count() > 0)
+            o.resume = path(suite_resume);
+        if (suite_output_opt->count() > 0)
+            o.output_dir = path(suite_output);
+        if (suite_python_opt->count() > 0)
+            o.python = path(suite_python);
+        std::string problem;
+        if (!o.config && !o.resume)
+            problem = "give a suite configuration file, or --resume DIR";
+        else if (o.resume && o.dry_run)
+            problem = "--dry-run cannot be combined with --resume";
+        else if (o.resume && o.output_dir)
+            problem = "--output-dir cannot be combined with --resume (the suite stays in DIR)";
+        else if ((o.config && o.config->empty()) || (o.resume && o.resume->empty()) ||
+                 (o.output_dir && o.output_dir->empty()) || (o.python && o.python->empty()))
+            problem = "paths must not be empty";
+        if (!problem.empty()) {
+            result.err = format_error("usage_error", problem,
+                                      "Run 'edgebench suite --help' for the options.");
+            result.exit = ExitCode::usage_error;
         }
         return result;
     }

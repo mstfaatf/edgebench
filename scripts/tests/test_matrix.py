@@ -146,3 +146,18 @@ def test_the_check_notices_a_changed_npu_result(tmp_path, change, message):
     manifest = {f.file: f for f in reg.read_manifest()[0]}
     problems, _ = cm.check_run(run, copy, plan, summary, manifest)
     assert any(message in p for p in problems), problems
+
+
+def test_a_suite_manifest_reads_as_a_plan():
+    manifest = json.loads((reg.REPO_ROOT / "docs" / "examples" / "suite" / "example-suite-manifest.json")
+                          .read_text(encoding="utf-8"))
+    plan = cm.plan_from_suite(manifest)
+    assert len(plan["runs"]) == len(manifest["runs"])
+    for run, record in zip(plan["runs"], manifest["runs"]):
+        c = record["configuration"]
+        assert run["settings"] == {"trials": c["trials"], "iterations": c["iterations"],
+                                   "warmup": c["warmup"]}
+        assert run["config"] == f"{c['provider']}_{c['compute_precision']}"
+        assert run["result"] == record["result_file"]
+        assert run["cached"] is (c["init"] == "cached")
+    assert plan["doctor"]["checks"]  # from the last pre-flight attempt

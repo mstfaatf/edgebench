@@ -100,16 +100,41 @@ std::vector<ConfigError> validate(const RunConfig& c) {
     }
     if (c.htp_graph_finalization_mode &&
         !is_htp_graph_finalization_mode(*c.htp_graph_finalization_mode)) {
-        add("htp-graph-finalization-mode", "unsupported mode '" + *c.htp_graph_finalization_mode +
-                                               "'; supported modes: " +
-                                               htp_graph_finalization_modes_list());
+        add("htp-graph-finalization-mode",
+            "unsupported mode '" + *c.htp_graph_finalization_mode +
+                "'; supported modes: " + htp_graph_finalization_modes_list());
     }
 
+    if (c.suite) {
+        const auto hex64 = [](const std::string& v) {
+            return v.size() == 64 && std::all_of(v.begin(), v.end(), [](char ch) {
+                       return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f');
+                   });
+        };
+        if (!is_valid_result_name(c.suite->suite_name))
+            add("suite-name", "must be a valid suite name (got '" + c.suite->suite_name + "')");
+        if (!hex64(c.suite->config_hash))
+            add("suite-config-hash", "must be 64 lowercase hex digits");
+        if (!hex64(c.suite->run_id))
+            add("suite-run-id", "must be 64 lowercase hex digits");
+        if (c.suite->repetition < 0)
+            add("suite-repetition", "must not be negative");
+        if (c.suite->order_index < 0)
+            add("suite-order-index", "must not be negative");
+        if (!std::isfinite(c.suite->cooldown_s_before) || c.suite->cooldown_s_before < 0)
+            add("suite-cooldown-s-before", "must be a non-negative number");
+        if (c.dry_run)
+            add("suite-name", "is not used with --dry-run");
+    }
     if (c.label && c.label->empty())
         add("label", "must not be empty");
     if (c.output_dir.empty())
         add("output-dir", "must not be empty");
     return errors;
+}
+
+std::string format_seconds(double seconds) {
+    return nlohmann::json(seconds).dump();
 }
 
 bool is_valid_result_name(std::string_view name) {

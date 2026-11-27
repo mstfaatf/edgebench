@@ -1,6 +1,9 @@
-"""Check a CPU/NPU matrix written by scripts/run_matrix.py, and print its sanity table.
+"""Check a CPU/NPU matrix (scripts/run_matrix.py, or an `edgebench suite` directory) and print
+its sanity table.
 
-For every run of the matrix's plan.json:
+MATRIX_DIR is a directory with the plan.json of scripts/run_matrix.py, or a suite
+directory with a suite-manifest.json (docs/suite.md); its runs are read as plan
+entries (settings per run). For every run:
 
 - the edgebench call exited 0 and its result validates in strict mode
   (``validate_results.py``: schema and consistency rules, warnings fail);
@@ -21,7 +24,9 @@ For every run of the matrix's plan.json:
   (a successful --ep-cache build result of the same key) and the timed run
   loaded it (hit, state loaded); cached and compiled sessions gave equal outputs;
   the init breakdown has a cold, a build and a cached value per trial; the
-  profiled pass's median accelerator time is not above the median timed latency;
+  profiled pass's median accelerator time is not above the median timed latency
+  (in a suite, each only for runs whose configuration asks for it: init "cached",
+  init_breakdown, profile_accelerator);
 - no warning or note outside EXPECTED below.
 
 Every unexpected item is listed and makes the check fail (exit 1). Then the
@@ -129,7 +134,7 @@ def check_run(run: dict, root: Path, plan: dict, summary: dict,
     if doc["status"] != "success":
         add(f"status {doc['status']}: {doc.get('error')}")
         return problems, doc
-    s = plan["settings"]
+    s = run.get("settings") or plan["settings"]
     cfg = doc["config"]
     entry = manifest[run["file"]]
     if doc["model"]["sha256"] != entry.sha256:
@@ -184,7 +189,7 @@ def check_run(run: dict, root: Path, plan: dict, summary: dict,
             elif w["code"] == "value_unavailable" and w["path"] == "/runtime/qnn/soc_model" \
                     and not npu:
                 add("soc_model value_unavailable on a CPU run")
-    if npu and "ep_context_recompilation_suggested" not in noted:
+    if npu and run.get("cached", True) and "ep_context_recompilation_suggested" not in noted:
         add("no ep_context_recompilation_suggested note on a run that loads an EP context")
 
     # Placement and modules.
@@ -197,6 +202,7 @@ def check_run(run: dict, root: Path, plan: dict, summary: dict,
         if qnn["partition_count"] != 1:
             add(f"{qnn['partition_count']} QNN partitions")
         cache = cfg["ep_context_cache"]
+    if npu and run.get("cached", True):
         build_doc, _ = load(root, run["cache_build"]["result"])
         if run["cache_build"]["exit_code"] != 0 or build_doc is None:
             add("the cache build run failed")
@@ -213,10 +219,12 @@ def check_run(run: dict, root: Path, plan: dict, summary: dict,
             add(f"cache mode {cache['mode']}, hit {cache['hit']}, state {cache['state']}")
         if cache["verified_equal_outputs"] is not True:
             add("cached and compiled outputs not verified equal")
+    if npu and run.get("init_breakdown", True):
         init = doc["timing"]["session_init"]["summary"]
         for k in ("cold_ms", "context_build_ms", "cached_init_ms"):
             if not init.get(k) or init[k]["count"] != s["trials"]:
                 add(f"init breakdown {k} has no value per trial: {init.get(k)}")
+    if npu and run.get("profile_accelerator", True):
         pp = doc["timing"]["profiled_pass"]
         if not pp or not pp["enabled"] or not pp.get("accelerator_ms"):
             add("no profiled pass")
@@ -253,7 +261,8 @@ def table(rows: list[tuple[dict, dict]]) -> list[str]:
             for d in cells[2:]:
                 init = d and d["timing"]["session_init"]["summary"]
                 line += (f"{init['cold_ms']['median_ms']:>11.0f} /{init['cached_init_ms']['median_ms']:>5.0f}"
-                         if init and init.get("cold_ms") else f"{'-':>19}")
+                         if init and init.get("cold_ms") and init.get("cached_init_ms")
+                         else f"{'-':>19}")
             out.append(line)
             cpu32, cpu8, npu8, npu16 = (median_p50(d) if d else None for d in cells)
             image = m != "conv1d_autoencoder"
@@ -281,6 +290,36 @@ def table(rows: list[tuple[dict, dict]]) -> list[str]:
     return out
 
 
+def plan_from_suite(manifest: dict) -> dict:
+    """A suite manifest's runs as plan.json entries (settings per run)."""
+    runs = []
+    for r in manifest["runs"]:
+        c = r["configuration"]
+        label = c.get("label", r["label"])
+        prefix = f"{c['model']}_b{c['batch']}_"
+        runs.append({
+            "run_id": f"{label}_rep{r['repetition']}", "model": c["model"],
+            "config": label[len(prefix):] if label.startswith(prefix) else label,
+            "file": c["model_file"], "batch": c["batch"], "provider": c["provider"],
+            "stored_precision": c["precision"], "compute_precision": c["compute_precision"],
+            "ep_compile_options": c["ep_compile_options"] or {},
+            "settings": {"trials": c["trials"], "iterations": c["iterations"],
+                         "warmup": c["warmup"]},
+            "cached": c["init"] == "cached", "init_breakdown": c["init_breakdown"],
+            "profile_accelerator": c["profile_accelerator"],
+            "exit_code": r["exit_code"] if r["exit_code"] is not None else -1,
+            "result": r["result_file"],
+            "cache_build": {"exit_code": (r["cache_build"] or {}).get("exit_code"),
+                            "result": (r["cache_build"] or {}).get("result_file")},
+        })
+    doctor = {}
+    for attempt in manifest["preflight"][-1:]:
+        for check in attempt["checks"]:
+            if check["name"] == "doctor":
+                doctor = check["details"].get("checks", {})
+    return {"settings": None, "doctor": {"checks": doctor}, "runs": runs}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("matrix_dir", type=Path)
@@ -288,10 +327,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     vr.make_output_safe()
     plan_path = args.matrix_dir / "plan.json"
-    if not plan_path.is_file():
-        print(f"error: {plan_path} not found", file=sys.stderr)
+    suite_path = args.matrix_dir / "suite-manifest.json"
+    if plan_path.is_file():
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    elif suite_path.is_file():
+        plan = plan_from_suite(json.loads(suite_path.read_text(encoding="utf-8")))
+    else:
+        print(f"error: neither {plan_path} nor {suite_path} found", file=sys.stderr)
         return 2
-    plan = json.loads(plan_path.read_text(encoding="utf-8"))
     summary = json.loads(BATCH_EQUIVALENCE_JSON.read_text(encoding="utf-8"))
     manifest = {f.file: f for f in read_manifest()[0]}
     rows, failed = [], 0

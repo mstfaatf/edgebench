@@ -532,7 +532,7 @@ json to_result_json(const BenchmarkResult& r, const std::optional<RawLatencyLink
         return out;
     };
 
-    return {
+    json doc = {
         {"schema_version", r.schema_version},
         {"run_id", r.run_id},
         {"timestamp_utc", r.timestamp_utc},
@@ -562,6 +562,17 @@ json to_result_json(const BenchmarkResult& r, const std::optional<RawLatencyLink
                            {"sha256", raw->sha256}}
                     : json(nullptr)},
     };
+    // Only runs launched by `edgebench suite` carry the suite block.
+    if (const std::optional<SuiteLink>& s = r.config.suite) {
+        doc["suite"] = {{"suite_name", s->suite_name},
+                        {"suite_config_hash", s->config_hash},
+                        {"run_id", s->run_id},
+                        {"repetition", s->repetition},
+                        {"order_index", s->order_index},
+                        {"cooldown_s_before", s->cooldown_s_before},
+                        {"preflight_skipped", s->preflight_skipped}};
+    }
+    return doc;
 }
 
 std::string format_number(double value) {

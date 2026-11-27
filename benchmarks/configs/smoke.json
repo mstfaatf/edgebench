@@ -1,0 +1,27 @@
+{
+  "suite_config_version": "1.0.0",
+  "name": "smoke",
+  "description": "A quick end-to-end check of the suite command: the autoencoder on the CPU (FP32 and INT8) and on the NPU (INT8), batch 1, two repetitions, short runs. Not a benchmark.",
+  "output_dir": "../results/local/suites",
+  "models": ["conv1d_autoencoder"],
+  "matrix": {
+    "providers": ["cpu", "npu"],
+    "precisions": ["fp32", "int8"],
+    "batches": [1],
+    "exclude": [
+      {"provider": "npu", "precision": "fp32"}
+    ]
+  },
+  "defaults": {
+    "warmup": 5,
+    "iterations": 50,
+    "trials": 2,
+    "trial_cooldown_ms": 500
+  },
+  "repetitions": 2,
+  "rotation": "rotated",
+  "cooldown_s": 2,
+  "preflight": {
+    "checks": ["doctor"]
+  }
+}

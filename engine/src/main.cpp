@@ -2,6 +2,7 @@
 //
 //   edgebench run --model <file.onnx> [options]   benchmark a model (--dry-run: check only)
 //   edgebench doctor [--json]                     check the build, system and ONNX Runtime
+//   edgebench suite <config.json> [options]       run an experiment plan (docs/suite.md)
 //
 // ONNX Runtime is delay-loaded and initialized manually, and is only loaded by
 // the commands that need it (never for --help or --version), by full path from
@@ -31,6 +32,7 @@
 #include "edgebench/result_json.hpp"
 #include "edgebench/run_config.hpp"
 #include "edgebench/runtime.hpp"
+#include "edgebench/suite.hpp"
 #include "edgebench/version.hpp"
 
 #define WIN32_LEAN_AND_MEAN
@@ -214,6 +216,21 @@ int doctor_command(const eb::DoctorOptions& options) {
     return eb::to_int(report.exit_code);
 }
 
+int suite_command(const eb::SuiteOptions& o) {
+    wchar_t buffer[32768];
+    const DWORD n = GetModuleFileNameW(nullptr, buffer, static_cast<DWORD>(std::size(buffer)));
+    eb::suite::SuiteOptions options;
+    options.exe = fs::path(std::wstring(buffer, n));
+    options.config = o.config;
+    options.resume = o.resume;
+    options.output_dir = o.output_dir;
+    options.python = o.python;
+    options.dry_run = o.dry_run;
+    options.fail_fast = o.fail_fast;
+    options.skip_preflight = o.skip_preflight;
+    return eb::suite::run_suite(options);
+}
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
@@ -234,6 +251,8 @@ int wmain(int argc, wchar_t** argv) {
                 return run_command(parsed.run);
             case eb::Command::doctor:
                 return doctor_command(parsed.doctor);
+            case eb::Command::suite:
+                return suite_command(parsed.suite);
             case eb::Command::none:
                 break;
         }

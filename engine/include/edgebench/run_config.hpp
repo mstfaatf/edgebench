@@ -33,6 +33,23 @@ enum class OutputFormat { summary, json };
 /// build it first if there is none).
 enum class EpCacheMode { off, build, use };
 
+/// Where a run belongs when `edgebench suite` launched it (results schema: the
+/// top-level `suite` block). Passed with hidden `run` options; never set for a
+/// run started by hand.
+struct SuiteLink {
+    std::string suite_name;
+    std::string config_hash;  // SHA256 of the suite configuration
+    std::string run_id;       // the suite's run ID (SHA256)
+    int repetition = 0;       // 0-based
+    int order_index = 0;      // 0-based position in the suite's run order
+    double cooldown_s_before = 0.0;
+    bool preflight_skipped = false;  // the suite ran without its pre-flight gate
+    bool operator==(const SuiteLink&) const = default;
+};
+
+/// A number of seconds as the shortest decimal that reads back exactly (e.g. "2.5").
+std::string format_seconds(double seconds);
+
 /// Every value `edgebench run` uses. Defaults match the documented CLI defaults
 /// (docs/cli.md). `seed` and `constant_value` are only set when given explicitly;
 /// effective_seed() / effective_constant_value() apply the defaults.
@@ -76,6 +93,8 @@ struct RunConfig {
     /// --profile-iterations: measured inferences of that pass (after --warmup
     /// unrecorded ones); only set when given.
     std::optional<int> profile_iterations;
+    /// Set by the hidden --suite-* options when `edgebench suite` launched the run.
+    std::optional<SuiteLink> suite;
 
     int effective_profile_iterations() const {
         return profile_iterations.value_or(kDefaultProfileIterations);

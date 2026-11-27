@@ -57,9 +57,13 @@ jobs:
           scripts/tests/test_validate_doctor.py
           scripts/tests/test_matrix.py
           scripts/tests/test_check_links.py
+          scripts/tests/test_validate_suite.py
 
       - name: Validate example and published results
         run: python scripts/validate_results.py --strict docs/examples benchmarks/results/published
+
+      - name: Validate suite configurations and the example manifest
+        run: python scripts/validate_suite.py --no-files benchmarks/configs docs/examples/suite scripts/tests/fixtures/suite/valid
 
       - name: Validate example doctor reports
         run: python scripts/validate_doctor.py docs/examples/doctor
@@ -250,9 +254,11 @@ jobs:
 
       # Coverage of engine/src from every test program and every child process
       # they start (edgebench.exe, the helpers). No threshold: report only.
-      # ExitPaths.UnhandledExceptionIsReportedAndExits1 is excluded here (it runs
-      # in the windows jobs): OpenCppCoverage is a debugger, and Windows passes an
-      # unhandled exception to the debugger instead of the process's own filter.
+      # ExitPaths.UnhandledExceptionIsReportedAndExits1 and
+      # SuiteRun.InterruptedMidRunThenResumed are excluded here (they run in the
+      # windows jobs): OpenCppCoverage is a debugger, and Windows passes an
+      # unhandled exception, and a Ctrl+Break sent to a debugged child, to the
+      # debugger instead of the process's own handler.
       - name: Test (unit, ort) under OpenCppCoverage
         shell: pwsh
         run: |
@@ -262,7 +268,7 @@ jobs:
             --export_type "html:coverage\html" `
             --export_type "cobertura:coverage\coverage.xml" `
             -- ctest --preset x64-debug -L "unit|ort" --output-on-failure `
-               -E "^ExitPaths\.UnhandledExceptionIsReportedAndExits1$"
+               -E "^(ExitPaths\.UnhandledExceptionIsReportedAndExits1|SuiteRun\.InterruptedMidRunThenResumed)$"
           $code = $LASTEXITCODE
           if ($code -ne 0) { Write-Warning "ctest under OpenCppCoverage exited with $code" }
           exit $code

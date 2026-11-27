@@ -1088,6 +1088,16 @@ void finish_result(BenchmarkResult& r) {
         }
     }
 
+    // A suite that skipped its pre-flight gate: nothing from it may be published.
+    if (config.suite && config.suite->preflight_skipped) {
+        r.warnings.push_back(
+            {"preflight_skipped",
+             "The suite '" + config.suite->suite_name +
+                 "' ran without its pre-flight check (--skip-preflight); the result is not "
+                 "publishable.",
+             std::string("/suite/preflight_skipped")});
+    }
+
     // Power state at the end: anything that changed makes the run suspect.
     const PowerState power_at_start = r.system.power.value_or(PowerState{});
     r.power_at_end = query_power_state();
