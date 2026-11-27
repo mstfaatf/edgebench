@@ -1104,10 +1104,10 @@ void finish_result(BenchmarkResult& r) {
 
     // Background load: every sample above the threshold, with where its CPU time went.
     for (const TrialResult& trial : r.timing.trials) {
-        if (trial.idle_before && trial.idle_before->cpu_utilization_ratio > kHighBackgroundLoad)
+        if (trial.idle_before && background_load_too_high(*trial.idle_before))
             r.background_load_samples.push_back(
                 {"idle_before_trial", trial.trial_index, *trial.idle_before});
-        if (trial.during && trial.during->cpu_utilization_ratio > kHighBackgroundLoad)
+        if (trial.during && background_load_too_high(*trial.during))
             r.background_load_samples.push_back(
                 {"measured_iterations", trial.trial_index, *trial.during});
     }
@@ -1130,7 +1130,8 @@ void finish_result(BenchmarkResult& r) {
         double highest = -1.0;
         std::string when;
         for (const TrialResult& trial : r.timing.trials) {
-            if (trial.idle_before && trial.idle_before->cpu_utilization_ratio > highest) {
+            if (trial.idle_before && background_load_too_high(*trial.idle_before) &&
+                trial.idle_before->cpu_utilization_ratio > highest) {
                 highest = trial.idle_before->cpu_utilization_ratio;
                 highest_sample = &*trial.idle_before;
                 when = "before " + trial_label(trial.trial_index, config.trials);
@@ -1150,11 +1151,12 @@ void finish_result(BenchmarkResult& r) {
     {
         const TrialResult* worst = nullptr;
         for (const TrialResult& trial : r.timing.trials) {
-            if (trial.during && (!worst || trial.during->cpu_utilization_ratio >
-                                               worst->during->cpu_utilization_ratio))
+            if (trial.during && background_load_too_high(*trial.during) &&
+                (!worst ||
+                 trial.during->cpu_utilization_ratio > worst->during->cpu_utilization_ratio))
                 worst = &trial;
         }
-        if (worst && worst->during->cpu_utilization_ratio > kHighBackgroundLoad) {
+        if (worst) {
             r.warnings.push_back({"background_cpu_load_high",
                                   "Background CPU load from other processes reached " +
                                       fmt(worst->during->cpu_utilization_ratio * 100.0, 1) +

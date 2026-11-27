@@ -170,7 +170,9 @@ every run records:
   `power_state_changed` warning);
 - background CPU load before the first trial, between trials (the idle before
   each trial) and during each trial's measured iterations; more than 10% in any
-  sample produces a `background_cpu_load_high` warning that says when;
+  sample of at least 0.5 s produces a `background_cpu_load_high` warning that
+  says when and names the top other processes (shorter samples cannot resolve
+  10%: the counters advance in 15.6 ms clock ticks);
 - the operating system, CPU, device, ONNX Runtime version and the full path of
   every ONNX Runtime and QNN library that was loaded (a library from outside
   the bundle directory stops the run).

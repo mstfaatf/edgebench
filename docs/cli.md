@@ -308,16 +308,18 @@ background CPU load of the idle period before trial 1 (`system.load`). The power
 state is read again at the end; if the source, mode, plan or battery saver
 changed, the result gets a `power_state_changed` warning. Every load sample (the
 idle periods and each trial's measured iterations) counts other processes
-only: edgebench's own CPU time over the window is subtracted. If any sample
-shows more than 10%, the result gets a `background_cpu_load_high` warning with
+only: edgebench's own CPU time over the window is subtracted. If any sample of
+at least 0.5 s shows more than 10%, the result gets a `background_cpu_load_high` warning with
 the highest value, when it occurred and the top other processes by CPU share,
 and every such sample is recorded in
 `execution.verification_details.background_load_samples` with its
 attribution: the top other processes (image name and share only, no command
 lines), edgebench's own share and the busy time no process accounts for
-(interrupts, DPCs). Short windows (the measured iterations of a fast model can
-take tens of milliseconds) give coarse values, because the system counters
-advance in clock ticks.
+(interrupts, DPCs). Shorter samples are not judged: the system and process
+counters advance in clock ticks (15.6 ms by default), so over the measured
+iterations of a fast model (tens of milliseconds) a single tick of another
+process is several percent. Their values still appear in the summary, and the
+idle samples before every trial (1 s by default) catch sustained load.
 
 System-wide CPU utilization is also sampled across each trial's measured
 iterations (`GetSystemTimes` before the first and after the last iteration,

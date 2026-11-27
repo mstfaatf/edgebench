@@ -336,5 +336,18 @@ inline constexpr std::string_view kProfiledPassNote =
 
 /// Background CPU load above which a run gets a background_cpu_load_high warning.
 inline constexpr double kHighBackgroundLoad = 0.10;
+/// The shortest load sample judged against kHighBackgroundLoad. The system and
+/// process CPU counters advance in clock ticks (15.6 ms by default), so over a
+/// window of a few ticks a single tick of another process is several percent:
+/// the measured iterations of a fast model (tens of milliseconds) cannot tell
+/// 10% background load from noise. Shorter samples are still shown in the
+/// summary; the idle samples before every trial (1 s by default) catch sustained
+/// load either way.
+inline constexpr double kMinJudgedLoadWindowS = 0.5;
+/// Whether `s` is long enough to be judged and above kHighBackgroundLoad.
+inline bool background_load_too_high(const LoadSample& s) {
+    return s.sample_window_s >= kMinJudgedLoadWindowS &&
+           s.cpu_utilization_ratio > kHighBackgroundLoad;
+}
 
 }  // namespace edgebench

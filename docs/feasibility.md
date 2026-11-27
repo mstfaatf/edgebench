@@ -632,6 +632,33 @@ because it performs the same as s8w and adds nothing.
 19. **Record per-session memory**, at least the process working set or its peak,
     labelled as process memory: NPU-side memory is not visible.
 
+### Where the engine implements them
+
+Every requirement is implemented in the C++ engine; the table points at the
+code and a test that exercises it.
+
+| # | Implementation | Test |
+|---|---|---|
+| 1 | `engine/src/ort_loader.cpp` (delay-load, `ORT_API_MANUAL_INIT`, full path, version and API check), shared by `edgebench.exe` and `ort_probe` | `Doctor.WrongDllVersionIsReported`, `Doctor.MissingDllIgnoresWorkingDirectoryAndPath`, `Doctor.CorruptDllIsReported` |
+| 2 | `engine/src/bundle_modules.cpp`; checks after provider creation, every session and during placement and profiling (`execution.verification_details.module_checks`) | `FailurePaths.ModuleOutsideTheBundleStopsTheRun`, `RunNpu.BackendStubFromOutsideTheBundleExits4`, `QnnProviderNpu.ModulesAreCheckedAfterEveryQnnSessionCreation` |
+| 3 | `engine/src/npu_selection.cpp` (`QNNExecutionProvider`, type NPU, exactly one); `runtime.ep_device`, `runtime.ep_devices` | `NpuSelection.*`, `Cli.RunNpuWithoutASingleNpuExits3` |
+| 4 | `engine/src/npu_options.cpp` (`session.disable_cpu_ep_fallback` `1` unless `--no-strict`); refusals classified in `engine/src/qnn_log.cpp` (exit 5, stage `session_creation`) | `QnnProviderNpu.StrictRefusalIsExit5WithTheOrtError`, `RunNpu.StrictRefusalExits5AndWritesAFailedResult` |
+| 5 | `engine/src/placement.cpp` and `qnn_log.cpp` (node placement plus QNN validation, `verification_method` `combined`) | `QnnProviderNpu.StrictRunIsAllOnQnnAndRecordsWhatWasPassed`, `CpuProvider.NodePlacementIsAllCpu` |
+| 6 | `qnn_ep_options()` in `engine/src/npu_options.cpp` (absolute `backend_path`, `htp_performance_mode`, FP16 only with `--npu-fp16`); `execution.effective_precision` | `QnnEpOptions.*`, `EffectivePrecision.*` |
+| 7 | `engine/src/ort_bench_session.cpp` (`--binding iobinding` default, `run` available; `config.run_binding`) | `CpuProvider.RunAndIoBindingAreBitIdentical`, `CpuProvider.IoBindingReusesItsBuffers` |
+| 8 | `RunConfig::threads` (default 4, always passed and recorded as `config.intra_op_threads`) | `FailurePaths.ThreadsAboveLogicalProcessorsIsAWarning`, validator rule `cpu_threads_unset` |
+| 9 | `--init-breakdown` in `engine/src/benchmark.cpp` (cold, build and cached creation in every trial) | `EpCacheNpu.InitBreakdownMeasuresEveryKindInEveryTrial` |
+| 10 | `engine/src/ep_context_cache.cpp` (key over model, versions, options, session config and device; manifest-only deletion; stale entries; verified equal outputs; strict cached sessions) | `EpCacheEntries.*`, `EpCacheKey.*`, `EpCacheNpu.*`, `ReferenceCachedNpu.*` |
+| 11 | `--profile-accelerator`: a separate profiled session after the trials (`timing.profiled_pass`) | `ProfiledPassNpu.IsASeparateSessionThatLeavesTheTimedResultsAlone`, validator rule `profiled_timing` |
+| 12 | Generated, already-preprocessed input (`engine/src/input_fill.cpp`); `timing.scope` `model_execution`, `config.input.preprocessing` | `Benchmark.ShortRunOnFixture` |
+| 13 | `engine/src/scheduler.cpp` (rotated order), idle period before every trial, `timing.aggregate.trial_variation`, `trial_spread_high`. `run` measures one configuration; the rotation across configurations is used once several are run together | `Scheduler.RotatesTheStartingConfiguration`, `Benchmark.IdlesBeforeEveryTrialIncludingTheFirst`, `TrialSpread.*` |
+| 14 | `engine/src/system_info.cpp` (power source, mode, plan, battery saver; load of other processes before, between and during trials, with the top processes when it is high) | `Benchmark.RecordsPowerLoadAndMemory`, `LoadAttribution.*`, `FailurePaths.BackgroundLoadDuringATrialIsAWarning` |
+| 15 | Accuracy on ImageNetV2 with top-1 agreement and McNemar's test between devices (`scripts/eval_accuracy.py`, [accuracy.md](accuracy.md)); exact comparisons against saved reference outputs for the same file and device | `ReferenceModels.*`, `ReferenceModelsNpu.*`, `scripts/tests/test_accuracy_eval.py` |
+| 16 | The model pipeline ([models.md](models.md)): fixed shapes, pruning, recipe sidecars, normalization external or folded (`model.normalization`) | `OnnxInspectModels.ExportedFp32ModelsHaveFixedShapes`, `scripts/tests/test_model_recipes.py` |
+| 17 | `runtime.qnn.sdk_version` and `backend_build` as the QNN EP reports them at run time (`engine/src/qnn_backend_info.cpp`) | `QnnBackendInfoNpu.SdkVersionAndHtpArchComeFromTheEpAtRunTime` |
+| 18 | `--profile-accelerator` with `profiling_level` `basic` (`engine/src/qnn_profile.cpp`) | `ProfiledPassNpu.*`, `QnnProfile.*` |
+| 19 | `memory` (process working set, peaks, change across session creation; scope `process`) | `Benchmark.RecordsPowerLoadAndMemory` |
+
 ## 11. Limitations
 
 - One device (Snapdragon X Plus, Surface Laptop 7) and one model family

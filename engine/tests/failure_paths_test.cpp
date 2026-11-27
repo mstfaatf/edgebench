@@ -578,4 +578,19 @@ TEST(FailurePaths, BackgroundLoadDuringATrialIsAWarning) {
         if (x.code == "background_cpu_load_high")
             ADD_FAILURE() << x.message;
     }
+
+    // A window of a few clock ticks cannot resolve 10%: a high value from the
+    // measured iterations of a fast model is not judged (nor a short idle period).
+    std::vector<eb::TrialResult> fast{fake_trial(0, 0.3)};
+    fast[0].during = eb::LoadSample{0.25, 0.03, std::nullopt};
+    fast[0].idle_before = eb::LoadSample{0.30, 0.1, std::nullopt};
+    eb::BenchmarkResult f = result_with_trials(std::move(fast));
+    eb::finish_result(f);
+    for (const eb::ResultWarning& x : f.warnings) {
+        if (x.code == "background_cpu_load_high")
+            ADD_FAILURE() << x.message;
+    }
+    EXPECT_TRUE(f.background_load_samples.empty());
+    EXPECT_FALSE(eb::background_load_too_high(eb::LoadSample{0.5, 0.49, std::nullopt}));
+    EXPECT_TRUE(eb::background_load_too_high(eb::LoadSample{0.11, 0.5, std::nullopt}));
 }

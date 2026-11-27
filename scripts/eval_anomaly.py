@@ -348,13 +348,21 @@ def load_scores(ref: dict):
 
 
 def comparisons(output_dir: Path, data, manifest_sha: str) -> dict | None:
-    """Paired comparisons of the run results in ``output_dir``; None if any run is missing."""
+    """Paired comparisons of the run results in ``output_dir``; None if any run, or the
+    saved scores of any run, is missing (e.g. after rerunning one run in a fresh
+    checkout): the comparisons are then left as they are."""
     results = {}
     for run in planned_runs():
         path = output_dir / f"{run.run_id}.json"
         if not path.is_file():
             return None
         results[run.run_id] = json.loads(path.read_text(encoding="utf-8"))
+    missing = [ref["file"] for r in results.values() if r.get("scores")
+               for ref in r["scores"].values() if not (REPO_ROOT / ref["file"]).is_file()]
+    if missing:
+        print(f"comparisons not rewritten: the scores of {len(missing)} file(s) are not on "
+              f"disk (e.g. {missing[0]}); rerun every run to rewrite them")
+        return None
     labels = [bool(v) for v in data.labels["test"].tolist()]
     out = []
     for name, question, a, b in comparison_plan():

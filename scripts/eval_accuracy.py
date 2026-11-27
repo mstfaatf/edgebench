@@ -324,7 +324,9 @@ def write_json(path: Path, doc: dict) -> None:
 
 
 def comparisons(output_dir: Path, full) -> dict | None:
-    """Paired comparisons of the run results in ``output_dir``; None if any run is missing."""
+    """Paired comparisons of the run results in ``output_dir``; None if any run, or the
+    saved predictions of any run, is missing (e.g. after rerunning a few runs in a
+    fresh checkout): the comparisons are then left as they are."""
     import numpy as np
 
     results = {}
@@ -333,6 +335,13 @@ def comparisons(output_dir: Path, full) -> dict | None:
         if not path.is_file():
             return None
         results[run.run_id] = json.loads(path.read_text(encoding="utf-8"))
+    missing = [r["predictions"]["top5_indices"]["file"] for r in results.values()
+               if r["predictions"] and not (REPO_ROOT / r["predictions"]["top5_indices"]["file"])
+               .is_file()]
+    if missing:
+        print(f"comparisons not rewritten: the predictions of {len(missing)} run(s) are not on "
+              f"disk (e.g. {missing[0]}); rerun every run to rewrite them")
+        return None
 
     def top1_correct(run_id: str):
         ref = results[run_id]["predictions"]["top5_indices"]
