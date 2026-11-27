@@ -91,6 +91,11 @@ def _tamper_doc(docs, name, old, new):
     ("docs/models.md", "| `cpu` | all 66 |", "| `cpu` | all 65 |"),
     # abbreviated hash
     ("docs/autoencoder.md", "`a73173e6…f37c`", "`a73173e6…f37d`"),
+    # NPU batch-size findings
+    ("docs/npu.md", "| 7 | 0 of 8 | 0 of 8 |", "| 7 | 1 of 8 | 0 of 8 |"),
+    ("docs/npu.md", "| 6.89 MiB | 4.59 MiB |", "| 6.89 MiB | 4.60 MiB |"),
+    ("docs/npu.md", "| 2.83 | +29% |", "| 2.83 | +30% |"),
+    ("docs/npu.md", "differs is 7 for all three", "differs is 8 for all three"),
 ])
 def test_a_changed_document_number_is_reported(committed, name, old, new):
     docs, src = committed
@@ -121,6 +126,13 @@ def test_a_changed_result_is_reported(committed):
     assert problems(docs, changed)
     changed = copy.deepcopy(src)
     changed.manifest["conv1d_autoencoder/conv1d_autoencoder_int8_b1.onnx"]["size_bytes"] += 1
+    assert problems(docs, changed)
+    changed = copy.deepcopy(src)
+    changed.npu_batch["models"]["resnet18"]["threshold"]["batches"]["6"][
+        "items_equal_b1_reference"] = 7
+    assert problems(docs, changed)
+    changed = copy.deepcopy(src)
+    changed.npu_batch["layer_scan"]["rows"][3]["differing"] = 1
     assert problems(docs, changed)
 
 

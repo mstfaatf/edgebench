@@ -1,0 +1,1547 @@
+{
+ "findings_version": "1.0.0",
+ "description": "NPU (QNN HTP) INT8 image models: outputs at batch sizes other than 1; written by scripts/investigate_batch_equivalence.py",
+ "environment": {
+  "onnxruntime": "1.32.0",
+  "onnxruntime_qnn": "2.8.0",
+  "qnn_backend": "2.52.0.261104115025",
+  "power": {
+   "power_source": "ac",
+   "battery_percent": 80,
+   "battery_saver_on": false,
+   "power_mode": "Balanced",
+   "power_mode_overlay_guid": "00000000-0000-0000-0000-000000000000",
+   "power_plan": "Balanced",
+   "power_plan_guid": "381b4222-f694-41f0-9685-ff5bb260df2e"
+  }
+ },
+ "vtcm_bytes": 8388608,
+ "reference_images": 8,
+ "models": {
+  "mobilenetv2": {
+   "build": {
+    "shipped_graphs_reproduced": [
+     1,
+     4
+    ],
+    "quant_params_identical_to_shipped_b1": true,
+    "quant_param_count": 342
+   },
+   "threshold": {
+    "output_scale": 0.05699464678764343,
+    "batches": {
+     "1": {
+      "items_equal_b1_reference": 8,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/features/features.2/conv/conv.0/conv.0.2/Clip_output_0_QuantizeLinear_Output",
+       "shape": [
+        1,
+        96,
+        112,
+        112
+       ],
+       "bytes": 1204224
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "2": {
+      "items_equal_b1_reference": 8,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/features/features.2/conv/conv.0/conv.0.2/Clip_output_0_QuantizeLinear_Output",
+       "shape": [
+        2,
+        96,
+        112,
+        112
+       ],
+       "bytes": 2408448
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "3": {
+      "items_equal_b1_reference": 8,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/features/features.2/conv/conv.0/conv.0.2/Clip_output_0_QuantizeLinear_Output",
+       "shape": [
+        3,
+        96,
+        112,
+        112
+       ],
+       "bytes": 3612672
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "4": {
+      "items_equal_b1_reference": 8,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/features/features.2/conv/conv.0/conv.0.2/Clip_output_0_QuantizeLinear_Output",
+       "shape": [
+        4,
+        96,
+        112,
+        112
+       ],
+       "bytes": 4816896
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "5": {
+      "items_equal_b1_reference": 8,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/features/features.2/conv/conv.0/conv.0.2/Clip_output_0_QuantizeLinear_Output",
+       "shape": [
+        5,
+        96,
+        112,
+        112
+       ],
+       "bytes": 6021120
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "6": {
+      "items_equal_b1_reference": 8,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/features/features.2/conv/conv.0/conv.0.2/Clip_output_0_QuantizeLinear_Output",
+       "shape": [
+        6,
+        96,
+        112,
+        112
+       ],
+       "bytes": 7225344
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "7": {
+      "items_equal_b1_reference": 0,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/features/features.2/conv/conv.0/conv.0.2/Clip_output_0_QuantizeLinear_Output",
+       "shape": [
+        7,
+        96,
+        112,
+        112
+       ],
+       "bytes": 8429568
+      },
+      "largest_activation_exceeds_vtcm": true
+     },
+     "8": {
+      "items_equal_b1_reference": 0,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/features/features.2/conv/conv.0/conv.0.2/Clip_output_0_QuantizeLinear_Output",
+       "shape": [
+        8,
+        96,
+        112,
+        112
+       ],
+       "bytes": 9633792
+      },
+      "largest_activation_exceeds_vtcm": true
+     },
+     "16": {
+      "items_equal_b1_reference": 0,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/features/features.2/conv/conv.0/conv.0.2/Clip_output_0_QuantizeLinear_Output",
+       "shape": [
+        16,
+        96,
+        112,
+        112
+       ],
+       "bytes": 19267584
+      },
+      "largest_activation_exceeds_vtcm": true
+     }
+    },
+    "first_diverging_batch": 7,
+    "diverging_batches_identical": true,
+    "b8_independent_of_position_in_batch": true,
+    "output_lsb_histogram_b8_minus_b1": {
+     "0": 6329,
+     "1": 1671
+    },
+    "top1_changes_b8_reference_images": 0
+   },
+   "tail": {
+    "global_average_pool": {
+     "1": {
+      "0": 10240
+     },
+     "2": {
+      "0": 10240
+     },
+     "4": {
+      "0": 10240
+     },
+     "6": {
+      "0": 10240
+     },
+     "7": {
+      "0": 10240
+     },
+     "8": {
+      "0": 10240
+     }
+    },
+    "global_average_pool_flatten": {
+     "1": {
+      "0": 10240
+     },
+     "2": {
+      "0": 10240
+     },
+     "4": {
+      "0": 10240
+     },
+     "6": {
+      "0": 10111,
+      "1": 129
+     },
+     "7": {
+      "0": 10111,
+      "1": 129
+     },
+     "8": {
+      "0": 9275,
+      "1": 965
+     }
+    },
+    "tail_to_logits": {
+     "1": {
+      "0": 8000
+     },
+     "2": {
+      "0": 8000
+     },
+     "4": {
+      "0": 8000
+     },
+     "6": {
+      "0": 8000
+     },
+     "7": {
+      "0": 6329,
+      "1": 1671
+     },
+     "8": {
+      "0": 6329,
+      "1": 1671
+     }
+    },
+    "gemm_only": {
+     "1": {
+      "0": 64000
+     },
+     "2": {
+      "0": 64000
+     },
+     "4": {
+      "0": 64000
+     },
+     "6": {
+      "0": 64000
+     },
+     "7": {
+      "0": 51820,
+      "1": 12180
+     },
+     "8": {
+      "0": 51820,
+      "1": 12180
+     }
+    }
+   },
+   "gemm_emulation": {
+    "vectors": 64,
+    "outputs_compared": 50846,
+    "bias_scale_is_input_times_weight_scale": true,
+    "b1": {
+     "error_vs_exact_mean_lsb": -0.0014080006261446621,
+     "error_vs_exact_std_lsb": 0.28992770726269623,
+     "error_vs_exact_min_lsb": -0.5570634866760145,
+     "error_vs_exact_max_lsb": 0.56185256048866,
+     "minus_exactly_rounded_histogram": {
+      "-1": 563,
+      "0": 49739,
+      "1": 544
+     }
+    },
+    "b8": {
+     "error_vs_exact_mean_lsb": 0.23806019746220053,
+     "error_vs_exact_std_lsb": 0.5139092358945314,
+     "error_vs_exact_min_lsb": -0.5570634866760145,
+     "error_vs_exact_max_lsb": 1.5503043726861279,
+     "minus_exactly_rounded_histogram": {
+      "-1": 424,
+      "0": 37967,
+      "1": 12329,
+      "2": 126
+     }
+    },
+    "b8_finalization_1": {
+     "error_vs_exact_mean_lsb": -0.0014080006261446621,
+     "error_vs_exact_std_lsb": 0.28992770726269623,
+     "error_vs_exact_min_lsb": -0.5570634866760145,
+     "error_vs_exact_max_lsb": 0.56185256048866,
+     "minus_exactly_rounded_histogram": {
+      "-1": 563,
+      "0": 49739,
+      "1": 544
+     }
+    },
+    "b8_equals_b1": false,
+    "b8_finalization_1_equals_b1": true
+   },
+   "options_items_equal_b1_reference": {
+    "default": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "vtcm_mb=2": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "vtcm_mb=4": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "vtcm_mb=8": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "htp_graph_finalization_optimization_mode=0": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "htp_graph_finalization_optimization_mode=1": {
+     "1": 8,
+     "6": 8,
+     "7": 8,
+     "8": 8
+    },
+    "htp_graph_finalization_optimization_mode=2": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "htp_graph_finalization_optimization_mode=3": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "htp_performance_mode=balanced": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "htp_performance_mode=power_saver": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "htp_performance_mode=high_performance": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    }
+   },
+   "eval_quick": {
+    "default_b8": {
+     "images": 1000,
+     "bitwise_equal": 0,
+     "top1_differing": 6
+    },
+    "finalization_1_b1": {
+     "images": 1000,
+     "bitwise_equal": 1000,
+     "top1_differing": 0
+    },
+    "finalization_1_b8": {
+     "images": 1000,
+     "bitwise_equal": 1000,
+     "top1_differing": 0
+    }
+   },
+   "latency": {
+    "default_b1": {
+     "median_ms": 0.3174500016029924,
+     "runs": 500
+    },
+    "finalization_1_b1": {
+     "median_ms": 0.3198999911546707,
+     "runs": 500
+    },
+    "default_b4": {
+     "median_ms": 1.0179500095546246,
+     "runs": 500
+    },
+    "default_b8": {
+     "median_ms": 1.9828499935101718,
+     "runs": 500
+    },
+    "finalization_1_b8": {
+     "median_ms": 2.286250004544854,
+     "runs": 500
+    }
+   }
+  },
+  "resnet18": {
+   "build": {
+    "shipped_graphs_reproduced": [
+     1,
+     4
+    ],
+    "quant_params_identical_to_shipped_b1": true,
+    "quant_param_count": 146
+   },
+   "threshold": {
+    "output_scale": 0.16855919361114502,
+    "batches": {
+     "1": {
+      "items_equal_b1_reference": 8,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/relu/Relu_output_0_QuantizeLinear_Output",
+       "shape": [
+        1,
+        64,
+        112,
+        112
+       ],
+       "bytes": 802816
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "2": {
+      "items_equal_b1_reference": 8,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/relu/Relu_output_0_QuantizeLinear_Output",
+       "shape": [
+        2,
+        64,
+        112,
+        112
+       ],
+       "bytes": 1605632
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "3": {
+      "items_equal_b1_reference": 8,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/relu/Relu_output_0_QuantizeLinear_Output",
+       "shape": [
+        3,
+        64,
+        112,
+        112
+       ],
+       "bytes": 2408448
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "4": {
+      "items_equal_b1_reference": 8,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/relu/Relu_output_0_QuantizeLinear_Output",
+       "shape": [
+        4,
+        64,
+        112,
+        112
+       ],
+       "bytes": 3211264
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "5": {
+      "items_equal_b1_reference": 8,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/relu/Relu_output_0_QuantizeLinear_Output",
+       "shape": [
+        5,
+        64,
+        112,
+        112
+       ],
+       "bytes": 4014080
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "6": {
+      "items_equal_b1_reference": 8,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/relu/Relu_output_0_QuantizeLinear_Output",
+       "shape": [
+        6,
+        64,
+        112,
+        112
+       ],
+       "bytes": 4816896
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "7": {
+      "items_equal_b1_reference": 0,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/relu/Relu_output_0_QuantizeLinear_Output",
+       "shape": [
+        7,
+        64,
+        112,
+        112
+       ],
+       "bytes": 5619712
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "8": {
+      "items_equal_b1_reference": 0,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/relu/Relu_output_0_QuantizeLinear_Output",
+       "shape": [
+        8,
+        64,
+        112,
+        112
+       ],
+       "bytes": 6422528
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "16": {
+      "items_equal_b1_reference": 0,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/relu/Relu_output_0_QuantizeLinear_Output",
+       "shape": [
+        16,
+        64,
+        112,
+        112
+       ],
+       "bytes": 12845056
+      },
+      "largest_activation_exceeds_vtcm": true
+     }
+    },
+    "first_diverging_batch": 7,
+    "diverging_batches_identical": true,
+    "b8_independent_of_position_in_batch": true,
+    "output_lsb_histogram_b8_minus_b1": {
+     "0": 6287,
+     "1": 1713
+    },
+    "top1_changes_b8_reference_images": 0
+   },
+   "tail": {
+    "global_average_pool": {
+     "1": {
+      "0": 4096
+     },
+     "2": {
+      "0": 4096
+     },
+     "4": {
+      "0": 4096
+     },
+     "6": {
+      "0": 4096
+     },
+     "7": {
+      "0": 4096
+     },
+     "8": {
+      "0": 4096
+     }
+    },
+    "global_average_pool_flatten": {
+     "1": {
+      "0": 4096
+     },
+     "2": {
+      "0": 4096
+     },
+     "4": {
+      "0": 4096
+     },
+     "6": {
+      "0": 4096
+     },
+     "7": {
+      "0": 4096
+     },
+     "8": {
+      "0": 4096
+     }
+    },
+    "tail_to_logits": {
+     "1": {
+      "0": 8000
+     },
+     "2": {
+      "0": 8000
+     },
+     "4": {
+      "0": 8000
+     },
+     "6": {
+      "0": 8000
+     },
+     "7": {
+      "0": 6287,
+      "1": 1713
+     },
+     "8": {
+      "0": 6287,
+      "1": 1713
+     }
+    },
+    "gemm_only": {
+     "1": {
+      "0": 64000
+     },
+     "2": {
+      "0": 64000
+     },
+     "4": {
+      "0": 64000
+     },
+     "6": {
+      "0": 64000
+     },
+     "7": {
+      "0": 50317,
+      "1": 13683
+     },
+     "8": {
+      "0": 50317,
+      "1": 13683
+     }
+    }
+   },
+   "gemm_emulation": {
+    "vectors": 64,
+    "outputs_compared": 56994,
+    "bias_scale_is_input_times_weight_scale": true,
+    "b1": {
+     "error_vs_exact_mean_lsb": -0.0007261219137735582,
+     "error_vs_exact_std_lsb": 0.29002196082969434,
+     "error_vs_exact_min_lsb": -0.5529850315625424,
+     "error_vs_exact_max_lsb": 0.5506144845372773,
+     "minus_exactly_rounded_histogram": {
+      "-1": 647,
+      "0": 55667,
+      "1": 680
+     }
+    },
+    "b8": {
+     "error_vs_exact_mean_lsb": 0.23935178102337773,
+     "error_vs_exact_std_lsb": 0.5148765182160956,
+     "error_vs_exact_min_lsb": -0.5487136111842119,
+     "error_vs_exact_max_lsb": 1.5460067353367322,
+     "minus_exactly_rounded_histogram": {
+      "-1": 484,
+      "0": 42463,
+      "1": 13894,
+      "2": 153
+     }
+    },
+    "b8_finalization_1": {
+     "error_vs_exact_mean_lsb": -0.0007261219137735582,
+     "error_vs_exact_std_lsb": 0.29002196082969434,
+     "error_vs_exact_min_lsb": -0.5529850315625424,
+     "error_vs_exact_max_lsb": 0.5506144845372773,
+     "minus_exactly_rounded_histogram": {
+      "-1": 647,
+      "0": 55667,
+      "1": 680
+     }
+    },
+    "b8_equals_b1": false,
+    "b8_finalization_1_equals_b1": true
+   },
+   "options_items_equal_b1_reference": {
+    "default": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "vtcm_mb=2": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "vtcm_mb=4": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "vtcm_mb=8": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "htp_graph_finalization_optimization_mode=0": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "htp_graph_finalization_optimization_mode=1": {
+     "1": 8,
+     "6": 8,
+     "7": 8,
+     "8": 8
+    },
+    "htp_graph_finalization_optimization_mode=2": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "htp_graph_finalization_optimization_mode=3": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "htp_performance_mode=balanced": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "htp_performance_mode=power_saver": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "htp_performance_mode=high_performance": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    }
+   },
+   "eval_quick": {
+    "default_b8": {
+     "images": 1000,
+     "bitwise_equal": 0,
+     "top1_differing": 10
+    },
+    "finalization_1_b1": {
+     "images": 1000,
+     "bitwise_equal": 1000,
+     "top1_differing": 0
+    },
+    "finalization_1_b8": {
+     "images": 1000,
+     "bitwise_equal": 1000,
+     "top1_differing": 0
+    }
+   },
+   "latency": {
+    "default_b1": {
+     "median_ms": 0.3664999967440963,
+     "runs": 500
+    },
+    "finalization_1_b1": {
+     "median_ms": 0.43940002797171474,
+     "runs": 500
+    },
+    "default_b4": {
+     "median_ms": 1.0954499884974211,
+     "runs": 500
+    },
+    "default_b8": {
+     "median_ms": 2.1846499876119196,
+     "runs": 500
+    },
+    "finalization_1_b8": {
+     "median_ms": 2.826599986292422,
+     "runs": 500
+    }
+   }
+  },
+  "efficientnet_lite0": {
+   "build": {
+    "shipped_graphs_reproduced": [
+     1,
+     4
+    ],
+    "quant_params_identical_to_shipped_b1": true,
+    "quant_param_count": 322
+   },
+   "threshold": {
+    "output_scale": 0.08230851590633392,
+    "batches": {
+     "1": {
+      "items_equal_b1_reference": 8,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/blocks/blocks.1/blocks.1.0/bn1/act/Clip_output_0_QuantizeLinear_Output",
+       "shape": [
+        1,
+        96,
+        112,
+        112
+       ],
+       "bytes": 1204224
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "2": {
+      "items_equal_b1_reference": 8,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/blocks/blocks.1/blocks.1.0/bn1/act/Clip_output_0_QuantizeLinear_Output",
+       "shape": [
+        2,
+        96,
+        112,
+        112
+       ],
+       "bytes": 2408448
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "3": {
+      "items_equal_b1_reference": 8,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/blocks/blocks.1/blocks.1.0/bn1/act/Clip_output_0_QuantizeLinear_Output",
+       "shape": [
+        3,
+        96,
+        112,
+        112
+       ],
+       "bytes": 3612672
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "4": {
+      "items_equal_b1_reference": 8,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/blocks/blocks.1/blocks.1.0/bn1/act/Clip_output_0_QuantizeLinear_Output",
+       "shape": [
+        4,
+        96,
+        112,
+        112
+       ],
+       "bytes": 4816896
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "5": {
+      "items_equal_b1_reference": 8,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/blocks/blocks.1/blocks.1.0/bn1/act/Clip_output_0_QuantizeLinear_Output",
+       "shape": [
+        5,
+        96,
+        112,
+        112
+       ],
+       "bytes": 6021120
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "6": {
+      "items_equal_b1_reference": 8,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/blocks/blocks.1/blocks.1.0/bn1/act/Clip_output_0_QuantizeLinear_Output",
+       "shape": [
+        6,
+        96,
+        112,
+        112
+       ],
+       "bytes": 7225344
+      },
+      "largest_activation_exceeds_vtcm": false
+     },
+     "7": {
+      "items_equal_b1_reference": 0,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/blocks/blocks.1/blocks.1.0/bn1/act/Clip_output_0_QuantizeLinear_Output",
+       "shape": [
+        7,
+        96,
+        112,
+        112
+       ],
+       "bytes": 8429568
+      },
+      "largest_activation_exceeds_vtcm": true
+     },
+     "8": {
+      "items_equal_b1_reference": 0,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/blocks/blocks.1/blocks.1.0/bn1/act/Clip_output_0_QuantizeLinear_Output",
+       "shape": [
+        8,
+        96,
+        112,
+        112
+       ],
+       "bytes": 9633792
+      },
+      "largest_activation_exceeds_vtcm": true
+     },
+     "16": {
+      "items_equal_b1_reference": 0,
+      "items": 8,
+      "repeat_identical": true,
+      "largest_activation": {
+       "tensor": "/blocks/blocks.1/blocks.1.0/bn1/act/Clip_output_0_QuantizeLinear_Output",
+       "shape": [
+        16,
+        96,
+        112,
+        112
+       ],
+       "bytes": 19267584
+      },
+      "largest_activation_exceeds_vtcm": true
+     }
+    },
+    "first_diverging_batch": 7,
+    "diverging_batches_identical": true,
+    "b8_independent_of_position_in_batch": true,
+    "output_lsb_histogram_b8_minus_b1": {
+     "0": 6134,
+     "1": 1866
+    },
+    "top1_changes_b8_reference_images": 0
+   },
+   "tail": {
+    "global_average_pool": {
+     "1": {
+      "0": 10240
+     },
+     "2": {
+      "0": 10240
+     },
+     "4": {
+      "0": 10240
+     },
+     "6": {
+      "0": 10240
+     },
+     "7": {
+      "0": 10240
+     },
+     "8": {
+      "0": 10240
+     }
+    },
+    "global_average_pool_flatten": {
+     "1": {
+      "0": 10240
+     },
+     "2": {
+      "0": 10240
+     },
+     "4": {
+      "0": 10240
+     },
+     "6": {
+      "0": 10098,
+      "1": 142
+     },
+     "7": {
+      "0": 10098,
+      "1": 142
+     },
+     "8": {
+      "0": 9087,
+      "1": 1153
+     }
+    },
+    "tail_to_logits": {
+     "1": {
+      "0": 8000
+     },
+     "2": {
+      "0": 8000
+     },
+     "4": {
+      "0": 8000
+     },
+     "6": {
+      "0": 8000
+     },
+     "7": {
+      "0": 6134,
+      "1": 1866
+     },
+     "8": {
+      "0": 6134,
+      "1": 1866
+     }
+    },
+    "gemm_only": {
+     "1": {
+      "0": 64000
+     },
+     "2": {
+      "0": 64000
+     },
+     "4": {
+      "0": 64000
+     },
+     "6": {
+      "0": 64000
+     },
+     "7": {
+      "0": 57385,
+      "1": 6615
+     },
+     "8": {
+      "0": 57385,
+      "1": 6615
+     }
+    }
+   },
+   "gemm_emulation": {
+    "vectors": 64,
+    "outputs_compared": 25948,
+    "bias_scale_is_input_times_weight_scale": true,
+    "b1": {
+     "error_vs_exact_mean_lsb": 0.005485351717432549,
+     "error_vs_exact_std_lsb": 0.2898329781060461,
+     "error_vs_exact_min_lsb": -0.5614400127149608,
+     "error_vs_exact_max_lsb": 0.5615869316396456,
+     "minus_exactly_rounded_histogram": {
+      "-1": 313,
+      "0": 25344,
+      "1": 291
+     }
+    },
+    "b8": {
+     "error_vs_exact_mean_lsb": 0.2601485242162764,
+     "error_vs_exact_std_lsb": 0.5221216058343892,
+     "error_vs_exact_min_lsb": -0.5614400127149608,
+     "error_vs_exact_max_lsb": 1.5490533923421879,
+     "minus_exactly_rounded_histogram": {
+      "-1": 238,
+      "0": 18946,
+      "1": 6704,
+      "2": 60
+     }
+    },
+    "b8_finalization_1": {
+     "error_vs_exact_mean_lsb": 0.005485351717432549,
+     "error_vs_exact_std_lsb": 0.2898329781060461,
+     "error_vs_exact_min_lsb": -0.5614400127149608,
+     "error_vs_exact_max_lsb": 0.5615869316396456,
+     "minus_exactly_rounded_histogram": {
+      "-1": 313,
+      "0": 25344,
+      "1": 291
+     }
+    },
+    "b8_equals_b1": false,
+    "b8_finalization_1_equals_b1": true
+   },
+   "options_items_equal_b1_reference": {
+    "default": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "vtcm_mb=2": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "vtcm_mb=4": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "vtcm_mb=8": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "htp_graph_finalization_optimization_mode=0": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "htp_graph_finalization_optimization_mode=1": {
+     "1": 8,
+     "6": 8,
+     "7": 8,
+     "8": 8
+    },
+    "htp_graph_finalization_optimization_mode=2": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "htp_graph_finalization_optimization_mode=3": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "htp_performance_mode=balanced": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "htp_performance_mode=power_saver": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    },
+    "htp_performance_mode=high_performance": {
+     "1": 8,
+     "6": 8,
+     "7": 0,
+     "8": 0
+    }
+   },
+   "eval_quick": {
+    "default_b8": {
+     "images": 1000,
+     "bitwise_equal": 0,
+     "top1_differing": 5
+    },
+    "finalization_1_b1": {
+     "images": 1000,
+     "bitwise_equal": 1000,
+     "top1_differing": 0
+    },
+    "finalization_1_b8": {
+     "images": 1000,
+     "bitwise_equal": 1000,
+     "top1_differing": 0
+    }
+   },
+   "latency": {
+    "default_b1": {
+     "median_ms": 0.34389999927952886,
+     "runs": 500
+    },
+    "finalization_1_b1": {
+     "median_ms": 0.3522500046528876,
+     "runs": 500
+    },
+    "default_b4": {
+     "median_ms": 1.139800006058067,
+     "runs": 500
+    },
+    "default_b8": {
+     "median_ms": 2.2234999923966825,
+     "runs": 500
+    },
+    "finalization_1_b8": {
+     "median_ms": 2.446600003167987,
+     "runs": 500
+    }
+   }
+  }
+ },
+ "layer_scan": {
+  "model": "resnet18",
+  "batch": 7,
+  "cut_points": 33,
+  "first_diverging": "logits",
+  "rows": [
+   {
+    "index": 0,
+    "tensor": "input_DequantizeLinear_Output",
+    "elements": 1204224,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 1204224
+    }
+   },
+   {
+    "index": 1,
+    "tensor": "/relu/Relu_output_0_DequantizeLinear_Output",
+    "elements": 6422528,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 6422528
+    }
+   },
+   {
+    "index": 2,
+    "tensor": "/maxpool/MaxPool_output_0_DequantizeLinear_Output",
+    "elements": 1605632,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 1605632
+    }
+   },
+   {
+    "index": 3,
+    "tensor": "/layer1/layer1.0/relu/Relu_output_0_DequantizeLinear_Output",
+    "elements": 1605632,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 1605632
+    }
+   },
+   {
+    "index": 4,
+    "tensor": "/layer1/layer1.0/conv2/Conv_output_0_DequantizeLinear_Output",
+    "elements": 1605632,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 1605632
+    }
+   },
+   {
+    "index": 5,
+    "tensor": "/layer1/layer1.0/relu_1/Relu_output_0_DequantizeLinear_Output",
+    "elements": 1605632,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 1605632
+    }
+   },
+   {
+    "index": 6,
+    "tensor": "/layer1/layer1.1/relu/Relu_output_0_DequantizeLinear_Output",
+    "elements": 1605632,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 1605632
+    }
+   },
+   {
+    "index": 7,
+    "tensor": "/layer1/layer1.1/conv2/Conv_output_0_DequantizeLinear_Output",
+    "elements": 1605632,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 1605632
+    }
+   },
+   {
+    "index": 8,
+    "tensor": "/layer1/layer1.1/relu_1/Relu_output_0_DequantizeLinear_Output",
+    "elements": 1605632,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 1605632
+    }
+   },
+   {
+    "index": 9,
+    "tensor": "/layer2/layer2.0/relu/Relu_output_0_DequantizeLinear_Output",
+    "elements": 802816,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 802816
+    }
+   },
+   {
+    "index": 10,
+    "tensor": "/layer2/layer2.0/downsample/downsample.0/Conv_output_0_DequantizeLinear_Output",
+    "elements": 802816,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 802816
+    }
+   },
+   {
+    "index": 11,
+    "tensor": "/layer2/layer2.0/conv2/Conv_output_0_DequantizeLinear_Output",
+    "elements": 802816,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 802816
+    }
+   },
+   {
+    "index": 12,
+    "tensor": "/layer2/layer2.0/relu_1/Relu_output_0_DequantizeLinear_Output",
+    "elements": 802816,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 802816
+    }
+   },
+   {
+    "index": 13,
+    "tensor": "/layer2/layer2.1/relu/Relu_output_0_DequantizeLinear_Output",
+    "elements": 802816,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 802816
+    }
+   },
+   {
+    "index": 14,
+    "tensor": "/layer2/layer2.1/conv2/Conv_output_0_DequantizeLinear_Output",
+    "elements": 802816,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 802816
+    }
+   },
+   {
+    "index": 15,
+    "tensor": "/layer2/layer2.1/relu_1/Relu_output_0_DequantizeLinear_Output",
+    "elements": 802816,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 802816
+    }
+   },
+   {
+    "index": 16,
+    "tensor": "/layer3/layer3.0/relu/Relu_output_0_DequantizeLinear_Output",
+    "elements": 401408,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 401408
+    }
+   },
+   {
+    "index": 17,
+    "tensor": "/layer3/layer3.0/downsample/downsample.0/Conv_output_0_DequantizeLinear_Output",
+    "elements": 401408,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 401408
+    }
+   },
+   {
+    "index": 18,
+    "tensor": "/layer3/layer3.0/conv2/Conv_output_0_DequantizeLinear_Output",
+    "elements": 401408,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 401408
+    }
+   },
+   {
+    "index": 19,
+    "tensor": "/layer3/layer3.0/relu_1/Relu_output_0_DequantizeLinear_Output",
+    "elements": 401408,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 401408
+    }
+   },
+   {
+    "index": 20,
+    "tensor": "/layer3/layer3.1/relu/Relu_output_0_DequantizeLinear_Output",
+    "elements": 401408,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 401408
+    }
+   },
+   {
+    "index": 21,
+    "tensor": "/layer3/layer3.1/conv2/Conv_output_0_DequantizeLinear_Output",
+    "elements": 401408,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 401408
+    }
+   },
+   {
+    "index": 22,
+    "tensor": "/layer3/layer3.1/relu_1/Relu_output_0_DequantizeLinear_Output",
+    "elements": 401408,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 401408
+    }
+   },
+   {
+    "index": 23,
+    "tensor": "/layer4/layer4.0/relu/Relu_output_0_DequantizeLinear_Output",
+    "elements": 200704,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 200704
+    }
+   },
+   {
+    "index": 24,
+    "tensor": "/layer4/layer4.0/downsample/downsample.0/Conv_output_0_DequantizeLinear_Output",
+    "elements": 200704,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 200704
+    }
+   },
+   {
+    "index": 25,
+    "tensor": "/layer4/layer4.0/conv2/Conv_output_0_DequantizeLinear_Output",
+    "elements": 200704,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 200704
+    }
+   },
+   {
+    "index": 26,
+    "tensor": "/layer4/layer4.0/relu_1/Relu_output_0_DequantizeLinear_Output",
+    "elements": 200704,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 200704
+    }
+   },
+   {
+    "index": 27,
+    "tensor": "/layer4/layer4.1/relu/Relu_output_0_DequantizeLinear_Output",
+    "elements": 200704,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 200704
+    }
+   },
+   {
+    "index": 28,
+    "tensor": "/layer4/layer4.1/conv2/Conv_output_0_DequantizeLinear_Output",
+    "elements": 200704,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 200704
+    }
+   },
+   {
+    "index": 29,
+    "tensor": "/layer4/layer4.1/relu_1/Relu_output_0_DequantizeLinear_Output",
+    "elements": 200704,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 200704
+    }
+   },
+   {
+    "index": 30,
+    "tensor": "/avgpool/GlobalAveragePool_output_0_DequantizeLinear_Output",
+    "elements": 4096,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 4096
+    }
+   },
+   {
+    "index": 31,
+    "tensor": "/Flatten_output_0_DequantizeLinear_Output",
+    "elements": 4096,
+    "differing": 0,
+    "lsb_histogram": {
+     "0": 4096
+    }
+   },
+   {
+    "index": 32,
+    "tensor": "logits",
+    "elements": 8000,
+    "differing": 1713,
+    "lsb_histogram": {
+     "0": 6287,
+     "1": 1713
+    }
+   }
+  ]
+ },
+ "qnn_graph_differences_b6_b7": {
+  "model": "resnet18",
+  "sub_model": "gemm_only",
+  "differences": [
+   "/graph/tensors//Flatten_output_0_QuantizeLinear_Output/dims[0]: 6 -> 7",
+   "/graph/tensors/logits/dims[0]: 6 -> 7",
+   "/graph/tensors/logits_QuantizeLinear_Output/dims[0]: 6 -> 7"
+  ]
+ },
+ "duration_s": 1150
+}

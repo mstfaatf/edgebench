@@ -45,10 +45,11 @@ image. On the CPU all three agree, and batch 8 is used. On the NPU:
   batch 4;
 - **INT8 at batch 8 computes different outputs**: every image's logits
   differ from batch 1 (up to 0.06 for MobileNetV2 and 0.17 for ResNet-18), and
-  the top-1 class changes on 6 and 10 of the 1,000 images. The HTP evidently
-  executes the batch-8 graph differently. Batch 8 is therefore not used for INT8
-  on the NPU, and an NPU INT8 benchmark at batch 8 measures a slightly different
-  computation from batch 1;
+  the top-1 class changes on 6 and 10 of the 1,000 images. The HTP executes the
+  final fully connected layer differently from batch 7 up (see
+  [npu.md](npu.md#batch-size-and-int8-outputs)). Batch 8 is therefore not used
+  for INT8 on the NPU, and an NPU INT8 benchmark at batch 8 measures a slightly
+  different computation from batch 1;
 - FP16 at batch 8 matches batch 1, so FP16 runs use batch 8.
 
 Each result records the candidates and the batch size used

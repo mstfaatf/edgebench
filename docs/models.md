@@ -766,7 +766,8 @@ its basis and counts. `edgebench run` looks every model up there and records the
 answer in its result (`execution.batch_equivalence`): a model whose predictions
 differ gets a `batch_not_equivalent` warning, one whose outputs differ only in
 their bits gets a `batch_rounding_only` note (see
-[cli.md](cli.md#batch-equivalence)). The summary lists 132 entries (every model
+[cli.md](cli.md#batch-equivalence)). Why the NPU INT8 image models differ at
+batch 8 is explained in [npu.md](npu.md#batch-size-and-int8-outputs). The summary lists 132 entries (every model
 file on each of its reference devices), 22 of them not bitwise equal, 14 with
 different predictions. Bitwise, by group ("same": every file of the group
 computes the batch-1 outputs exactly; "differs": none does):

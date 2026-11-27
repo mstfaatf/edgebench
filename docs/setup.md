@@ -45,7 +45,7 @@ The ARM64 build is the one tagged `-arm64`. Confirm it with `sysconfig`:
 >
 > | Kind of script | Behaviour on a non-native interpreter | Examples |
 > |---|---|---|
-> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `scripts/export_models.py`, `scripts/export_mobilenetv2.py`, `scripts/fold_models.py`, `scripts/quantize_models.py`, `scripts/make_references.py` (except `--check`), `scripts/eval_accuracy.py`, `scripts/prepare_autoencoder.py`, `scripts/eval_anomaly.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `scripts/npu_overhead.py`, `scripts/check_autoencoder_npu.py`, `scripts/make_probe_references.py`, `tools/qnn_rejection_check.py`, `tools/ort_probe/reference.py`, `tools/ort_probe/make_reference.py` |
+> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `scripts/export_models.py`, `scripts/export_mobilenetv2.py`, `scripts/fold_models.py`, `scripts/quantize_models.py`, `scripts/make_references.py` (except `--check`), `scripts/eval_accuracy.py`, `scripts/prepare_autoencoder.py`, `scripts/eval_anomaly.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `scripts/npu_overhead.py`, `scripts/check_autoencoder_npu.py`, `scripts/make_probe_references.py`, `scripts/investigate_batch_equivalence.py`, `tools/qnn_rejection_check.py`, `tools/ort_probe/reference.py`, `tools/ort_probe/make_reference.py` |
 > | Environment diagnostic | Runs and reports the problem prominently | `scripts/check_env.py` |
 > | Downloads and platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/get_data.py`, `scripts/get_aihub_baseline.py`, `scripts/validate_results.py`, `scripts/make_test_models.py`, `scripts/check_hygiene.py`, `scripts/coverage_summary.py`, `scripts/validate_accuracy.py`, `scripts/check_doc_numbers.py`, `scripts/model_recipes.py`, `scripts/model_info.py` (they read model files with onnx but never run them), and the tests in `scripts/tests/` |
 > | Shared modules in `scripts/common/` | Not checked themselves. `npu_harness.py` and `ort_qnn.py` load ONNX Runtime and are imported only by guarded scripts, after the check; `onnx_export.py` and `onnx_quantize.py` import torch, onnx and ONNX Runtime inside their functions and are used by `export_models.py`, `fold_models.py`, `quantize_models.py` and their tests; `onnx_fold.py` needs onnx and NumPy only; `model_recipe.py` imports onnx inside the functions that read model files; `reference_outputs.py` imports NumPy only to generate the SplitMix64 input; `timeseries.py` is standard library only except for the two functions that build NumPy arrays; `autoencoder.py`, `autoencoder_pipeline.py` and `onnx_cleanup.py` import onnx and NumPy (the pipeline also ONNX Runtime) inside their functions, so the source-bundle checks of `autoencoder_pipeline.py` run anywhere; `anomaly_stats.py` is standard library only; `imagenet_eval.py` needs NumPy and Pillow; `accuracy_stats.py` is standard library only; the others (`preprocess.py`, `manifests.py`, `model_registry.py`, `accuracy.py`, `qnn_log.py`, `onnx_prune.py`, `qdq_inspect.py`, `results_io.py`, `cli.py`) do not | – |
@@ -317,8 +317,8 @@ rerun with the committed results instead, pass `--output-dir` (and
 `--predictions-dir` / `--scores-dir`). Metrics and the SHA256 of the prediction
 and score files are reproducible. `check_doc_numbers.py` (standard library only,
 also run in CI) checks that the numbers quoted in README.md, accuracy.md,
-autoencoder.md and models.md match the committed results, the manifest and the
-split manifest. See [accuracy.md](accuracy.md).
+autoencoder.md, models.md and npu.md match the committed results, the manifest,
+the split manifest and `docs/findings/`. See [accuracy.md](accuracy.md).
 
 ### 8. Feasibility-study models (optional)
 

@@ -4,11 +4,12 @@ The published accuracy and anomaly-detection results
 (``benchmarks/results/published/accuracy/``), the model manifest
 (``models/manifest.json``), the batch-equivalence summary
 (``models/batch_equivalence.json``), the NAB split manifest, the autoencoder's
-committed training record and the weights pinned in
-``scripts/common/model_registry.py``
+committed training record, the weights pinned in
+``scripts/common/model_registry.py`` and the NPU batch-size findings
+(``docs/findings/npu_int8_batch_size.json``)
 are the sources of truth. This script finds the tables and sentences in
-README.md, docs/accuracy.md, docs/autoencoder.md and docs/models.md that quote
-them and checks every number:
+README.md, docs/accuracy.md, docs/autoencoder.md, docs/models.md and
+docs/npu.md that quote them and checks every number:
 
 * result tables are matched row by row (same rows, same order, every cell);
 * sentences that summarise results (ranges, maxima, counts) are recomputed;
@@ -44,7 +45,9 @@ ANOMALY_DIR = ACCURACY_DIR / "anomaly"
 SPLITS = REPO_ROOT / "datasets" / "nab-machine-temperature" / "splits.json"
 TRAINING_RECORD = REPO_ROOT / "models" / "sources" / "conv1d_autoencoder" / "training_record.json"
 BATCH_EQUIVALENCE = REPO_ROOT / "models" / "batch_equivalence.json"
-DOCS = ("README.md", "docs/accuracy.md", "docs/autoencoder.md", "docs/models.md")
+NPU_BATCH_FINDINGS = REPO_ROOT / "docs" / "findings" / "npu_int8_batch_size.json"
+DOCS = ("README.md", "docs/accuracy.md", "docs/autoencoder.md", "docs/models.md",
+        "docs/npu.md")
 
 AE = "conv1d_autoencoder"
 IMAGE_MODELS = ("mobilenetv2", "resnet18", "efficientnet_lite0")
@@ -107,6 +110,7 @@ class Sources:
     splits: dict
     training_record: dict
     batch_equivalence: list[dict] = field(default_factory=list)
+    npu_batch: dict = field(default_factory=dict)
     known_sha256: set[str] = field(default_factory=set)
 
 
@@ -134,6 +138,7 @@ def load_sources(root: Path = REPO_ROOT) -> Sources:
     splits = _json(root / SPLITS.relative_to(REPO_ROOT))
     record = _json(root / TRAINING_RECORD.relative_to(REPO_ROOT))
     equivalence = _json(root / BATCH_EQUIVALENCE.relative_to(REPO_ROOT))["entries"]
+    npu_batch = _json(root / NPU_BATCH_FINDINGS.relative_to(REPO_ROOT))
     known = set()
     for obj in (runs, anomaly_runs, manifest_doc, splits, record, equivalence):
         known |= _sha256s(obj)
@@ -143,7 +148,7 @@ def load_sources(root: Path = REPO_ROOT) -> Sources:
         known |= {sha for _, sha in imported.source_sha256}
         known |= {imported.training_record_sha256, imported.sha256sums_sha256}
     return Sources(runs, comparisons, anomaly_runs, anomaly_comparisons, manifest, splits,
-                   record, equivalence, known)
+                   record, equivalence, npu_batch, known)
 
 
 # ------------------------------------------------------------------- markdown helpers
@@ -584,6 +589,134 @@ def check_batch_equivalence(c: Checker) -> None:
                sum(1 for e in entries if e["predictions_equal_to_b1"] is False))
 
 
+MIB = 1024 * 1024
+DISPLAY = {"mobilenetv2": "MobileNetV2", "resnet18": "ResNet-18",
+           "efficientnet_lite0": "EfficientNet-Lite0"}
+TAIL_LABEL = {"global_average_pool": "GlobalAveragePool",
+              "global_average_pool_flatten": "GlobalAveragePool + Flatten",
+              "tail_to_logits": "GlobalAveragePool to logits", "gemm_only": "Gemm only"}
+
+
+def _differing(hist: dict[str, int]) -> str:
+    """'0', or 'N of M' (elements not 0 LSB apart, of all) for an LSB histogram."""
+    total = sum(hist.values())
+    n = total - hist.get("0", 0)
+    return "0" if n == 0 else f"{n:,} of {total:,}"
+
+
+def _same_or_differs(counts: list[int], items: int) -> str:
+    return ("same" if all(n == items for n in counts) else
+            "differs" if not any(counts) else "mixed")
+
+
+def check_npu_batch_findings(c: Checker) -> None:
+    """docs/npu.md, "Batch size and INT8 outputs", against docs/findings/."""
+    doc = "docs/npu.md"
+    f = c.src.npu_batch
+    models = f["models"]
+    items = f["reference_images"]
+    batches = list(models[IMAGE_MODELS[0]]["threshold"]["batches"])
+    rows = c.rows(doc, "| Batch | MobileNetV2 | ResNet-18 | EfficientNet-Lite0 | Largest activation",
+                  len(batches))
+    for shown, batch in zip(rows, batches):
+        where = f"{doc}: threshold row b{batch}"
+        c.equal(where, shown[0], batch)
+        for i, m in enumerate(IMAGE_MODELS):
+            row = models[m]["threshold"]["batches"][batch]
+            c.equal(where, shown[1 + i], f"{row['items_equal_b1_reference']} of {items}")
+            c.number(where, shown[4 + i].replace(" MiB", ""),
+                     row["largest_activation"]["bytes"], 1 / MIB)
+    for m in IMAGE_MODELS:
+        t = models[m]["threshold"]
+        c.equal(f"{doc}: {m} diverging batches identical", t["diverging_batches_identical"], True)
+        c.equal(f"{doc}: {m} position independent", t["b8_independent_of_position_in_batch"], True)
+    c.sentence(doc, r"smallest batch size that differs is (\d+) for all three models",
+               lambda t: all(models[m]["threshold"]["first_diverging_batch"] == int(t)
+                             for m in IMAGE_MODELS))
+    c.sentence(doc, r"VTCM is (\d+) MiB", f["vtcm_bytes"] // MIB)
+
+    scan = f["layer_scan"]
+    c.sentence(doc, r"Of the (\d+) activations of ResNet-18 \(the output of every activation "
+                    r"DequantizeLinear\), compared at b1 and b(\d+), only the last one, `(\w+)`, "
+                    r"differs",
+               scan["cut_points"], scan["batch"], scan["first_diverging"])
+    c.equal(f"{doc}: layer scan differing tensors",
+            [r["tensor"] for r in scan["rows"] if r["differing"]], [scan["first_diverging"]])
+
+    rows = c.rows(doc, "| Model | Sub-model | b2 | b4 | b6 | b7 | b8 |",
+                  len(IMAGE_MODELS) * len(TAIL_LABEL))
+    for shown, (m, v) in zip(rows, [(m, v) for m in IMAGE_MODELS for v in TAIL_LABEL]):
+        tail = models[m]["tail"][v]
+        c.equal(f"{doc}: tail row {m} {v}", shown,
+                [DISPLAY[m], TAIL_LABEL[v], *(_differing(tail[b]) for b in ("2", "4", "6", "7", "8"))])
+    histograms = [h for m in IMAGE_MODELS
+                  for h in [models[m]["threshold"]["output_lsb_histogram_b8_minus_b1"],
+                            *models[m]["tail"]["tail_to_logits"].values(),
+                            *models[m]["tail"]["gemm_only"].values()]]
+    c.sentence(doc, r"every differing element is (\+1) LSB",
+               lambda t: t == "+1" and all(set(h) <= {"0", "1"} for h in histograms))
+
+    rows = c.rows(doc, "| Model | Output scale | Outputs | +1 LSB | Top-1 changes |",
+                  len(IMAGE_MODELS))
+    for shown, m in zip(rows, IMAGE_MODELS):
+        t = models[m]["threshold"]
+        hist = t["output_lsb_histogram_b8_minus_b1"]
+        total = sum(hist.values())
+        where = f"{doc}: output LSB row {m}"
+        c.equal(where, shown[0], DISPLAY[m])
+        c.number(where, shown[1], t["output_scale"])
+        c.equal(where, int(shown[2].replace(",", "")), total)
+        count, share = shown[3].split(" (")
+        c.equal(where, int(count.replace(",", "")), hist.get("1", 0))
+        c.number(where, share.rstrip(")"), hist.get("1", 0) / total, 100)
+        c.equal(where, int(shown[4]), t["top1_changes_b8_reference_images"])
+
+    rows = c.rows(doc, "| Model | Batch | Mean error (LSB) | Standard deviation (LSB) |",
+                  2 * len(IMAGE_MODELS))
+    for shown, (m, b) in zip(rows, [(m, b) for m in IMAGE_MODELS for b in ("b1", "b8")]):
+        e = models[m]["gemm_emulation"]
+        r = e[b]
+        where = f"{doc}: Gemm emulation row {m} {b}"
+        c.equal(where, shown[:2], [DISPLAY[m], b[1:]])
+        c.number(where, shown[2], r["error_vs_exact_mean_lsb"])
+        c.number(where, shown[3], r["error_vs_exact_std_lsb"])
+        low, high = shown[4].split(" to ")
+        c.number(where, low, r["error_vs_exact_min_lsb"])
+        c.number(where, high, r["error_vs_exact_max_lsb"])
+        c.number(where, shown[5], r["minus_exactly_rounded_histogram"].get("0", 0)
+                 / e["outputs_compared"], 100)
+
+    configs = list(models[IMAGE_MODELS[0]]["options_items_equal_b1_reference"])
+    rows = c.rows(doc, "| Option | b1 | b6 | b7 | b8 |", len(configs))
+    for shown, cfg in zip(rows, configs):
+        c.equal(f"{doc}: option row {cfg}", [shown[0].strip("`"), *shown[1:]], [cfg, *(
+            _same_or_differs([models[m]["options_items_equal_b1_reference"][cfg][b]
+                              for m in IMAGE_MODELS], items) for b in ("1", "6", "7", "8"))])
+
+    rows = c.rows(doc, "| Model | Default b8: top-1 changes | Mode 1 b8: bitwise equal to b1 |",
+                  len(IMAGE_MODELS))
+    for shown, m in zip(rows, IMAGE_MODELS):
+        q = models[m]["eval_quick"]
+        lat = {k: v["median_ms"] for k, v in models[m]["latency"].items()}
+        where = f"{doc}: mode 1 row {m}"
+        c.equal(where, shown[:3], [
+            DISPLAY[m],
+            f"{q['default_b8']['top1_differing']} of {q['default_b8']['images']:,}",
+            f"{q['finalization_1_b8']['bitwise_equal']:,} of {q['finalization_1_b8']['images']:,}"])
+        for i, key in enumerate(("default_b1", "finalization_1_b1", "default_b8",
+                                 "finalization_1_b8")):
+            c.number(where, shown[3 + i], lat[key])
+        c.number(where, shown[7].lstrip("+").rstrip("%"),
+                 lat["finalization_1_b8"] / lat["default_b8"] - 1, 100)
+        c.equal(f"{doc}: {m} mode 1 leaves b1 unchanged",
+                q["finalization_1_b1"]["bitwise_equal"], q["finalization_1_b1"]["images"])
+
+    diffs = f["qnn_graph_differences_b6_b7"]["differences"]
+    c.sentence(doc, r"differ only in the batch dimension of (\d+) tensors",
+               lambda t: int(t) == len(diffs) and all(d.endswith("/dims[0]: 6 -> 7")
+                                                      for d in diffs))
+
+
 def check_hashes(c: Checker) -> None:
     """Every SHA256 a document quotes, in full or abbreviated, is a known one."""
     for doc, text in c.docs.items():
@@ -599,7 +732,8 @@ def check_hashes(c: Checker) -> None:
 
 
 CHECKS = (check_accuracy_tables, check_anomaly_tables, check_accuracy_sentences,
-          check_autoencoder_sentences, check_models, check_batch_equivalence, check_hashes)
+          check_autoencoder_sentences, check_models, check_batch_equivalence,
+          check_npu_batch_findings, check_hashes)
 
 
 def read_docs(root: Path = REPO_ROOT) -> dict[str, str]:

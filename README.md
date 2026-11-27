@@ -152,6 +152,8 @@ hygiene check. See [Test labels](docs/setup.md#test-labels) and
   autoencoder: NAB data, windows and splits, Colab training, the committed
   source and its exact graph clean-up, INT8, NPU checks and the
   anomaly-detection evaluation on CPU and NPU
+- [docs/npu.md](docs/npu.md): NPU runs; why NPU INT8 image models compute
+  different outputs from batch 7 up
 - [docs/cli.md](docs/cli.md): `edgebench` commands, options, output and exit
   codes
 - [docs/results-schema.md](docs/results-schema.md): result file format (JSON
