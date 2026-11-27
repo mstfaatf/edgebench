@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mstfaatf/edgebench/schemas/suite-manifest.v1.0.0.schema.json",
+  "title": "EdgeBench suite manifest",
+  "description": "suite-manifest.json of a suite directory (docs/suite.md, \"The manifest\"): the configuration, the pre-flight results and every planned run with its state. `edgebench suite` rewrites it atomically after every change of state; --resume reads it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "suite_manifest_version", "suite", "created_utc", "updated_utc", "status", "tool", "versions", "rotation",
+    "repetitions", "validator", "publishable", "not_publishable_reasons", "preflight_ever_skipped", "preflight",
+    "invocations", "estimate", "counts", "runs"
+  ],
+  "properties": {
+    "suite_manifest_version": {"const": "1.0.0"},
+    "suite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "config_file", "config_sha256", "config"],
+      "properties": {
+        "name": {"$ref": "#/$defs/name"},
+        "config_file": {"type": "string", "minLength": 1, "description": "Absolute path the suite was started with."},
+        "config_sha256": {
+          "$ref": "#/$defs/sha256",
+          "description": "SHA256 of the configuration serialized canonically (keys sorted, no whitespace, UTF-8); --resume refuses a configuration with another hash."
+        },
+        "config": {"type": "object", "description": "The configuration as it was read (also suite-config.json)."}
+      }
+    },
+    "created_utc": {"$ref": "#/$defs/timestamp"},
+    "updated_utc": {"$ref": "#/$defs/timestamp"},
+    "status": {
+      "enum": ["planned", "running", "interrupted", "completed", "aborted"],
+      "description": "completed: every run was attempted (some may have failed); aborted: the pre-flight gate failed or --fail-fast stopped it; interrupted: Ctrl+C (resumable)."
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "git_commit", "git_dirty", "build_type", "results_schema_version"],
+      "properties": {
+        "name": {"const": "edgebench"},
+        "version": {"type": "string"},
+        "git_commit": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "git_dirty": {"type": ["boolean", "null"]},
+        "build_type": {"type": "string"},
+        "results_schema_version": {"type": "string"}
+      }
+    },
+    "versions": {
+      "type": ["object", "null"],
+      "description": "The versions block of the latest doctor report (ONNX Runtime, QNN EP, QAIRT SDK); null if no doctor check ran. A resume refuses other versions."
+    },
+    "rotation": {"enum": ["rotated", "blocked"]},
+    "repetitions": {"type": "integer", "minimum": 1},
+    "validator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["python", "script"],
+      "properties": {"python": {"type": "string"}, "script": {"type": "string"}}
+    },
+    "publishable": {"type": "boolean"},
+    "not_publishable_reasons": {"type": "array", "items": {"type": "string"}},
+    "preflight_ever_skipped": {"type": "boolean", "description": "True once any invocation ran with --skip-preflight; it never becomes false again."},
+    "preflight": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["started_utc", "skipped", "passed", "checks"],
+        "properties": {
+          "started_utc": {"$ref": "#/$defs/timestamp"},
+          "skipped": {"type": "boolean"},
+          "passed": {"type": "boolean"},
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "status", "summary", "details"],
+              "properties": {
+                "name": {"type": "string", "minLength": 1},
+                "status": {"enum": ["pass", "warn", "fail"]},
+                "summary": {"type": "string"},
+                "details": {"type": "object"}
+              }
+            }
+          }
+        }
+      },
+      "description": "One entry per invocation (the gate runs again on every resume)."
+    },
+    "invocations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["started_utc", "ended_utc", "resumed", "fail_fast", "skip_preflight", "exit_code"],
+        "properties": {
+          "started_utc": {"$ref": "#/$defs/timestamp"},
+          "ended_utc": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/timestamp"}]},
+          "resumed": {"type": "boolean"},
+          "fail_fast": {"type": "boolean"},
+          "skip_preflight": {"type": "boolean"},
+          "exit_code": {"type": ["integer", "null"]}
+        }
+      }
+    },
+    "estimate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total_s", "configurations_from_prior_results", "configurations_from_heuristic"],
+      "properties": {
+        "total_s": {"type": "number", "minimum": 0},
+        "configurations_from_prior_results": {"type": "integer", "minimum": 0},
+        "configurations_from_heuristic": {"type": "integer", "minimum": 0}
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pending", "running", "done", "failed", "skipped"],
+      "properties": {
+        "pending": {"type": "integer", "minimum": 0},
+        "running": {"type": "integer", "minimum": 0},
+        "done": {"type": "integer", "minimum": 0},
+        "failed": {"type": "integer", "minimum": 0},
+        "skipped": {"type": "integer", "minimum": 0}
+      }
+    },
+    "runs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/run"}}
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"},
+    "relativePath": {"type": ["string", "null"], "pattern": "^(?![A-Za-z]:|[\\\\/])"},
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id", "short_id", "configuration_id", "label", "order_index", "repetition", "configuration", "status",
+        "attempts", "exit_code", "exit_code_name", "started_utc", "ended_utc", "duration_s", "cooldown_s_before",
+        "estimate_s", "output_dir", "result_file", "result_sha256", "log_file", "failure", "validation",
+        "validation_issues", "warnings", "cache_build", "discarded"
+      ],
+      "properties": {
+        "run_id": {"$ref": "#/$defs/sha256", "description": "SHA256 of the resolved configuration plus the repetition."},
+        "short_id": {"type": "string", "pattern": "^[0-9a-f]{12}$"},
+        "configuration_id": {"$ref": "#/$defs/sha256", "description": "SHA256 of the resolved configuration."},
+        "label": {"$ref": "#/$defs/name"},
+        "order_index": {"type": "integer", "minimum": 0},
+        "repetition": {"type": "integer", "minimum": 0},
+        "configuration": {
+          "type": "object",
+          "required": [
+            "run_id_version", "model", "model_file", "model_sha256", "provider", "precision", "compute_precision", "batch"
+          ],
+          "properties": {
+            "run_id_version": {"const": 1},
+            "model_sha256": {"$ref": "#/$defs/sha256"},
+            "provider": {"enum": ["cpu", "npu"]},
+            "precision": {"enum": ["fp32", "int8"]},
+            "compute_precision": {"enum": ["fp32", "int8", "fp16"]},
+            "batch": {"type": "integer", "minimum": 1}
+          },
+          "description": "The resolved configuration the IDs hash (plus model_file_path, source and label, which they do not)."
+        },
+        "status": {"enum": ["pending", "running", "done", "failed", "skipped"]},
+        "attempts": {"type": "integer", "minimum": 0},
+        "exit_code": {"type": ["integer", "null"]},
+        "exit_code_name": {"type": ["string", "null"]},
+        "started_utc": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/timestamp"}]},
+        "ended_utc": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/timestamp"}]},
+        "duration_s": {"type": ["number", "null"], "minimum": 0},
+        "cooldown_s_before": {"type": ["number", "null"], "minimum": 0},
+        "estimate_s": {"type": "number", "minimum": 0},
+        "output_dir": {"$ref": "#/$defs/relativePath"},
+        "result_file": {"$ref": "#/$defs/relativePath"},
+        "result_sha256": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]},
+        "log_file": {"$ref": "#/$defs/relativePath"},
+        "failure": {"type": ["string", "null"]},
+        "validation": {"enum": ["passed", "failed", null]},
+        "validation_issues": {"type": "array", "items": {"type": "string"}},
+        "warnings": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "cache_build": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["exit_code", "exit_code_name", "seconds", "result_file"],
+              "properties": {
+                "exit_code": {"type": ["integer", "null"]},
+                "exit_code_name": {"type": ["string", "null"]},
+                "seconds": {"type": "number", "minimum": 0},
+                "result_file": {"$ref": "#/$defs/relativePath"}
+              }
+            }
+          ]
+        },
+        "discarded": {"type": "array", "items": {"type": "string"}, "description": "Output of earlier attempts, moved aside."}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "done"}}},
+          "then": {
+            "properties": {
+              "exit_code": {"const": 0},
+              "result_file": {"type": "string"},
+              "result_sha256": {"type": "string"},
+              "validation": {"const": "passed"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "failed"}}},
+          "then": {"properties": {"failure": {"type": "string"}}}
+        }
+      ]
+    }
+  }
+}

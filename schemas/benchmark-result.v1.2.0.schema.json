@@ -1244,6 +1244,30 @@
           }
         }
       ]
+    },
+    "suite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "suite_name", "suite_config_hash", "run_id", "repetition", "order_index", "cooldown_s_before",
+        "preflight_skipped"
+      ],
+      "properties": {
+        "suite_name": {"type": "string", "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$"},
+        "suite_config_hash": {"$ref": "#/$defs/sha256"},
+        "run_id": {
+          "$ref": "#/$defs/sha256",
+          "description": "The suite's ID of this run: SHA256 of its resolved configuration and repetition (docs/suite.md). Not the result's run_id."
+        },
+        "repetition": {"type": "integer", "minimum": 0, "description": "0-based."},
+        "order_index": {"type": "integer", "minimum": 0, "description": "0-based position in the suite's run order."},
+        "cooldown_s_before": {"type": "number", "minimum": 0, "description": "The suite's idle period before this run, in seconds."},
+        "preflight_skipped": {
+          "type": "boolean",
+          "description": "True if the suite ran without its pre-flight gate (--skip-preflight): the result is not publishable."
+        }
+      },
+      "description": "Present only when `edgebench suite` launched the run: where it belongs in the suite. Absent for a run started by hand."
     }
   },
   "allOf": [

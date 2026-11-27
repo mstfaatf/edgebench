@@ -1,0 +1,12 @@
+{
+  "description": "A preflight_skipped warning on a run that no suite launched.",
+  "base": "docs/examples/v1.2.0/example-cpu-fp32.json",
+  "set": {
+    "/warnings/-": {"code": "preflight_skipped", "message": "The suite ran without its pre-flight check.", "path": "/suite/preflight_skipped"}
+  },
+  "expect": {
+    "severity": "error",
+    "code": "preflight_skipped_unfounded",
+    "path": "/suite/preflight_skipped"
+  }
+}

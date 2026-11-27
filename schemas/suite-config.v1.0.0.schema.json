@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mstfaatf/edgebench/schemas/suite-config.v1.0.0.schema.json",
+  "title": "EdgeBench suite configuration",
+  "description": "An experiment plan for `edgebench suite` (docs/suite.md). Relative paths are relative to the directory of the configuration file. The engine also checks what a schema cannot: every configuration of a matrix, that model files exist and match, and every configuration against the rules of `edgebench run`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["suite_config_version", "name", "output_dir", "models"],
+  "oneOf": [
+    {"required": ["configurations"], "not": {"required": ["matrix"]}},
+    {"required": ["matrix"], "not": {"required": ["configurations"]}}
+  ],
+  "properties": {
+    "suite_config_version": {"const": "1.0.0"},
+    "name": {"$ref": "#/$defs/name", "description": "Name of the suite; its directories are <output_dir>/<name>_<UTC stamp>."},
+    "description": {"type": "string"},
+    "output_dir": {"type": "string", "minLength": 1, "description": "Where suite directories are created."},
+    "models_dir": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Directory holding manifest.json for models named by their manifest name. Default: the nearest models/ directory above the configuration file."
+    },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {"$ref": "#/$defs/name", "description": "A model of models/manifest.json, e.g. \"conv1d_autoencoder\"."},
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "files"],
+            "properties": {
+              "name": {"$ref": "#/$defs/name"},
+              "files": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["path", "precision", "batch"],
+                  "properties": {
+                    "path": {"type": "string", "minLength": 1},
+                    "precision": {"$ref": "#/$defs/precision"},
+                    "batch": {"$ref": "#/$defs/batch"},
+                    "variant": {"type": "string", "minLength": 1}
+                  }
+                }
+              }
+            },
+            "description": "A model given by its files (outside the manifest)."
+          }
+        ]
+      }
+    },
+    "configurations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/configuration"}
+    },
+    "matrix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providers", "precisions", "batches"],
+      "properties": {
+        "models": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/name"}},
+        "providers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/provider"}},
+        "precisions": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/precision"}},
+        "batches": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/batch"}},
+        "npu": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "npu_fp16": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "boolean"}},
+            "htp_performance_mode": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/htpPerformanceMode"}]}
+            },
+            "htp_graph_finalization_mode": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/htpGraphFinalizationMode"}]}
+            },
+            "strict": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "boolean"}}
+          },
+          "description": "Further axes of the product that apply to NPU configurations only (default: one value each, npu_fp16 false, the EP defaults, strict)."
+        },
+        "include": {"type": "array", "items": {"$ref": "#/$defs/configuration"}},
+        "exclude": {"type": "array", "items": {"$ref": "#/$defs/match", "minProperties": 1}}
+      },
+      "description": "Models x providers x precisions x batches (x the NPU axes for NPU configurations), minus exclude, plus include. A combination that `edgebench run` would refuse is an error, not dropped: exclude it."
+    },
+    "defaults": {"$ref": "#/$defs/runParams"},
+    "overrides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["match", "set"],
+        "properties": {
+          "match": {"$ref": "#/$defs/match"},
+          "set": {"allOf": [{"$ref": "#/$defs/runParams"}, {"minProperties": 1}]}
+        }
+      },
+      "description": "Run parameters for the configurations a match selects, applied in order after defaults; keys written in a configuration itself win."
+    },
+    "repetitions": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 1},
+    "rotation": {"enum": ["rotated", "blocked"], "default": "rotated"},
+    "cooldown_s": {"$ref": "#/$defs/cooldown", "description": "Default idle period before every run, in seconds (default 5)."},
+    "preflight": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "checks": {"type": "array", "uniqueItems": true, "items": {"enum": ["doctor"]}, "default": ["doctor"]},
+        "fail_on_warn": {"type": "boolean", "default": false}
+      }
+    }
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$"},
+    "provider": {"enum": ["cpu", "npu"]},
+    "precision": {"enum": ["fp32", "int8"], "description": "Stored precision of the model file."},
+    "batch": {"type": "integer", "minimum": 1},
+    "cooldown": {"type": "number", "minimum": 0, "maximum": 3600},
+    "htpPerformanceMode": {
+      "enum": [
+        "burst", "balanced", "default", "high_performance", "high_power_saver", "low_balanced", "low_power_saver",
+        "power_saver", "extreme_power_saver", "sustained_high_performance"
+      ]
+    },
+    "htpGraphFinalizationMode": {"enum": ["0", "1", "2", "3"]},
+    "identityKeys": {
+      "type": "object",
+      "properties": {
+        "model": {"$ref": "#/$defs/name"},
+        "provider": {"$ref": "#/$defs/provider"},
+        "precision": {"$ref": "#/$defs/precision"},
+        "batch": {"$ref": "#/$defs/batch"},
+        "variant": {"type": "string", "minLength": 1},
+        "npu_fp16": {"type": "boolean"},
+        "htp_performance_mode": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/htpPerformanceMode"}]},
+        "htp_graph_finalization_mode": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/htpGraphFinalizationMode"}]},
+        "strict": {"type": "boolean"}
+      }
+    },
+    "match": {
+      "allOf": [{"$ref": "#/$defs/identityKeys"}],
+      "propertyNames": {
+        "enum": [
+          "model", "provider", "precision", "batch", "variant", "npu_fp16", "htp_performance_mode",
+          "htp_graph_finalization_mode", "strict"
+        ]
+      },
+      "description": "Selects the configurations whose keys equal these values."
+    },
+    "runParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "warmup": {"type": "integer", "minimum": 0, "maximum": 100000},
+        "iterations": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "trials": {"type": "integer", "minimum": 1, "maximum": 1000},
+        "trial_cooldown_ms": {"type": "integer", "minimum": 0, "maximum": 600000, "description": "`run --cooldown-ms`: idle before every trial."},
+        "load_sample_ms": {"type": "integer", "minimum": 0, "maximum": 600000},
+        "threads": {"type": "integer", "minimum": 1, "maximum": 256},
+        "binding": {"enum": ["run", "iobinding"]},
+        "init": {"enum": ["cold", "build", "cached"]},
+        "init_breakdown": {"type": "boolean"},
+        "profile_accelerator": {"type": "boolean"},
+        "profile_iterations": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "cooldown_s": {"$ref": "#/$defs/cooldown"}
+      }
+    },
+    "configuration": {
+      "allOf": [
+        {"$ref": "#/$defs/identityKeys"},
+        {
+          "if": {"properties": {"provider": {"const": "cpu"}}},
+          "then": {
+            "properties": {
+              "npu_fp16": {"const": false},
+              "htp_performance_mode": {"const": null},
+              "htp_graph_finalization_mode": {"const": null},
+              "strict": {"const": true},
+              "init": {"const": "cold"},
+              "init_breakdown": {"const": false},
+              "profile_accelerator": {"const": false}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"provider": {"const": "npu"}, "precision": {"const": "fp32"}}, "required": ["provider", "precision"]},
+          "then": {"required": ["npu_fp16"], "properties": {"npu_fp16": {"const": true}}},
+          "description": "The NPU has no FP32 compute: an FP32 file runs with FP16 compute only."
+        },
+        {
+          "if": {"properties": {"precision": {"const": "int8"}}, "required": ["precision"]},
+          "then": {"properties": {"npu_fp16": {"const": false}}}
+        }
+      ],
+      "required": ["model", "provider", "precision", "batch"],
+      "propertyNames": {
+        "enum": [
+          "model", "provider", "precision", "batch", "variant", "npu_fp16", "htp_performance_mode",
+          "htp_graph_finalization_mode", "strict", "warmup", "iterations", "trials", "trial_cooldown_ms",
+          "load_sample_ms", "threads", "binding", "init", "init_breakdown", "profile_accelerator",
+          "profile_iterations", "cooldown_s"
+        ]
+      },
+      "properties": {
+        "warmup": {"$ref": "#/$defs/runParams/properties/warmup"},
+        "iterations": {"$ref": "#/$defs/runParams/properties/iterations"},
+        "trials": {"$ref": "#/$defs/runParams/properties/trials"},
+        "trial_cooldown_ms": {"$ref": "#/$defs/runParams/properties/trial_cooldown_ms"},
+        "load_sample_ms": {"$ref": "#/$defs/runParams/properties/load_sample_ms"},
+        "threads": {"$ref": "#/$defs/runParams/properties/threads"},
+        "binding": {"$ref": "#/$defs/runParams/properties/binding"},
+        "init": {"$ref": "#/$defs/runParams/properties/init"},
+        "init_breakdown": {"$ref": "#/$defs/runParams/properties/init_breakdown"},
+        "profile_accelerator": {"$ref": "#/$defs/runParams/properties/profile_accelerator"},
+        "profile_iterations": {"$ref": "#/$defs/runParams/properties/profile_iterations"},
+        "cooldown_s": {"$ref": "#/$defs/cooldown"}
+      }
+    }
+  }
+}

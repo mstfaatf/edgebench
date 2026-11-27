@@ -1,0 +1,40 @@
+{
+  "description": "A model file that does not exist.",
+  "config": {
+    "suite_config_version": "1.0.0",
+    "name": "fixture",
+    "output_dir": "out",
+    "models": [
+      {
+        "name": "tiny",
+        "files": [
+          {
+            "path": "no_such_model.onnx",
+            "precision": "fp32",
+            "batch": 1
+          }
+        ]
+      }
+    ],
+    "defaults": {
+      "warmup": 1,
+      "iterations": 5,
+      "trials": 1,
+      "trial_cooldown_ms": 0,
+      "load_sample_ms": 0
+    },
+    "cooldown_s": 0,
+    "configurations": [
+      {
+        "model": "tiny",
+        "provider": "cpu",
+        "precision": "fp32",
+        "batch": 1
+      }
+    ]
+  },
+  "expect": {
+    "schema": "valid",
+    "engine_kind": "model_file_missing"
+  }
+}

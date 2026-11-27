@@ -1,0 +1,56 @@
+{
+  "description": "The CPU provider has no EP context cache.",
+  "config": {
+    "suite_config_version": "1.0.0",
+    "name": "fixture",
+    "output_dir": "out",
+    "models": [
+      {
+        "name": "tiny",
+        "files": [
+          {
+            "path": "../../../../../engine/tests/fixtures/models/fixed_float32.onnx",
+            "precision": "fp32",
+            "batch": 1
+          }
+        ]
+      },
+      {
+        "name": "probe",
+        "files": [
+          {
+            "path": "../../../../../engine/resources/doctor/npu_probe_fp32.onnx",
+            "precision": "fp32",
+            "batch": 1
+          },
+          {
+            "path": "../../../../../engine/resources/doctor/npu_probe_int8.onnx",
+            "precision": "int8",
+            "batch": 1
+          }
+        ]
+      }
+    ],
+    "defaults": {
+      "warmup": 1,
+      "iterations": 5,
+      "trials": 1,
+      "trial_cooldown_ms": 0,
+      "load_sample_ms": 0
+    },
+    "cooldown_s": 0,
+    "configurations": [
+      {
+        "model": "tiny",
+        "provider": "cpu",
+        "precision": "fp32",
+        "batch": 1,
+        "init": "cached"
+      }
+    ]
+  },
+  "expect": {
+    "schema": "invalid",
+    "engine_kind": "invalid_combination"
+  }
+}

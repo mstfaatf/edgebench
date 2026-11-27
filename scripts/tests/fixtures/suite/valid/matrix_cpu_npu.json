@@ -1,0 +1,96 @@
+{
+  "suite_config_version": "1.0.0",
+  "name": "fixture",
+  "output_dir": "out",
+  "models": [
+    {
+      "name": "tiny",
+      "files": [
+        {
+          "path": "../../../../../engine/tests/fixtures/models/fixed_float32.onnx",
+          "precision": "fp32",
+          "batch": 1
+        }
+      ]
+    },
+    {
+      "name": "probe",
+      "files": [
+        {
+          "path": "../../../../../engine/resources/doctor/npu_probe_fp32.onnx",
+          "precision": "fp32",
+          "batch": 1
+        },
+        {
+          "path": "../../../../../engine/resources/doctor/npu_probe_int8.onnx",
+          "precision": "int8",
+          "batch": 1
+        }
+      ]
+    }
+  ],
+  "defaults": {
+    "warmup": 1,
+    "iterations": 5,
+    "trials": 1,
+    "trial_cooldown_ms": 0,
+    "load_sample_ms": 0
+  },
+  "cooldown_s": 0,
+  "matrix": {
+    "models": [
+      "probe"
+    ],
+    "providers": [
+      "cpu",
+      "npu"
+    ],
+    "precisions": [
+      "fp32",
+      "int8"
+    ],
+    "batches": [
+      1
+    ],
+    "npu": {
+      "npu_fp16": [
+        false,
+        true
+      ]
+    },
+    "exclude": [
+      {
+        "provider": "npu",
+        "precision": "fp32",
+        "npu_fp16": false
+      },
+      {
+        "provider": "npu",
+        "precision": "int8",
+        "npu_fp16": true
+      }
+    ],
+    "include": [
+      {
+        "model": "tiny",
+        "provider": "cpu",
+        "precision": "fp32",
+        "batch": 1
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "match": {
+        "provider": "npu"
+      },
+      "set": {
+        "init": "cached",
+        "profile_accelerator": true,
+        "profile_iterations": 3
+      }
+    }
+  ],
+  "repetitions": 3,
+  "rotation": "blocked"
+}

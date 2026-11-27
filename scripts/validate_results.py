@@ -373,8 +373,15 @@ V1_2_RULES = {
     "trial_spread_mismatch": ERROR,
     "trial_spread_unflagged": ERROR,
     "trial_spread_unfounded": ERROR,
+    "preflight_skipped_unflagged": ERROR,
+    "preflight_skipped_unfounded": ERROR,
+    "result_not_publishable": WARNING,
     "missing_1_2_0_key": WARNING,
 }
+
+# Keys only some writers emit: never reported as missing.
+OPTIONAL_TOP_LEVEL_KEYS = ("/suite",)  # only runs launched by `edgebench suite`
+PREFLIGHT_SKIPPED_WARNING = "preflight_skipped"
 
 # trial_spread_high: judged on the per-trial medians (engine stats.hpp).
 TRIAL_SPREAD_WARNING = "trial_spread_high"
@@ -456,7 +463,7 @@ def missing_key_issues(doc: dict[str, Any], schema: dict[str, Any]) -> list[Issu
     with the version that added it (missing_1_1_0_key, missing_1_2_0_key)."""
     if doc["tool"].get("implementation") != "cpp":
         return []
-    missing = missing_keys(doc, schema, schema)
+    missing = [p for p in missing_keys(doc, schema, schema) if p not in OPTIONAL_TOP_LEVEL_KEYS]
     from_1_1 = set(missing)
     if version_key(doc["schema_version"]) >= (1, 2, 0):
         older = _schema_of_version("1.1.0")
@@ -825,6 +832,22 @@ def v1_2_issues(doc: dict[str, Any]) -> list[Issue]:
         if warned and not high:
             report(f"{base}/high", f"a '{TRIAL_SPREAD_WARNING}' warning requires the trial "
                                    "medians to exceed a spread threshold", "trial_spread_unfounded")
+
+    # A suite without its pre-flight gate: every result says so in a warning.
+    suite = doc.get("suite")
+    skipped_warning = any(w["code"] == PREFLIGHT_SKIPPED_WARNING for w in doc["warnings"])
+    if suite is not None and suite["preflight_skipped"] and not skipped_warning:
+        report("/suite/preflight_skipped", "a result of a suite that skipped its pre-flight check "
+                                           f"needs a '{PREFLIGHT_SKIPPED_WARNING}' warning",
+               "preflight_skipped_unflagged")
+    if suite is not None and suite["preflight_skipped"] and skipped_warning:
+        # Valid, but --strict (how published results are checked) must reject it.
+        report("/suite/preflight_skipped", "the suite skipped its pre-flight check: the result "
+                                           "is not publishable", "result_not_publishable")
+    if skipped_warning and (suite is None or not suite["preflight_skipped"]):
+        report("/suite/preflight_skipped", f"a '{PREFLIGHT_SKIPPED_WARNING}' warning requires "
+                                           "suite.preflight_skipped to be true",
+               "preflight_skipped_unfounded")
     return issues
 
 
@@ -883,15 +906,17 @@ def collect_files(paths: Iterable[Path]) -> list[Path]:
 
 
 def is_accuracy_document(path: Path) -> bool:
-    """An accuracy result (scripts/eval_accuracy.py) or a doctor report: each has its own schema
-    and validator."""
+    """An accuracy result (scripts/eval_accuracy.py), a doctor report, or a suite configuration
+    or manifest: each has its own schema and validator."""
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
     return isinstance(doc, dict) and ("accuracy_schema_version" in doc
                                       or "anomaly_schema_version" in doc
-                                      or "doctor_schema_version" in doc)
+                                      or "doctor_schema_version" in doc
+                                      or "suite_config_version" in doc
+                                      or "suite_manifest_version" in doc)
 
 
 def make_output_safe() -> None:
@@ -929,7 +954,7 @@ def main(argv: list[str] | None = None) -> int:
     for path in files:
         if is_accuracy_document(path):
             skipped += 1
-            print(f"SKIP {path} (accuracy result: checked by scripts/validate_accuracy.py)")
+            print(f"SKIP {path} (not a benchmark result: checked by its own validator)")
             continue
         issues = validate_file(path, validators)
         n_errors, n_warnings = len(errors(issues)), len(warnings_of(issues))

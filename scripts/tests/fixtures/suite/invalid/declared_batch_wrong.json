@@ -1,0 +1,40 @@
+{
+  "description": "A file declared batch 2 whose input has batch 1.",
+  "config": {
+    "suite_config_version": "1.0.0",
+    "name": "fixture",
+    "output_dir": "out",
+    "models": [
+      {
+        "name": "tiny",
+        "files": [
+          {
+            "path": "../../../../../engine/tests/fixtures/models/fixed_float32.onnx",
+            "precision": "fp32",
+            "batch": 2
+          }
+        ]
+      }
+    ],
+    "defaults": {
+      "warmup": 1,
+      "iterations": 5,
+      "trials": 1,
+      "trial_cooldown_ms": 0,
+      "load_sample_ms": 0
+    },
+    "cooldown_s": 0,
+    "configurations": [
+      {
+        "model": "tiny",
+        "provider": "cpu",
+        "precision": "fp32",
+        "batch": 2
+      }
+    ]
+  },
+  "expect": {
+    "schema": "valid",
+    "engine_kind": "model_file_mismatch"
+  }
+}
