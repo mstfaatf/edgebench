@@ -293,6 +293,7 @@ call, using a monotonic clock.
 | `aggregate.trial_variation.trial_mean_max_ms` | number | no | Largest trial mean |
 | `aggregate.trial_variation.trial_mean_stddev_ms` | number | yes | Sample std dev of the trial means; `null` with fewer than 2 trials |
 | `aggregate.trial_variation.trial_mean_cv_ratio` | number | yes | Coefficient of variation of the trial means (stddev / mean of trial means); `null` with fewer than 2 trials |
+| `aggregate.trial_spread` | object | no | 1.2.0: whether the trials agree, judged on the per-trial medians: `judged_on` (`trial_p50`), `trial_min_ms`, `trial_max_ms`, `trial_stddev_ms`, `trial_cv_ratio` (of the trial p50s; stddev and CV `null` with fewer than 2 trials), `cv_threshold_ratio` (0.1), `max_to_min_threshold` (1.25), `high` (either threshold exceeded, strictly; then the result has a `trial_spread_high` warning). The trial means' spread above stays as data: one slow iteration moves a mean, not a median |
 
 Latency stats (used for each trial and for the aggregate):
 
@@ -737,6 +738,9 @@ fields involved are present:
 | `accelerator_exceeds_latency_unfounded` | error | That warning on a run whose median accelerator time is not above the median latency |
 | `profiled_pass_count_mismatch` | error | `accelerator_ms.count` differs from `iterations` without a `profiled_pass_incomplete` warning |
 | `cache_compatibility_without_cache` | error | `config.ep_context_cache.compatibility` set with `mode` `off` |
+| `trial_spread_mismatch` | error | `timing.aggregate.trial_spread` values (min, max, stddev, CV of the trial p50s, thresholds, `high`) differ from those the trials' medians give |
+| `trial_spread_unflagged` | error | The trial medians exceed a spread threshold, but there is no `trial_spread_high` warning |
+| `trial_spread_unfounded` | error | A `trial_spread_high` warning although the trial medians are within both thresholds |
 | `missing_1_2_0_key` | warning | `tool.implementation` is `cpp` and a key added in 1.2.0 is absent. Keys added in 1.1.0 that are absent from a 1.2.0 document are still reported as `missing_1_1_0_key` |
 
 The schema itself also requires: `mode` `off` only with `enabled` `false`;
@@ -888,6 +892,10 @@ the profiled pass are filled in. Amendments so far:
   `verification_details.deleted_stale_cache_files`; module-check stage
   `after_untimed_session`; `session_init_not_applicable` allows per-trial
   cached values with `init_breakdown` and the cache off.
+- Trial spread judged on the per-trial medians: `timing.aggregate.trial_spread`
+  (the `trial_spread_high` warning's path is now `/timing/aggregate/trial_spread`);
+  rules `trial_spread_mismatch`, `trial_spread_unflagged`, `trial_spread_unfounded`.
+- Background load attribution: `execution.verification_details.background_load_samples`.
 - Backend-reported values and the profiled pass: `runtime.qnn.value_sources`;
   `config.ep_context_cache.compatibility`; `timing.profiled_pass` detail
   (`level`, `warmup_iterations`, `inferences_in_profile`, `reported_unit`,

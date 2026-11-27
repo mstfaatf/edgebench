@@ -1,0 +1,16 @@
+{
+  "description": "Trial medians spread out (1.27x) and recorded as such, but no trial_spread_high warning.",
+  "base": "docs/examples/v1.2.0/example-cpu-fp32.json",
+  "set": {
+    "/timing/trials/1/stats/p50_ms": 5.0,
+    "/timing/aggregate/trial_spread/trial_max_ms": 5.0,
+    "/timing/aggregate/trial_spread/trial_stddev_ms": 0.611008175068059,
+    "/timing/aggregate/trial_spread/trial_cv_ratio": 0.14227028082707968,
+    "/timing/aggregate/trial_spread/high": true
+  },
+  "expect": {
+    "severity": "error",
+    "code": "trial_spread_unflagged",
+    "path": "/timing/aggregate/trial_spread/high"
+  }
+}

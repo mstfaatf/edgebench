@@ -1176,24 +1176,26 @@ void finish_result(BenchmarkResult& r) {
         std::sort(sorted.begin(), sorted.end());
         if (!sorted.empty())
             t.session_init.session_create_ms = nearest_rank(sorted, 50);
-        std::vector<double> pooled, means;
+        std::vector<double> pooled, means, medians;
         for (const TrialResult& trial : t.trials) {
             pooled.insert(pooled.end(), trial.latencies_ms.begin(), trial.latencies_ms.end());
             means.push_back(trial.stats.mean_ms);
+            medians.push_back(trial.stats.p50_ms);
         }
         t.aggregate =
-            AggregateResult{compute_stats(pooled, r.batch_size), compute_trial_variation(means)};
-        if (const TrialVariation& v = t.aggregate->trial_variation; trial_spread_high(v)) {
+            AggregateResult{compute_stats(pooled, r.batch_size), compute_trial_variation(means),
+                            compute_trial_variation(medians)};
+        if (const TrialVariation& v = t.aggregate->trial_spread; trial_spread_high(v)) {
             r.warnings.push_back(
                 {"trial_spread_high",
-                 "Trial means range from " + fmt(v.trial_mean_min_ms) + " to " +
+                 "Trial medians (p50) range from " + fmt(v.trial_mean_min_ms) + " to " +
                      fmt(v.trial_mean_max_ms) + " ms (" +
                      (v.trial_mean_cv_ratio ? "CV " + fmt(*v.trial_mean_cv_ratio * 100.0, 1) + "%, "
                                             : std::string()) +
                      "slowest/fastest " + fmt(v.trial_mean_max_ms / v.trial_mean_min_ms, 2) +
                      "x); the trials disagree, so one aggregate number does not describe this "
                      "run.",
-                 std::string("/timing/aggregate/trial_variation")});
+                 std::string("/timing/aggregate/trial_spread")});
         }
     }
 
@@ -1543,7 +1545,12 @@ std::string format_summary(const BenchmarkResult& r) {
             << " ms";
         if (v.trial_mean_cv_ratio)
             out << ", CV " << fmt(*v.trial_mean_cv_ratio * 100.0, 2) << "%";
-        out << "\n";
+        const TrialVariation& m = t.aggregate->trial_spread;
+        out << "\nTrial p50s  " << fmt(m.trial_mean_min_ms) << " .. " << fmt(m.trial_mean_max_ms)
+            << " ms";
+        if (m.trial_mean_cv_ratio)
+            out << ", CV " << fmt(*m.trial_mean_cv_ratio * 100.0, 2) << "%";
+        out << " (spread judged on these)\n";
     }
     const NodeAssignment& na = r.execution.node_assignment;
     out << "Placement   " << na.total_nodes << " nodes:";

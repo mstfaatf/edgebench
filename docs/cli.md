@@ -331,10 +331,15 @@ above 10%, the result gets a second `background_cpu_load_high` warning naming
 the trial ("during trial N of M"). These during-trial values appear in the
 summary but not in the result document: `system.load` stays the pre-run sample.
 
-If the trial means are spread out, i.e. their coefficient of variation is above
-10% or the slowest trial mean is more than 1.25 times the fastest, the result
-gets a `trial_spread_high` warning (path `/timing/aggregate/trial_variation`):
+If the trial medians (p50) are spread out, i.e. their coefficient of variation is
+above 10% or the slowest trial median is more than 1.25 times the fastest, the
+result gets a `trial_spread_high` warning (path `/timing/aggregate/trial_spread`):
 the trials disagree, so the aggregate statistics alone do not describe the run.
+The spread is judged on the medians because a single slow iteration moves a
+trial's mean but not its median; such spikes show in each trial's max and p99.
+`timing.aggregate.trial_variation` (the spread of the trial means) is kept as
+data, and `timing.aggregate.trial_spread` records the medians' spread, the
+thresholds and the verdict (`judged_on` `trial_p50`).
 
 Right after the provider is created (for the NPU: after the QNN EP library is
 registered), after every session is created, and while the node placement
@@ -455,6 +460,8 @@ Placement   55 nodes: CPUExecutionProvider 55 (all on the requested EP)
   not included.
 - One row per trial, then `aggregate` over all measured iterations pooled.
 - `Trial means`: range of the trial means and their coefficient of variation.
+- `Trial p50s`: the same for the trial medians, on which `trial_spread_high` is
+  judged.
 - `Placement`: node count per execution provider after graph optimization.
 - `Results`: the last line, the path of the result file that was written. With
   `--format json`, stdout is only the document and the path goes to stderr.

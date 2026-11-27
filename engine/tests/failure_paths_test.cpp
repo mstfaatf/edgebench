@@ -525,13 +525,47 @@ TEST(FailurePaths, TrialSpreadIsAWarningInTheResultAndSummary) {
     eb::finish_result(r);
     const eb::ResultWarning* w = find_warning(r, "trial_spread_high");
     ASSERT_NE(w, nullptr);
-    EXPECT_EQ(w->path, std::optional<std::string>("/timing/aggregate/trial_variation"));
-    EXPECT_NE(w->message.find("3.8000 to 9.6000 ms"), std::string::npos) << w->message;
+    EXPECT_EQ(w->path, std::optional<std::string>("/timing/aggregate/trial_spread"));
+    EXPECT_NE(w->message.find("medians (p50) range from 3.8000 to 9.6000 ms"), std::string::npos)
+        << w->message;
     EXPECT_NE(eb::format_summary(r).find("[trial_spread_high]"), std::string::npos);
 
     eb::BenchmarkResult steady = result_with_trials({fake_trial(0, 3.8), fake_trial(1, 3.9)});
     eb::finish_result(steady);
     EXPECT_FALSE(has_warning(steady, "trial_spread_high"));
+}
+
+// One slow iteration inflates a trial's mean but not its median: the trials still
+// agree, so there is no trial_spread_high warning, while the means (kept as data)
+// show the inflation.
+TEST(FailurePaths, ASpikeInflatingOneTrialMeanIsNotTrialSpread) {
+    std::vector<eb::TrialResult> trials{fake_trial(0, 0.05), fake_trial(1, 0.05),
+                                        fake_trial(2, 0.05)};
+    trials[2].latencies_ms[7] = 1.0;  // one 1 ms spike among 20 iterations of 0.05 ms
+    trials[2].stats = eb::compute_stats(trials[2].latencies_ms, 1);
+    ASSERT_GT(trials[2].stats.mean_ms, 1.9 * trials[0].stats.mean_ms);
+    ASSERT_EQ(trials[2].stats.p50_ms, trials[0].stats.p50_ms);
+    eb::BenchmarkResult r = result_with_trials(std::move(trials));
+    eb::finish_result(r);
+    EXPECT_FALSE(has_warning(r, "trial_spread_high"));
+    ASSERT_TRUE(r.timing.aggregate);
+    EXPECT_TRUE(eb::trial_spread_high(r.timing.aggregate->trial_variation));  // the means
+    EXPECT_FALSE(eb::trial_spread_high(r.timing.aggregate->trial_spread));    // the medians
+    EXPECT_EQ(r.timing.aggregate->trial_spread.trial_mean_max_ms, 0.05);
+}
+
+// Trials whose medians really disagree (a slow machine state in one trial) are
+// trial spread, by either threshold.
+TEST(FailurePaths, DisagreeingTrialMediansAreTrialSpread) {
+    for (const auto& medians : {std::vector<double>{4.0, 4.0, 5.2},            // 1.3x: ratio
+                                std::vector<double>{4.0, 4.0, 4.95, 4.95}}) {  // CV 12%, 1.24x
+        std::vector<eb::TrialResult> trials;
+        for (std::size_t i = 0; i < medians.size(); ++i)
+            trials.push_back(fake_trial(static_cast<int>(i), medians[i]));
+        eb::BenchmarkResult r = result_with_trials(std::move(trials));
+        eb::finish_result(r);
+        EXPECT_TRUE(has_warning(r, "trial_spread_high")) << medians.back();
+    }
 }
 
 TEST(FailurePaths, BackgroundLoadDuringATrialIsAWarning) {

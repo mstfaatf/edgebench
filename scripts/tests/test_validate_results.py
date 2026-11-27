@@ -57,7 +57,10 @@ def set_pointer(doc: Any, pointer: str, value: Any) -> None:
     for key in parents:
         node = node[int(key)] if isinstance(node, list) else node[key]
     if isinstance(node, list):
-        node[int(last)] = value
+        if last == "-":  # JSON Pointer: append to the array
+            node.append(value)
+        else:
+            node[int(last)] = value
     else:
         node[last] = value
 

@@ -148,11 +148,13 @@ Per trial and pooled over all trials (`aggregate`):
 - **Standard deviation** is the sample standard deviation (n − 1), reported with
   at least 2 samples.
 - **Throughput** is 1000 / mean (sequential, one inference at a time).
-- **Trial spread**: the range and coefficient of variation of the trial means
-  (`aggregate.trial_variation`). A large spread means the run should not be
-  summarized by one number: a coefficient of variation above 10%, or a slowest
-  trial mean more than 1.25× the fastest, produces a `trial_spread_high`
-  warning.
+- **Trial spread** is judged on the per-trial medians (`aggregate.trial_spread`):
+  a coefficient of variation above 10%, or a slowest trial median more than
+  1.25× the fastest, means the trials disagree and the run should not be
+  summarized by one number (`trial_spread_high` warning). Single slow iterations
+  move a trial's mean, not its median; they are visible in each trial's max and
+  p99, and the spread of the trial means (`aggregate.trial_variation`) is kept as
+  data.
 
 The raw per-iteration latencies are written to a CSV file next to the result,
 linked by SHA-256, so any other statistic can be recomputed.

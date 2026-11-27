@@ -1,0 +1,12 @@
+{
+  "description": "A trial_spread_high warning although the trial medians agree.",
+  "base": "docs/examples/v1.2.0/example-cpu-fp32.json",
+  "set": {
+    "/warnings/-": {"code": "trial_spread_high", "message": "Trial medians are spread out.", "path": "/timing/aggregate/trial_spread"}
+  },
+  "expect": {
+    "severity": "error",
+    "code": "trial_spread_unfounded",
+    "path": "/timing/aggregate/trial_spread/high"
+  }
+}

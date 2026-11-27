@@ -475,6 +475,15 @@ json timing_json(const BenchmarkResult& r, const std::optional<std::vector<Linke
               {"trial_mean_stddev_ms", opt(v.trial_mean_stddev_ms)},
               {"trial_mean_cv_ratio", opt(v.trial_mean_cv_ratio)}}},
         };
+        const TrialVariation& m = t.aggregate->trial_spread;
+        aggregate["trial_spread"] = {{"judged_on", std::string(kTrialSpreadStatistic)},
+                                     {"trial_min_ms", m.trial_mean_min_ms},
+                                     {"trial_max_ms", m.trial_mean_max_ms},
+                                     {"trial_stddev_ms", opt(m.trial_mean_stddev_ms)},
+                                     {"trial_cv_ratio", opt(m.trial_mean_cv_ratio)},
+                                     {"cv_threshold_ratio", kHighTrialMedianCv},
+                                     {"max_to_min_threshold", kHighTrialMedianRatio},
+                                     {"high", trial_spread_high(m)}};
     }
     const SessionInitResult& si = t.session_init;
     return {

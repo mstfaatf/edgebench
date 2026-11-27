@@ -65,26 +65,26 @@ LatencyStats compute_stats(std::span<const double> latencies_ms, std::int64_t ba
     return s;
 }
 
-TrialVariation compute_trial_variation(std::span<const double> trial_means_ms) {
-    if (trial_means_ms.empty())
+TrialVariation compute_trial_variation(std::span<const double> trial_values_ms) {
+    if (trial_values_ms.empty())
         throw std::invalid_argument("compute_trial_variation: no trials");
     TrialVariation v;
-    const auto [lo, hi] = std::minmax_element(trial_means_ms.begin(), trial_means_ms.end());
+    const auto [lo, hi] = std::minmax_element(trial_values_ms.begin(), trial_values_ms.end());
     v.trial_mean_min_ms = *lo;
     v.trial_mean_max_ms = *hi;
-    v.trial_mean_stddev_ms = sample_stddev(trial_means_ms);
+    v.trial_mean_stddev_ms = sample_stddev(trial_values_ms);
     if (v.trial_mean_stddev_ms) {
-        const double m = mean(trial_means_ms);
+        const double m = mean(trial_values_ms);
         v.trial_mean_cv_ratio = m > 0 ? *v.trial_mean_stddev_ms / m : 0.0;
     }
     return v;
 }
 
 bool trial_spread_high(const TrialVariation& v) {
-    if (v.trial_mean_cv_ratio && *v.trial_mean_cv_ratio > kHighTrialMeanCv)
+    if (v.trial_mean_cv_ratio && *v.trial_mean_cv_ratio > kHighTrialMedianCv)
         return true;
     return v.trial_mean_min_ms > 0 &&
-           v.trial_mean_max_ms > kHighTrialMeanRatio * v.trial_mean_min_ms;
+           v.trial_mean_max_ms > kHighTrialMedianRatio * v.trial_mean_min_ms;
 }
 
 }  // namespace edgebench

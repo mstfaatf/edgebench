@@ -370,8 +370,17 @@ V1_2_RULES = {
     "accelerator_exceeds_latency_unfounded": ERROR,
     "profiled_pass_count_mismatch": ERROR,
     "cache_compatibility_without_cache": ERROR,
+    "trial_spread_mismatch": ERROR,
+    "trial_spread_unflagged": ERROR,
+    "trial_spread_unfounded": ERROR,
     "missing_1_2_0_key": WARNING,
 }
+
+# trial_spread_high: judged on the per-trial medians (engine stats.hpp).
+TRIAL_SPREAD_WARNING = "trial_spread_high"
+TRIAL_SPREAD_STATISTIC = "trial_p50"
+TRIAL_SPREAD_CV = 0.10
+TRIAL_SPREAD_RATIO = 1.25
 
 BATCH_NOT_EQUIVALENT_WARNING = "batch_not_equivalent"
 ACCELERATOR_EXCEEDS_LATENCY_WARNING = "accelerator_time_exceeds_latency"
@@ -774,6 +783,48 @@ def v1_2_issues(doc: dict[str, Any]) -> list[Issue]:
             report("/runtime/qnn/partition_count",
                   f"{qnn['partition_count']} partitions, but node_assignment places {placed} "
                   "nodes on QNNExecutionProvider", "qnn_partition_count_mismatch")
+
+    # Trial spread: the per-trial medians, their spread and the warning agree.
+    aggregate = (timing or {}).get("aggregate") or {}
+    spread = aggregate.get("trial_spread")
+    if spread is not None:
+        base = "/timing/aggregate/trial_spread"
+        medians = [t["stats"]["p50_ms"] for t in timing["trials"]]
+        expected_stddev = None
+        if len(medians) >= 2:
+            m = sum(medians) / len(medians)
+            expected_stddev = math.sqrt(sum((x - m) ** 2 for x in medians) / (len(medians) - 1))
+        expected = {
+            "judged_on": TRIAL_SPREAD_STATISTIC,
+            "trial_min_ms": min(medians) if medians else None,
+            "trial_max_ms": max(medians) if medians else None,
+            "trial_stddev_ms": expected_stddev,
+            "trial_cv_ratio": (expected_stddev / m if expected_stddev is not None and m > 0
+                               else (0.0 if expected_stddev is not None else None)),
+            "cv_threshold_ratio": TRIAL_SPREAD_CV,
+            "max_to_min_threshold": TRIAL_SPREAD_RATIO,
+        }
+        for key, want in expected.items():
+            got = spread.get(key)
+            same = (got == want if isinstance(want, str) or want is None or got is None
+                    else math.isclose(got, want, rel_tol=1e-9, abs_tol=1e-12))
+            if not same:
+                report(f"{base}/{key}", f"is {got!r}, the trials' medians give {want!r}",
+                       "trial_spread_mismatch")
+        # What the medians show decides; the recorded verdict must agree with it.
+        cv, lo, hi = expected["trial_cv_ratio"], expected["trial_min_ms"], expected["trial_max_ms"]
+        high = bool((cv is not None and cv > TRIAL_SPREAD_CV)
+                    or (lo is not None and hi is not None and lo > 0 and hi > TRIAL_SPREAD_RATIO * lo))
+        if spread.get("high") is not high:
+            report(f"{base}/high", f"is {spread.get('high')!r}, the trials' medians give {high}",
+                   "trial_spread_mismatch")
+        warned = any(w["code"] == TRIAL_SPREAD_WARNING for w in doc["warnings"])
+        if high and not warned:
+            report(f"{base}/high", f"trials whose medians are spread out need a "
+                                   f"'{TRIAL_SPREAD_WARNING}' warning", "trial_spread_unflagged")
+        if warned and not high:
+            report(f"{base}/high", f"a '{TRIAL_SPREAD_WARNING}' warning requires the trial "
+                                   "medians to exceed a spread threshold", "trial_spread_unfounded")
     return issues
 
 

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace edgebench {
@@ -43,17 +44,26 @@ std::optional<double> sample_stddev(std::span<const double> values);
 /// the schema. Throughput assumes sequential runs of `batch_size` items each.
 LatencyStats compute_stats(std::span<const double> latencies_ms, std::int64_t batch_size);
 
-/// Spread of the trial means (non-empty).
-TrialVariation compute_trial_variation(std::span<const double> trial_means_ms);
+/// Spread of one value per trial (non-empty): the trial means
+/// (timing.aggregate.trial_variation) or the trial medians (trial_spread). The
+/// field names say "mean" for the schema's trial_variation; for the medians they
+/// hold the same statistics of the medians.
+TrialVariation compute_trial_variation(std::span<const double> trial_values_ms);
 
-/// Trial means whose coefficient of variation exceeds this are too spread out to
-/// be summarized by one number (warning trial_spread_high).
-inline constexpr double kHighTrialMeanCv = 0.10;
-/// The same when the slowest trial mean exceeds the fastest by more than this factor.
-inline constexpr double kHighTrialMeanRatio = 1.25;
+/// Trials whose medians (p50) have a coefficient of variation above this are too
+/// spread out to be summarized by one number (warning trial_spread_high). The
+/// spread is judged on the medians, not the means: one slow iteration moves a
+/// trial's mean (a separate effect, visible in max and p99) but not its median, so
+/// the medians show whether the trials agree.
+inline constexpr double kHighTrialMedianCv = 0.10;
+/// The same when the slowest trial median exceeds the fastest by more than this factor.
+inline constexpr double kHighTrialMedianRatio = 1.25;
+/// What trial_spread_high is judged on (results schema: timing.aggregate.trial_spread.judged_on).
+inline constexpr std::string_view kTrialSpreadStatistic = "trial_p50";
 
-/// True if the trial means are spread out by either threshold above (strictly
-/// greater). False for a single trial.
-bool trial_spread_high(const TrialVariation& variation);
+/// True if the per-trial medians in `medians` (compute_trial_variation() of the
+/// trial p50s) are spread out by either threshold above (strictly greater).
+/// False for a single trial.
+bool trial_spread_high(const TrialVariation& medians);
 
 }  // namespace edgebench

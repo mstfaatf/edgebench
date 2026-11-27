@@ -497,6 +497,16 @@
         "trial_mean_max_ms": 2.0396150000000004,
         "trial_mean_stddev_ms": 0.02834083978995722,
         "trial_mean_cv_ratio": 0.014033071210505784
+      },
+      "trial_spread": {
+        "judged_on": "trial_p50",
+        "trial_min_ms": 1.9621,
+        "trial_max_ms": 2.0061,
+        "trial_stddev_ms": 0.03111269837220812,
+        "trial_cv_ratio": 0.015681013241372974,
+        "cv_threshold_ratio": 0.1,
+        "max_to_min_threshold": 1.25,
+        "high": false
       }
     },
     "scope": "model_execution",

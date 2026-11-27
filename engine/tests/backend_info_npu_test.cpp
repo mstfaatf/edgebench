@@ -108,6 +108,8 @@ json timed_structure(const eb::BenchmarkResult& r) {
                 blank(v);
         } else if (j.is_number()) {
             j = 0;
+        } else if (j.is_boolean()) {
+            j = false;  // a measured verdict (e.g. trial_spread.high), not structure
         }
     };
     blank(t);

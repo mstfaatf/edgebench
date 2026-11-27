@@ -164,8 +164,9 @@ struct MemoryResult {
 };
 
 struct AggregateResult {
-    LatencyStats stats;  // all measured iterations of all trials pooled
-    TrialVariation trial_variation;
+    LatencyStats stats;              // all measured iterations of all trials pooled
+    TrialVariation trial_variation;  // of the trial means (data; not judged)
+    TrialVariation trial_spread;     // of the trial medians: trial_spread_high is judged on it
 };
 
 struct TimingResult {

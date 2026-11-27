@@ -78,10 +78,18 @@ def test_expected_batch_equivalence_follows_the_compile_options():
                                "enable_htp_fp16_precision": "1"}) == {}
 
 
-def latest_matrix() -> Path | None:
+TAMPERED_RUN = "mobilenetv2_b8_npu_int8"
+
+
+def latest_matrix(with_run: str | None = None) -> Path | None:
+    """The newest local matrix directory (with `with_run` among its runs, if given)."""
     dirs = sorted(d for d in MATRIX_ROOT.glob("*") if (d / "plan.json").is_file()) \
         if MATRIX_ROOT.is_dir() else []
-    return dirs[-1] if dirs else None
+    for d in reversed(dirs):
+        runs = json.loads((d / "plan.json").read_text(encoding="utf-8"))["runs"]
+        if with_run is None or any(r["run_id"] == with_run for r in runs):
+            return d
+    return None
 
 
 @pytest.fixture(scope="module")
@@ -115,15 +123,18 @@ def test_a_real_matrix_has_no_engine_problems(matrix_dir):
     (lambda d: d["config"]["ep_context_cache"].update(hit=False), "hit False"),
     (lambda d: d["runtime"]["qnn"].update(partition_count=2), "2 QNN partitions"),
     (lambda d: d["warnings"].append({"code": "trial_spread_high", "message": "m",
-                                     "path": "/timing/aggregate/trial_variation"}),
+                                     "path": "/timing/aggregate/trial_spread"}),
      "unexpected warning [trial_spread_high]"),
     (lambda d: d["execution"]["effective_precision"].update(compute="fp16"), "effective precision"),
     (lambda d: d["execution"]["verification_details"]["module_checks"][0].update(
         modules_outside_bundle=["C:/x/QnnHtp.dll"]), "modules outside the bundle"),
 ])
-def test_the_check_notices_a_changed_npu_result(matrix_dir, tmp_path, change, message):
+def test_the_check_notices_a_changed_npu_result(tmp_path, change, message):
+    matrix_dir = latest_matrix(with_run=TAMPERED_RUN)
+    if matrix_dir is None:
+        pytest.skip(f"no local matrix run with {TAMPERED_RUN} (scripts/run_matrix.py)")
     plan = json.loads((matrix_dir / "plan.json").read_text(encoding="utf-8"))
-    run = next(r for r in plan["runs"] if r["run_id"] == "mobilenetv2_b8_npu_int8")
+    run = next(r for r in plan["runs"] if r["run_id"] == TAMPERED_RUN)
     copy = tmp_path / "m"
     for rel in (run["result"], run["cache_build"]["result"]):
         (copy / rel).parent.mkdir(parents=True, exist_ok=True)

@@ -1044,6 +1044,23 @@
                         "trial_mean_stddev_ms": {"$ref": "#/$defs/nullableNonNegativeNumber"},
                         "trial_mean_cv_ratio": {"$ref": "#/$defs/nullableNonNegativeNumber"}
                       }
+                    },
+                    "trial_spread": {
+                      "description": "Whether the trials agree, judged on the per-trial medians (p50): one slow iteration moves a trial's mean (trial_variation, kept as data) but not its median. high is true if the medians' coefficient of variation exceeds cv_threshold_ratio or the slowest median exceeds the fastest by more than max_to_min_threshold; then the result carries a trial_spread_high warning. Added to the 1.2.0 object in place.",
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["judged_on", "trial_min_ms", "trial_max_ms", "trial_stddev_ms", "trial_cv_ratio",
+                                   "cv_threshold_ratio", "max_to_min_threshold", "high"],
+                      "properties": {
+                        "judged_on": {"const": "trial_p50", "description": "The per-trial statistic the spread is judged on."},
+                        "trial_min_ms": {"type": "number", "minimum": 0},
+                        "trial_max_ms": {"type": "number", "minimum": 0},
+                        "trial_stddev_ms": {"$ref": "#/$defs/nullableNonNegativeNumber"},
+                        "trial_cv_ratio": {"$ref": "#/$defs/nullableNonNegativeNumber"},
+                        "cv_threshold_ratio": {"type": "number", "exclusiveMinimum": 0},
+                        "max_to_min_threshold": {"type": "number", "minimum": 1},
+                        "high": {"type": "boolean"}
+                      }
                     }
                   }
                 }
