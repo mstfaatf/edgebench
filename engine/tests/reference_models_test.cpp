@@ -158,6 +158,8 @@ eb::RunConfig engine_config(const fs::path& model, const std::string& device) {
     if (device != "cpu") {
         c.provider = eb::ProviderKind::npu;
         c.npu_fp16 = device == "npu_fp16";
+        if (device == "npu_finalization1")
+            c.htp_graph_finalization_mode = "1";
     }
     return c;
 }
@@ -365,17 +367,18 @@ nlohmann::json npu_record(const std::string& rel, const fs::path& model,
 
 }  // namespace
 
-TEST_P(ReferenceModelsNpu, EngineMatchesPythonBitForBit) {
-    if (const std::optional<std::string> reason = skip_reason())
-        GTEST_SKIP() << *reason;
-    const auto& [name, variant, batch] = GetParam();
+namespace {
+
+// The engine's timed NPU session for `param` with the options of reference
+// device `device` computes every saved output of that device bit for bit.
+void check_npu_reference(const Param& param, const std::string& device) {
+    const auto& [name, variant, batch] = param;
     const std::string rel = relative_model(name, variant, batch);
     const fs::path model = kModels / fs::path(rel).make_preferred();
     if (!fs::is_regular_file(model))
         GTEST_SKIP() << rel << " is not present (see docs/models.md)";
     if (!fs::is_regular_file(kReferences / "index.tsv"))
         GTEST_SKIP() << "no reference outputs; run scripts/make_references.py";
-    const std::string device = npu_device(variant);
     const nlohmann::json record = npu_record(rel, model, device);
 
     // The reference was made with the options the engine passes (backend_path
@@ -417,7 +420,15 @@ TEST_P(ReferenceModelsNpu, EngineMatchesPythonBitForBit) {
     }
     std::printf("[ reference ] %s (%s): %d/%zu runs bit-identical\n", rel.c_str(), device.c_str(),
                 identical, runs.size());
-    RecordProperty("bit_identical_runs", identical);
+    ::testing::Test::RecordProperty("bit_identical_runs", identical);
+}
+
+}  // namespace
+
+TEST_P(ReferenceModelsNpu, EngineMatchesPythonBitForBit) {
+    if (const std::optional<std::string> reason = skip_reason())
+        GTEST_SKIP() << *reason;
+    check_npu_reference(GetParam(), npu_device(std::get<1>(GetParam())));
 }
 
 INSTANTIATE_TEST_SUITE_P(AllFiles, ReferenceModelsNpu,
@@ -432,6 +443,58 @@ INSTANTIATE_TEST_SUITE_P(AllFiles, ReferenceModelsNpu,
 INSTANTIATE_TEST_SUITE_P(ImportedFiles, ReferenceModelsNpu,
                          ::testing::Combine(::testing::ValuesIn(kImportedModelNames),
                                             ::testing::ValuesIn(kImportedNpuVariants),
+                                            ::testing::ValuesIn(kBatches)),
+                         [](const ::testing::TestParamInfo<Param>& info) {
+                             return std::get<0>(info.param) + "_" + std::get<1>(info.param) + "_b" +
+                                    std::to_string(std::get<2>(info.param));
+                         });
+
+namespace {
+
+// INT8 variants of the image models: they also have an `npu_finalization1`
+// reference (htp_graph_finalization_optimization_mode 1).
+const std::vector<std::string> kFinalizationVariants = {"int8", "int8_unpruned", "int8_folded",
+                                                        "int8_folded_unpruned"};
+constexpr const char* kFinalizationDevice = "npu_finalization1";
+constexpr const char* kAllFinalizationEnv = "EDGEBENCH_FINALIZATION_REFERENCES_ALL";
+
+class ReferenceFinalizationNpu : public ::testing::TestWithParam<Param>, protected NpuTest {
+protected:
+    void TearDown() override { unregister(); }
+};
+
+}  // namespace
+
+// With --htp-graph-finalization-mode 1 the engine computes the saved
+// npu_finalization1 references bit for bit (the Subset runs by default, every
+// file with EDGEBENCH_FINALIZATION_REFERENCES_ALL=1).
+TEST_P(ReferenceFinalizationNpu, EngineMatchesPythonBitForBit) {
+    if (const std::optional<std::string> reason = skip_reason())
+        GTEST_SKIP() << *reason;
+    const std::string suite =
+        ::testing::UnitTest::GetInstance()->current_test_info()->test_suite_name();
+    char* value = nullptr;
+    std::size_t length = 0;
+    const bool all = _dupenv_s(&value, &length, kAllFinalizationEnv) == 0 && value &&
+                     std::string(value) == "1";
+    std::free(value);
+    if (suite.find("Manual") != std::string::npos && !all)
+        GTEST_SKIP() << "set " << kAllFinalizationEnv << "=1 to check every file";
+    check_npu_reference(GetParam(), kFinalizationDevice);
+}
+
+INSTANTIATE_TEST_SUITE_P(Subset, ReferenceFinalizationNpu,
+                         ::testing::Combine(::testing::ValuesIn(kModelNames),
+                                            ::testing::Values(std::string("int8")),
+                                            ::testing::Values(1, 8)),
+                         [](const ::testing::TestParamInfo<Param>& info) {
+                             return std::get<0>(info.param) + "_" + std::get<1>(info.param) + "_b" +
+                                    std::to_string(std::get<2>(info.param));
+                         });
+
+INSTANTIATE_TEST_SUITE_P(AllFilesManual, ReferenceFinalizationNpu,
+                         ::testing::Combine(::testing::ValuesIn(kModelNames),
+                                            ::testing::ValuesIn(kFinalizationVariants),
                                             ::testing::ValuesIn(kBatches)),
                          [](const ::testing::TestParamInfo<Param>& info) {
                              return std::get<0>(info.param) + "_" + std::get<1>(info.param) + "_b" +
@@ -620,6 +683,10 @@ TEST(ReferenceModelsNpu, IndexListsExactlyTheseFiles) {
         for (const std::string& v : kImportedNpuVariants)
             for (int b : kBatches)
                 expected.insert(relative_model(m, v, b) + " " + npu_device(v));
+    for (const std::string& m : kModelNames)
+        for (const std::string& v : kFinalizationVariants)
+            for (int b : kBatches)
+                expected.insert(relative_model(m, v, b) + " " + kFinalizationDevice);
     EXPECT_EQ(indexed, expected);
 }
 

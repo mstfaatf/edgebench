@@ -60,6 +60,9 @@ struct RunConfig {
     bool strict = true;     // session.disable_cpu_ep_fallback = 1; --no-strict clears it
     bool npu_fp16 = false;  // --npu-fp16: FP32 model with FP16 compute
     std::optional<std::string> htp_performance_mode;  // default: burst
+    /// --htp-graph-finalization-mode (htp_graph_finalization_optimization_mode);
+    /// unset: not passed, the EP's default applies.
+    std::optional<std::string> htp_graph_finalization_mode;
     EpCacheMode ep_cache = EpCacheMode::off;
     /// --ep-cache-dir; default: default_ep_cache_dir() (%LOCALAPPDATA%\EdgeBench\qnn-context).
     std::optional<std::filesystem::path> ep_cache_dir;

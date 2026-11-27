@@ -77,6 +77,15 @@ def _tamper_doc(docs, name, old, new):
     # summarising sentence
     ("docs/accuracy.md", "within 0.15 points of CPU INT8", "within 0.16 points of CPU INT8"),
     ("README.md", "within 0.15 top-1 points", "within 0.25 top-1 points"),
+    # batch 8 on the NPU: table, summary sentence, eval-quick count
+    ("docs/accuracy.md", "| 57.21 | 57.14 | -0.07 | 98.84% |", "| 57.21 | 57.15 | -0.07 | 98.84% |"),
+    ("docs/accuracy.md", "within 0.07 top-1 points of batch 4", "within 0.05 top-1 points of batch 4"),
+    ("docs/accuracy.md", "| 152 of 1,000 |", "| 151 of 1,000 |"),
+    # batch equivalence with finalization mode 1
+    ("docs/models.md", "With finalization mode 1, all 36 image INT8",
+     "With finalization mode 1, all 35 image INT8"),
+    ("docs/models.md", "| NPU, INT8, finalization mode 1 | same | same | 0 |\n| `resnet18` | INT8 (all four) | CPU",
+     "| NPU, INT8, finalization mode 1 | same | differs | 0 |\n| `resnet18` | INT8 (all four) | CPU"),
     # anomaly tables
     ("docs/autoencoder.md", "| 0.813 | 0.714 | 0.796 |", "| 0.813 | 0.715 | 0.796 |"),
     ("docs/autoencoder.md", "| 155 (12 h 55 min) | 155 (12 h 55 min) | 153",

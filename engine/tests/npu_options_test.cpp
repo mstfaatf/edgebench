@@ -7,6 +7,7 @@
 
 #include <onnxruntime_c_api.h>
 
+#include <algorithm>
 #include <fstream>
 #include <map>
 #include <regex>
@@ -105,6 +106,33 @@ TEST(QnnEpOptions, Fp16PrecisionOnlyWithTheFlag) {
     EXPECT_EQ(options.size(), 3u);
     EXPECT_EQ(options.at("enable_htp_fp16_precision"), "1");
     EXPECT_EQ(options.at("htp_performance_mode"), "balanced");
+}
+
+TEST(QnnEpOptions, FinalizationModeOnlyWhenGiven) {
+    eb::RunConfig c = npu_config();
+    EXPECT_FALSE(eb::qnn_ep_options(c, LR"(C:\bundle\QnnHtp.dll)")
+                     .contains("htp_graph_finalization_optimization_mode"));
+    c.htp_graph_finalization_mode = "1";
+    const auto options = eb::qnn_ep_options(c, LR"(C:\bundle\QnnHtp.dll)");
+    EXPECT_EQ(options.size(), 3u);
+    EXPECT_EQ(options.at("htp_graph_finalization_optimization_mode"), "1");
+}
+
+TEST(QnnEpOptions, CompileRelevantOptionsLeaveOutTheOutputNeutralOnes) {
+    // Backend path, performance mode and the FP16 flag (part of the compute
+    // precision) are not compile-relevant; the defaults give an empty set.
+    eb::RunConfig c = npu_config();
+    c.npu_fp16 = true;
+    c.htp_performance_mode = "balanced";
+    EXPECT_TRUE(eb::compile_relevant_ep_options(eb::qnn_ep_options(c, "C:/QnnHtp.dll")).empty());
+    EXPECT_TRUE(eb::compile_relevant_ep_options({}).empty());  // the CPU provider
+    c.htp_graph_finalization_mode = "1";
+    EXPECT_EQ(eb::compile_relevant_ep_options(eb::qnn_ep_options(c, "C:/QnnHtp.dll")),
+              (std::map<std::string, std::string>{
+                  {"htp_graph_finalization_optimization_mode", "1"}}));
+    // An option edgebench does not know is assumed to change the graph.
+    EXPECT_EQ(eb::compile_relevant_ep_options({{"backend_path", "x"}, {"vtcm_mb", "8"}}),
+              (std::map<std::string, std::string>{{"vtcm_mb", "8"}}));
 }
 
 TEST(QnnSessionConfig, StrictByDefaultAndNoContextCache) {
@@ -369,11 +397,37 @@ TEST(NpuCli, UnknownPerformanceModeIsAUsageError) {
     EXPECT_TRUE(contains(r.err, "sustained_high_performance")) << r.err;
 }
 
+TEST(NpuCli, GraphFinalizationModeIsParsedAndValidated) {
+    const eb::test::TempModel model("m.onnx");
+    for (const char* mode : {"0", "1", "2", "3"}) {
+        const eb::ParseResult r =
+            parse({"--provider", "npu", "--htp-graph-finalization-mode", mode}, model);
+        ASSERT_FALSE(r.exit) << mode << ": " << r.err;
+        EXPECT_EQ(r.run.htp_graph_finalization_mode, mode);
+    }
+    EXPECT_FALSE(parse({"--provider", "npu"}, model).run.htp_graph_finalization_mode);
+    for (const char* bad : {"4", "-1", "fast", "01", ""}) {
+        const eb::ParseResult r =
+            parse({"--provider", "npu", "--htp-graph-finalization-mode", bad}, model);
+        ASSERT_TRUE(r.exit) << bad;
+        EXPECT_EQ(*r.exit, ExitCode::usage_error);
+        EXPECT_TRUE(contains(r.err, "HTP graph finalization mode")) << r.err;
+    }
+    // validate() rejects a bad value set programmatically, too.
+    eb::RunConfig c = npu_config();
+    c.htp_graph_finalization_mode = "9";
+    const std::vector<eb::ConfigError> errors = eb::validate(c);
+    EXPECT_TRUE(std::any_of(errors.begin(), errors.end(), [](const eb::ConfigError& e) {
+        return e.field == "htp-graph-finalization-mode" && contains(e.message, "'9'");
+    }));
+}
+
 TEST(NpuCli, NpuOptionsWithTheCpuProviderAreUsageErrors) {
     const eb::test::TempModel model("m.onnx");
     for (const std::vector<std::string>& args :
          {std::vector<std::string>{"--npu-fp16"}, std::vector<std::string>{"--no-strict"},
           std::vector<std::string>{"--htp-performance-mode", "burst"},
+          std::vector<std::string>{"--htp-graph-finalization-mode", "1"},
           std::vector<std::string>{"--provider", "cpu", "--npu-fp16"}}) {
         const eb::ParseResult r = parse(args, model);
         ASSERT_TRUE(r.exit) << args.front();

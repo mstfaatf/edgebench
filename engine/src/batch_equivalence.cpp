@@ -64,11 +64,39 @@ bool consistent(const BatchEquivalence& b) {
            *b.predictions_equal_to_b1 == (*b.predictions_differing == 0);
 }
 
+// The entry's ep_compile_options as a map; nullopt if missing or not an object of
+// strings.
+std::optional<EpCompileOptions> entry_options(const nlohmann::json& e) {
+    const auto it = e.find("ep_compile_options");
+    if (it == e.end() || !it->is_object())
+        return std::nullopt;
+    EpCompileOptions out;
+    for (const auto& [key, value] : it->items()) {
+        if (!value.is_string())
+            return std::nullopt;
+        out.emplace(key, value.get<std::string>());
+    }
+    return out;
+}
+
 }  // namespace
+
+std::string describe_compile_options(const EpCompileOptions& options) {
+    if (options.empty())
+        return "the EP defaults";
+    std::string out;
+    for (const auto& [key, value] : options) {
+        if (!out.empty())
+            out += ", ";
+        out += key + "=" + value;
+    }
+    return out;
+}
 
 BatchEquivalence batch_equivalence_from(const nlohmann::json& summary, std::string_view sha256,
                                         std::string_view provider,
                                         std::string_view compute_precision,
+                                        const EpCompileOptions& compile_options,
                                         std::int64_t batch_size) {
     if (batch_size == 1) {
         BatchEquivalence b1;
@@ -89,11 +117,21 @@ BatchEquivalence batch_equivalence_from(const nlohmann::json& summary, std::stri
         out.reason = "the batch-equivalence summary has no entries list";
         return out;
     }
+    bool listed_with_other_options = false;
     for (const nlohmann::json& e : *entries) {
         if (!e.is_object() || e.value("sha256", "") != sha256 ||
             e.value("provider", "") != provider ||
             e.value("compute_precision", "") != compute_precision)
             continue;
+        const std::optional<EpCompileOptions> options = entry_options(e);
+        if (!options) {
+            out.reason = "the batch-equivalence entry for this model file is inconsistent";
+            return out;
+        }
+        if (*options != compile_options) {
+            listed_with_other_options = true;
+            continue;
+        }
         bool ok = e.value("batch_size", std::int64_t{0}) == batch_size;
         BatchEquivalence found;
         found.bitwise_equal_to_b1 = optional_bool(e, "bitwise_equal_to_b1", ok);
@@ -112,19 +150,32 @@ BatchEquivalence batch_equivalence_from(const nlohmann::json& summary, std::stri
                 "model file";
         return found;
     }
-    out.reason = "this model file (SHA256 " + std::string(sha256.substr(0, 12)) + ", " +
-                 std::string(provider) + ", " + std::string(compute_precision) +
-                 ") is not in the batch-equivalence summary";
+    const std::string file = "this model file (SHA256 " + std::string(sha256.substr(0, 12)) +
+                             ", " + std::string(provider) + ", " +
+                             std::string(compute_precision) + ")";
+    if (listed_with_other_options) {
+        out.options_not_covered = true;
+        out.reason = "the batch-equivalence summary lists " + file +
+                     " only for other compile-relevant EP options than this run's (" +
+                     describe_compile_options(compile_options) +
+                     "); entries measured with other options are not reused";
+        return out;
+    }
+    out.reason = file + " is not in the batch-equivalence summary";
+    if (!compile_options.empty())
+        out.reason += " (compile-relevant EP options " + describe_compile_options(compile_options) +
+                      ")";
     return out;
 }
 
 BatchEquivalence lookup_batch_equivalence(const fs::path& model, std::string_view sha256,
                                           std::string_view provider,
                                           std::string_view compute_precision,
+                                          const EpCompileOptions& compile_options,
                                           std::int64_t batch_size) {
     if (batch_size == 1)
         return batch_equivalence_from(nlohmann::json::object(), sha256, provider, compute_precision,
-                                      batch_size);
+                                      compile_options, batch_size);
     const std::optional<fs::path> file = find_batch_equivalence_file(model);
     if (!file) {
         BatchEquivalence out;
@@ -139,7 +190,8 @@ BatchEquivalence lookup_batch_equivalence(const fs::path& model, std::string_vie
         out.reason = path_to_utf8(*file) + " is not a valid JSON object";
         return out;
     }
-    return batch_equivalence_from(summary, sha256, provider, compute_precision, batch_size);
+    return batch_equivalence_from(summary, sha256, provider, compute_precision, compile_options,
+                                  batch_size);
 }
 
 }  // namespace edgebench

@@ -552,8 +552,12 @@ every model file with those of its batch-1 file, item by item, on the 8
 reference images or windows (the SplitMix64 input does not count: its batch
 items differ from each other), runs the prediction comparison for the files that
 differ, and writes `models/batch_equivalence.json`, keyed by model SHA256,
-provider (`cpu`, `npu`) and compute precision (see
-[models.md](models.md#batch-equivalence)). The engine finds that file in the
+provider (`cpu`, `npu`), compute precision and the compile-relevant EP options
+(every `config.ep_options` entry except `backend_path`, `htp_performance_mode`
+and `enable_htp_fp16_precision`; see [models.md](models.md#batch-equivalence)).
+An entry applies only to runs with exactly its options; a run whose options no
+entry was made with gets `not_available` and a
+`batch_equivalence_options_not_covered` note. The engine finds that file in the
 model's directory or the nearest parent directory that has one and looks the
 model up by its SHA256. `bitwise_basis` is `batch_size_1` (a batch-1 model:
 equal by definition), `reference_outputs` (found), or `not_available` (not

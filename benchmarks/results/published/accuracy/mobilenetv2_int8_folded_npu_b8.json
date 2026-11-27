@@ -1,0 +1,106 @@
+{
+  "accuracy_schema_version": "1.1.0",
+  "kind": "run",
+  "run_id": "mobilenetv2_int8_folded_npu_b8",
+  "timestamp_utc": "2026-11-27T15:10:39.772Z",
+  "status": "success",
+  "error": null,
+  "model": {
+    "file": "mobilenetv2/mobilenetv2_int8_folded_b8.onnx",
+    "sha256": "6f721b44b2e6ac376c7637966ab02f7234b0793dfc1095812edc4df73af4852f",
+    "model": "mobilenetv2",
+    "variant": "int8_folded",
+    "stored_precision": "int8",
+    "normalization": "folded",
+    "batch_size": 8
+  },
+  "execution": {
+    "device": "npu",
+    "execution_provider": "QNNExecutionProvider",
+    "strict": true,
+    "compute_precision": "int8",
+    "intra_op_threads": null,
+    "provider_options": {
+      "backend_path": "<onnxruntime_qnn>/QnnHtp.dll",
+      "htp_performance_mode": "burst"
+    },
+    "session_config": {
+      "session.disable_cpu_ep_fallback": "1"
+    },
+    "batch_equivalence": {
+      "split": "eval-quick",
+      "reference_batch": 1,
+      "batch_rule": "fixed",
+      "identical_top5": false,
+      "top5_differing": 96,
+      "images": 1000,
+      "candidates": {
+        "b1": "identical",
+        "b8": "differs"
+      }
+    }
+  },
+  "dataset": {
+    "name": "ImageNetV2 matched-frequency",
+    "split": "eval-full",
+    "manifest": "datasets/imagenetv2-matched-frequency/eval-full.tsv",
+    "manifest_sha256": "f28c92578baeb703b3674c055c014b7c6bacb7eb1ba5e6b3f011aabb1dcd42b4",
+    "image_count": 10000,
+    "label_source": "manifest label = integer folder name; class order of scripts/common/imagenet_classes.json"
+  },
+  "preprocessing": {
+    "resize_shorter_side": 256,
+    "interpolation": "bilinear (PIL)",
+    "center_crop": 224,
+    "scale": "1/255",
+    "mean": null,
+    "std": null,
+    "input": "[0, 1]",
+    "image_cache": {
+      "used": true,
+      "verified_sample": 200,
+      "bit_identical": true
+    }
+  },
+  "metrics": {
+    "top1": {
+      "correct": 5929,
+      "total": 10000,
+      "accuracy": 0.5929,
+      "ci95": {
+        "low": 0.583236928050948,
+        "high": 0.6024917250517803,
+        "method": "wilson"
+      }
+    },
+    "top5": {
+      "correct": 8172,
+      "total": 10000,
+      "accuracy": 0.8172,
+      "ci95": {
+        "low": 0.8095033617035712,
+        "high": 0.8246530297300716,
+        "method": "wilson"
+      }
+    }
+  },
+  "predictions": {
+    "top5_indices": {
+      "file": "benchmarks/results/local/accuracy/predictions/mobilenetv2_int8_folded_npu_b8.top5_indices.npy",
+      "sha256": "9a5ddb34a7528dba9e77e15149edd1970bc9bb82dd7a2acd52ac9be9d044cc57"
+    },
+    "top5_logits": {
+      "file": "benchmarks/results/local/accuracy/predictions/mobilenetv2_int8_folded_npu_b8.top5_logits.npy",
+      "sha256": "fd9864ba4886ea389c137dc67e2535f10c38dbe2a3be4e58504d70ba00dd7d18"
+    }
+  },
+  "environment": {
+    "python": "3.12.8",
+    "numpy": "2.5.5",
+    "onnxruntime": "1.32.0",
+    "onnxruntime_qnn": "2.8.0",
+    "qnn_backend": "2.52.0.261104115025",
+    "os": "Windows-11-10.0.26200-SP0",
+    "machine": "ARM64"
+  }
+}

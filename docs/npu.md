@@ -1,8 +1,227 @@
 # NPU runs
 
 How EdgeBench runs models on the Snapdragon NPU (Qualcomm QNN execution
-provider, HTP backend) and what to know when reading NPU numbers. Options and
-exit codes are in [cli.md](cli.md#npu-runs).
+provider, HTP backend) and what to know when reading NPU numbers. Every option,
+result field and exit code mentioned here is specified in
+[cli.md](cli.md#npu-runs); the measurement rules are in
+[methodology.md](methodology.md).
+
+## Run doctor first
+
+```powershell
+.\build\arm64-release\bin\Release\edgebench.exe doctor
+```
+
+`doctor` checks, in order, everything an NPU run depends on, and runs every
+check even after a failure: the ONNX Runtime and QNN files of the bundle against their pinned
+hashes, the QNN EP's registration and the backend versions it reports, the
+device list and the NPU a run would select, two tiny probe models run on the
+NPU (INT8 and FP16) whose outputs must equal their expected bytes exactly, an
+EP context built, loaded and compared, the cache directory, the power settings
+and the background CPU load. Each check is a pass, a warning or a failure with
+a code and a hint; the exit code is that of the first failure, so a failing
+doctor predicts how `run` would fail. A warning on `power` (battery, or a power
+mode other than Best performance) or `background_load` does not stop a run, but
+a result measured that way is not comparable with one measured on AC power, in
+Best performance, on an idle machine ([cli.md](cli.md#edgebench-doctor)).
+
+## Device and bundle
+
+`--provider npu` registers the QNN EP from the bundle (the files next to
+`edgebench.exe`) and selects the one QNN device of type NPU; none or several is
+exit 3. The QNN EP lists the NPU from hardware discovery alone, even when the HTP
+backend files are missing, so an NPU in the device list proves nothing about
+the backend. edgebench therefore checks that `QnnHtp.dll` and
+`QnnHtpPrepare.dll` are in the bundle before the first session (exit 4), and
+`QnnSystem.dll` too when a run uses EP contexts.
+
+The architecture-specific stub (`QnnHtpV73Stub.dll` on this device) cannot be
+checked in advance: which one the backend loads depends on the hardware. Without
+it in the bundle, the backend does not fail. It loads the copies that the NPU
+display driver keeps in the Windows driver store and runs with them, so the
+run would silently use a backend edgebench did not pin. That is why the loaded
+ONNX Runtime and QNN modules are checked after the EP registration, after every
+session creation (the HTP DLLs load at that point) and while the placement and
+profiling sessions exist: any such module outside the bundle directory stops the
+run with `module_outside_bundle` (exit 4). Each check is recorded with its stage
+in `execution.verification_details.module_checks`.
+
+## Strict mode
+
+By default an NPU session is strict: `session.disable_cpu_ep_fallback` is `1`,
+so ONNX Runtime refuses to create a session in which any node would run on the
+CPU. A refusal fails the run with `strict_mode_refusal` (exit 5) and lists the
+nodes the QNN EP could not take (`error.unsupported_nodes`). A strict result
+is therefore all-NPU by construction; the placement session after the trials
+confirms it (every node on the QNN EP, `full_device_execution_verified`) and
+records the QNN EP's own node validation (`execution.qnn_validation`).
+
+`--no-strict` allows the fallback. The result then records `strict_mode` false
+and carries a `strict_mode_off` warning, and a `cpu_fallback_nodes` warning
+naming the nodes that ran on the CPU: such a result measures a CPU/NPU mix, not
+the NPU. A backend that cannot be loaded is told apart from a refusal (ONNX
+Runtime reports both the same way) by what the QNN EP logged during the session
+creation: `qnn_backend_load_failed`, exit 4.
+
+## Precision
+
+The NPU computes INT8 or FP16, never FP32.
+
+- An INT8 QDQ model (static quantization) runs as stored:
+  `execution.effective_precision` is stored `int8`, compute `int8`, source
+  `model`.
+- An FP32 model needs `--npu-fp16`, which passes `enable_htp_fp16_precision`
+  `1`: stored `fp32`, compute `fp16`, source `enable_htp_fp16_precision`, and a
+  `model.precision_notes` entry. Without the flag the run is refused
+  (`npu_fp32_needs_fp16`, exit 2) rather than silently computed in FP16.
+- `--npu-fp16` with an INT8 model, and any other stored precision, are usage
+  errors (exit 2).
+
+On the CPU the compute precision is the stored one.
+
+## Provider options
+
+edgebench passes the QNN EP exactly these provider options and records them in
+`config.ep_options`; every other option stays at the EP's default, which the
+result says with `runtime.qnn.unlisted_ep_options` `ep_default`:
+
+| Option | Value | Set by |
+|---|---|---|
+| `backend_path` | absolute path of the bundled `QnnHtp.dll` | always |
+| `htp_performance_mode` | `burst` | `--htp-performance-mode` |
+| `enable_htp_fp16_precision` | `1` | `--npu-fp16` only |
+| `htp_graph_finalization_optimization_mode` | `0`, `1`, `2` or `3` | `--htp-graph-finalization-mode` only |
+
+**Graph finalization.** `--htp-graph-finalization-mode` sets how much the HTP
+backend optimizes the graph when it finalizes it, with the values the QNN EP
+documents: `0` (the EP default), `1` (faster preparation, a less optimized
+graph), `2` (longer preparation, a more optimized graph), `3` (longest
+preparation). Without the option nothing is passed and the backend's default
+applies, which is what every result without it measures. The option is recorded
+in `config.ep_options`, is part of the EP context cache key like every option,
+and decides which batch-equivalence facts apply to the run (below). Mode 1 is
+what makes the INT8 image models compute the same outputs at batch 8 as at
+batch 1, at a latency cost ([Batch size and INT8 outputs](#options)); it is an
+option for experiments, not the default.
+
+## Initialization
+
+Creating an NPU session from the ONNX model compiles it for the HTP. A session
+created from an EP context (the precompiled graph the QNN EP can write) skips
+the compilation. `--init-breakdown` measures the three kinds of session
+creation in every trial, each after the same idle period as the trial, and
+before the trial's timed session (`timing.trials[].session_init`, summarized in
+`timing.session_init.summary`):
+
+- **cold** (`cold_ms`): a session from the model, compiled from scratch;
+- **build** (`context_build_ms`): a session that compiles the model and writes
+  an EP context into a scratch directory of that trial;
+- **cached** (`cached_init_ms`): a session from that scratch context.
+
+Cold and build times are close to each other: writing the context costs little
+compared with compiling. Much of a cold session creation is not the graph
+compilation at all: the QNN profile (below) shows the graph finalization as a
+small part of it, and the rest, a cost of roughly the same size at batch 1 for
+every model from the tiny autoencoder to ResNet-18, is the backend and device
+setup; larger batches compile longer, FP16 more so than INT8. Cached sessions
+avoid most of the cost, and their creation time hardly depends on the model or
+the batch size. Initialization times vary between trials and
+between sessions of the machine, so they are reported with their spread.
+
+## EP context cache
+
+`--ep-cache` decides where the timed sessions come from:
+
+- `off` (default): every timed session is compiled from the model
+  (`ep_context_state` `cold`);
+- `build`: delete this key's cache entry, build it once before the trials,
+  create every timed session from it;
+- `use`: create the timed sessions from the entry whose key matches; build it
+  first if there is none (`hit` false), load it if there is (`hit` true).
+
+**Location.** `%LOCALAPPDATA%\EdgeBench\qnn-context` by default, or
+`--ep-cache-dir`; one subdirectory per key, holding the context model, its
+context binary and a manifest with every file's size and SHA256. edgebench only
+deletes files listed in a manifest it wrote. `doctor` reports the directory and
+its stale entries, and `doctor --prune-cache` deletes them.
+
+**Key.** The key covers everything that could make a stored context wrong for
+the run: the model file's SHA256, the ONNX Runtime, QNN EP and QNN SDK
+versions, the HTP backend file version, every EP option passed (graph
+finalization mode included), the session settings that affect compilation, the
+graph optimization level and the device. A change to any of them gives a new
+key, so a stale context is never loaded.
+
+**Stale entries.** An entry of the same model file under another key is stale
+and is deleted when a run builds or uses the cache. One consequence: runs of
+the same model file with two different EP options (for example
+`--htp-graph-finalization-mode 1` and the default) evict each other's entries,
+so alternating between them rebuilds every time. Use separate `--ep-cache-dir`
+directories to keep both.
+
+**Verification.** Before the trials of a `build` or `use` run, the engine runs
+its input through a session compiled from the model and through a session from
+the context, and compares the output bytes: `verified_equal_outputs` true, or
+the run fails (`ep_context_outputs_differ`, exit 1). A cache file that is
+missing or changed, or a context ONNX Runtime cannot load, fails the run (exit
+3) with a hint to rebuild it with `--ep-cache build`; nothing is rebuilt
+silently.
+
+**The "suboptimal" note.** Every session from a context makes the QNN EP log
+that the context is supported but suboptimal and should be recompiled; the
+result gets an `ep_context_recompilation_suggested` note. The cause is known:
+the EP rates a context optimal only if the VTCM size stored in it equals the
+device's, and without the `vtcm_mb` option it stores 0. Compiling with the
+device's VTCM size makes the verdict optimal with bit-identical outputs and the
+same initialization and latency, but nothing reports the device's VTCM size
+before a context exists, and a value larger than the device's makes the context
+unusable, so edgebench does not set it. The note does not affect the results:
+the context's outputs are verified equal to a compiled session's. The
+compatibility info and verdict are in `config.ep_context_cache.compatibility`
+([cli.md](cli.md#ep-context-cache-and-initialization)).
+
+## Accelerator time and latency
+
+The timed latency of an NPU inference is what an application waits for: ONNX
+Runtime and the QNN EP on the CPU, the transfer to the NPU and back, and the
+NPU's own work. `--profile-accelerator` adds a separate session with QNN
+profiling after the trials and records the backend's accelerator time per
+inference (`timing.profiled_pass`): the part the HTP itself spends. It comes
+from another session than the timed ones and never enters their statistics
+([methodology.md](methodology.md#accelerator-time)).
+
+The difference between the median latency and the median accelerator time is
+the host and transfer overhead of an inference. It is roughly constant per
+inference, so it matters most for small models: for a tiny model such as the
+autoencoder it is a large share of the latency, so a CPU that needs no
+transfer can be faster than the NPU on such a model, and the NPU's latency says
+as much about the host path as about the NPU. Comparing an NPU
+latency with a CPU latency compares what an application gets, overhead
+included; the accelerator time says how much of it the NPU is responsible for.
+An accelerator time above the latency means one of the two is wrong and gets an
+`accelerator_time_exceeds_latency` warning.
+
+## Batch equivalence
+
+A result at batch 4 or 8 records whether the file computes, per item, exactly
+what its batch-1 file computes on the same provider and compute precision, and
+if not, whether any prediction changes (`execution.batch_equivalence`, from the
+committed `models/batch_equivalence.json`; [models.md](models.md#batch-equivalence)).
+A run whose predictions differ from batch 1 gets a `batch_not_equivalent`
+warning and must not be averaged or compared with batch-1 results as the same
+computation.
+
+On the NPU this matters for the INT8 image models at batch 8 with the default
+graph finalization: their outputs differ from batch 1 on every image
+([below](#batch-size-and-int8-outputs)), and the published eval-full accuracy
+at batch 8 is compared with batch 4 in [accuracy.md](accuracy.md#batch-8-on-the-npu).
+The facts are measured per set of compile-relevant EP options (every option
+except `backend_path`, `htp_performance_mode` and `enable_htp_fp16_precision`):
+with `--htp-graph-finalization-mode 1` the same files have their own entries
+(batch 8 equal to batch 1), and with any option combination that has no entries
+the result records batch equivalence as not available, with a
+`batch_equivalence_options_not_covered` note, rather than reusing the default
+options' answer.
 
 ## Batch size and INT8 outputs
 
@@ -177,8 +396,13 @@ mode 1 at b1 is also bit-identical to the default on all 1,000 images):
 | ResNet-18 | 10 of 1,000 | 1,000 of 1,000 | 0.37 | 0.44 | 2.18 | 2.83 | +29% |
 | EfficientNet-Lite0 | 5 of 1,000 | 1,000 of 1,000 | 0.34 | 0.35 | 2.22 | 2.45 | +10% |
 
-Mode 1 is not used: EdgeBench keeps the backend's default finalization, and NPU
-INT8 runs at b8 carry the `batch_not_equivalent` warning.
+Mode 1 is not the default: edgebench keeps the backend's default finalization,
+and NPU INT8 runs at b8 carry the `batch_not_equivalent` warning. Mode 1 is
+available as `--htp-graph-finalization-mode 1`
+([Provider options](#provider-options)); its runs are matched with their own
+batch-equivalence entries, which confirm on the references and on all 1,000
+eval-quick images that b4 and b8 compute exactly the b1 outputs
+([models.md](models.md#batch-equivalence)).
 
 ### Conclusion
 

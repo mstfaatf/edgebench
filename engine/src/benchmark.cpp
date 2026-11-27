@@ -1216,7 +1216,9 @@ void finish_result(BenchmarkResult& r) {
         r.batch_equivalence =
             lookup_batch_equivalence(r.model.file.path, r.model.file.sha256,
                                      config.provider == ProviderKind::npu ? "npu" : "cpu",
-                                     r.effective_precision->compute, r.batch_size);
+                                     r.effective_precision->compute,
+                                     compile_relevant_ep_options(r.runtime.provider.ep_options),
+                                     r.batch_size);
         const BatchEquivalence& be = *r.batch_equivalence;
         const std::string on =
             std::string(config.provider == ProviderKind::npu ? "the NPU" : "the CPU") + " (" +
@@ -1250,6 +1252,17 @@ void finish_result(BenchmarkResult& r) {
                                    " compared).",
                                std::string("/execution/batch_equivalence/bitwise_equal_to_b1")});
         } else if (!be.bitwise_equal_to_b1) {
+            if (be.options_not_covered) {
+                r.notes.push_back(
+                    {"batch_equivalence_options_not_covered",
+                     "Batch equivalence was measured for this model file with other "
+                     "compile-relevant EP options than this run's (" +
+                         describe_compile_options(
+                             compile_relevant_ep_options(r.runtime.provider.ep_options)) +
+                         "). Options can change how the backend compiles the graph, so those "
+                         "facts are not reused here.",
+                     std::string("/execution/batch_equivalence/bitwise_basis")});
+            }
             r.warnings.push_back({"value_unavailable",
                                   "Whether batch size " + batch +
                                       " computes the same outputs as batch 1 is "

@@ -32,7 +32,7 @@ and writes results as schema-validated JSON plus CSV.
   provider reports them at run time, and an optional separate profiled pass
   records the accelerator time per inference
   ([docs/cli.md](docs/cli.md#accelerator-time---profile-accelerator)).
-  No NPU latency results are published yet.
+  See [NPU runs](#npu-runs) below. No NPU latency results are published yet.
 - **Accuracy results are published**: every model variant on ImageNetV2,
   on the CPU and on the NPU (strict mode), with confidence intervals and paired
   CPU vs NPU comparisons ([docs/accuracy.md](docs/accuracy.md)). On the same
@@ -126,6 +126,25 @@ are never overwritten. Check a result with:
 .\.venv\Scripts\python.exe scripts\validate_results.py --strict benchmarks\results\local\mobilenetv2_fp32_b1_cpu_iobinding_t4_latest.json
 ```
 
+## NPU runs
+
+Run `edgebench doctor` first: it checks the bundled QNN files, the NPU, a probe
+model on the NPU, the EP context cache and the power settings. Then, for
+example:
+
+```powershell
+# INT8 as stored; strict mode (no CPU fallback) is the default
+.\build\arm64-release\bin\Release\edgebench.exe run --model models\mobilenetv2\mobilenetv2_int8_b1.onnx --provider npu --ep-cache use --init-breakdown --profile-accelerator
+# an FP32 model needs FP16 compute: the NPU has no FP32
+.\build\arm64-release\bin\Release\edgebench.exe run --model models\mobilenetv2\mobilenetv2_fp32_b1.onnx --provider npu --npu-fp16
+```
+
+[docs/npu.md](docs/npu.md) explains what an NPU result contains and how to read
+it: device and bundle checks, strict mode, precision, the provider options
+(including `--htp-graph-finalization-mode`), cold, build and cached
+initialization, the EP context cache, accelerator time against latency, and
+why INT8 image models at batch 8 compute something different from batch 1.
+
 ## Testing
 
 Tests carry CTest labels by what they need: `unit` (nothing), `ort` (the ONNX
@@ -152,8 +171,10 @@ hygiene check. See [Test labels](docs/setup.md#test-labels) and
   autoencoder: NAB data, windows and splits, Colab training, the committed
   source and its exact graph clean-up, INT8, NPU checks and the
   anomaly-detection evaluation on CPU and NPU
-- [docs/npu.md](docs/npu.md): NPU runs; why NPU INT8 image models compute
-  different outputs from batch 7 up
+- [docs/npu.md](docs/npu.md): NPU runs: doctor, device and bundle checks,
+  strict mode, precision, provider options, initialization, the EP context
+  cache, accelerator time, batch equivalence, and why NPU INT8 image models
+  compute different outputs from batch 7 up
 - [docs/cli.md](docs/cli.md): `edgebench` commands, options, output and exit
   codes
 - [docs/results-schema.md](docs/results-schema.md): result file format (JSON

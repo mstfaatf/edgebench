@@ -60,7 +60,11 @@ ACCURACY_ROWS = (
     ("int8_npu", "INT8", "NPU (strict)", "INT8"),
     ("int8_folded_npu", "INT8 folded", "NPU (strict)", "INT8"),
     ("fp32_npu_fp16", "FP32 file", "NPU (strict)", "FP16"),
+    ("int8_npu_b8", "INT8", "NPU (strict)", "INT8"),
+    ("int8_folded_npu_b8", "INT8 folded", "NPU (strict)", "INT8"),
 )
+B8_ROWS = (("int8", "external", "NPU INT8 b8 vs NPU INT8 b4"),
+           ("int8_folded", "folded", "NPU INT8 folded b8 vs NPU INT8 folded b4"))
 ANOMALY_RUNS = ("fp32_cpu", "int8_cpu", "int8_npu", "fp32_npu_fp16")
 
 
@@ -272,6 +276,37 @@ def check_accuracy_tables(c: Checker) -> None:
         c.equal(where + " A right B wrong", int(row[3]), comp["counts"]["only_a_correct"])
         c.equal(where + " B right A wrong", int(row[4]), comp["counts"]["only_b_correct"])
         c.number(where + " p", row[5], comp["p_value"])
+
+
+def check_accuracy_b8(c: Checker) -> None:
+    """docs/accuracy.md, "Batch 8 on the NPU": the b8 runs against b4."""
+    doc = "docs/accuracy.md"
+    rows = c.rows(doc, "| Model | Normalization | Top-1 % at b4 | Top-1 % at b8 |",
+                  len(IMAGE_MODELS) * len(B8_ROWS))
+    expected = [(m, r) for m in IMAGE_MODELS for r in B8_ROWS]
+    comps = []
+    for row, (m, (variant, normalization, label)) in zip(rows, expected):
+        comp = c.comparison(m, label)
+        comps.append(comp)
+        b8, b4 = c.run(f"{m}_{variant}_npu_b8"), c.run(f"{m}_{variant}_npu")
+        where = f"{doc}: b8 row {m} {variant}"
+        c.equal(where, row[:2], [reg.MODELS[m].display_name, normalization])
+        c.equal(where + " runs", (comp["a"], comp["b"]), (b8["run_id"], b4["run_id"]))
+        c.number(where + " b4", row[2], b4["metrics"]["top1"]["accuracy"], 100)
+        c.number(where + " b8", row[3], b8["metrics"]["top1"]["accuracy"], 100)
+        c.number(where + " delta", row[4], comp["top1_delta"], 100)
+        c.number(where + " agreement", row[5], comp["top1_agreement"], 100)
+        c.number(where + " p", row[6], comp["p_value"])
+        be = b8["execution"]["batch_equivalence"]
+        c.equal(where + " eval-quick", row[7], f"{be['top5_differing']:,} of {be['images']:,}")
+    deltas = [x["top1_delta"] * 100 for x in comps]
+    c.sentence(doc, r"batch 8 is within ([\d.]+) top-1 points of batch 4 \(from ([-+\d.]+) to "
+                    r"([-+\d.]+)\)", max(abs(d) for d in deltas), min(deltas), max(deltas))
+    p = [x["p_value"] for x in comps]
+    c.sentence(doc, r"McNemar p = ([\d.]+) to ([\d.]+) for batch 8 against batch 4", min(p), max(p))
+    agree = [x["top1_agreement"] * 100 for x in comps]
+    c.sentence(doc, r"two batch sizes give the same top-1 class on ([\d.]+)-([\d.]+)% of the "
+                    r"images", min(agree), max(agree))
 
 
 def _anomaly(c: Checker, suffix: str) -> dict:
@@ -519,6 +554,14 @@ BATCH_GROUPS = (
 )
 PROVIDER_LABEL = {("cpu", "fp32"): "CPU, FP32", ("cpu", "int8"): "CPU, INT8",
                   ("npu", "fp16"): "NPU, FP16", ("npu", "int8"): "NPU, INT8"}
+OPTIONS_LABEL = {"{}": "",
+                 '{"htp_graph_finalization_optimization_mode":"1"}': ", finalization mode 1"}
+
+
+def provider_label(e: dict) -> str:
+    """'NPU, INT8', with the compile-relevant EP options of the entry if any."""
+    options = json.dumps(e.get("ep_compile_options", {}), sort_keys=True, separators=(",", ":"))
+    return PROVIDER_LABEL[(e["provider"], e["compute_precision"])] + OPTIONS_LABEL[options]
 
 
 def batch_equivalence_rows(entries: list[dict]) -> list[tuple[str, str, str, str, str, float]]:
@@ -529,13 +572,13 @@ def batch_equivalence_rows(entries: list[dict]) -> list[tuple[str, str, str, str
     for model, variants, label in BATCH_GROUPS:
         group = [e for e in entries if e["model"] == model and e["variant"] in variants
                  and e["batch_size"] > 1]
-        for key in sorted({(e["provider"], e["compute_precision"]) for e in group}):
-            sel = [e for e in group if (e["provider"], e["compute_precision"]) == key]
+        for key in sorted({provider_label(e) for e in group}):
+            sel = [e for e in group if provider_label(e) == key]
             cells = []
             for batch in (4, 8):
                 same = [e["bitwise_equal_to_b1"] for e in sel if e["batch_size"] == batch]
                 cells.append("same" if all(same) else "differs" if not any(same) else "mixed")
-            rows.append((model, label, PROVIDER_LABEL[key], cells[0], cells[1],
+            rows.append((model, label, key, cells[0], cells[1],
                          max(e["max_abs_diff"] for e in sel)))
     return rows
 
@@ -554,7 +597,7 @@ def prediction_rows(entries: list[dict]) -> list[tuple[str, str, str, int, str]]
             continue
         variant = e["variant"].replace("_unpruned", "")
         key = (MODEL_ORDER.index(e["model"]), e["model"], variant,
-               PROVIDER_LABEL[(e["provider"], e["compute_precision"])], e["batch_size"])
+               provider_label(e), e["batch_size"])
         groups.setdefault(key, []).append(e)
     rows = []
     for key in sorted(groups, key=lambda k: (k[0], k[2], k[3], k[4])):
@@ -587,6 +630,14 @@ def check_batch_equivalence(c: Checker) -> None:
                     r"devices\), (\d+) of them not bitwise equal, (\d+) with different predictions",
                len(entries), sum(1 for e in entries if not e["bitwise_equal_to_b1"]),
                sum(1 for e in entries if e["predictions_equal_to_b1"] is False))
+    mode1 = [e for e in entries if e.get("ep_compile_options")]
+    confirmed = [e["eval_quick_confirmation"] for e in mode1 if e["batch_size"] > 1]
+    c.sentence(doc, r"With finalization mode 1, all (\d+) image INT8 files compute exactly their "
+                    r"batch-1 outputs, at batch 4 and 8 on the reference images and on all "
+                    r"([\d,]+) eval-quick images",
+               len({e["file"] for e in mode1}),
+               lambda t: all(x["compared"] == int(t.replace(",", "")) and x["outputs_differing"] == 0
+                             for x in confirmed) and len(confirmed) > 0)
 
 
 MIB = 1024 * 1024
@@ -731,9 +782,9 @@ def check_hashes(c: Checker) -> None:
                                   f"committed file or pin")
 
 
-CHECKS = (check_accuracy_tables, check_anomaly_tables, check_accuracy_sentences,
-          check_autoencoder_sentences, check_models, check_batch_equivalence,
-          check_npu_batch_findings, check_hashes)
+CHECKS = (check_accuracy_tables, check_accuracy_b8, check_anomaly_tables,
+          check_accuracy_sentences, check_autoencoder_sentences, check_models,
+          check_batch_equivalence, check_npu_batch_findings, check_hashes)
 
 
 def read_docs(root: Path = REPO_ROOT) -> dict[str, str]:

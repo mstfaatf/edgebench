@@ -48,6 +48,7 @@ one inference without measuring or writing anything.
 | `--no-strict` | off | NPU only: allow nodes the NPU cannot run to fall back to the CPU (recorded as `config.strict_mode` false, with `strict_mode_off` and `cpu_fallback_nodes` warnings). By default such a session is refused (exit 5) |
 | `--npu-fp16` | off | NPU only: run an FP32 model with FP16 compute (`enable_htp_fp16_precision` = `1`). Required for FP32 models, a usage error for INT8 models |
 | `--htp-performance-mode MODE` | `burst` | NPU only: the QNN EP's `htp_performance_mode`: `burst`, `balanced`, `default`, `high_performance`, `high_power_saver`, `low_balanced`, `low_power_saver`, `power_saver`, `extreme_power_saver`, `sustained_high_performance` |
+| `--htp-graph-finalization-mode MODE` | not passed | NPU only: the QNN EP's `htp_graph_finalization_optimization_mode`, the values it documents: `0` (EP default), `1` (faster preparation, less optimized graph), `2` (longer preparation, more optimized graph), `3` (longest preparation). Passed and recorded only when given; without it the EP's default applies. See [npu.md](npu.md#provider-options) |
 | `--ep-cache MODE` | `off` | NPU only: EP context cache. `off`: every session is compiled from the model. `build`: delete this key's cache entry, build it once before the trials, create every timed session from it. `use`: create the timed sessions from the entry whose key matches; build it first if there is none. See [EP context cache and initialization](#ep-context-cache-and-initialization) |
 | `--ep-cache-dir PATH` | `%LOCALAPPDATA%\EdgeBench\qnn-context` | NPU only: the cache directory (created if missing; must be writable, exit 6 otherwise), one subdirectory per cache key. Only with `--ep-cache build`/`use` or `--init-breakdown` |
 | `--init-breakdown` | off | NPU only: in every trial, also time a cold, a context-building and a cached session creation, each after the trial's idle period, before the timed session |
@@ -79,6 +80,7 @@ other QNN EP option stays at the EP's default:
 | `config.ep_options` | `backend_path` | absolute path of the bundled `QnnHtp.dll` |
 | `config.ep_options` | `htp_performance_mode` | `--htp-performance-mode` (default `burst`) |
 | `config.ep_options` | `enable_htp_fp16_precision` | `1`, only with `--npu-fp16` |
+| `config.ep_options` | `htp_graph_finalization_optimization_mode` | `--htp-graph-finalization-mode`, only when given |
 | `config.session_config` | `session.disable_cpu_ep_fallback` | `1` (strict mode), `0` with `--no-strict` |
 | `config.session_config` | `ep.context_enable` | `0`: the session writes no EP context |
 | `config.session_config` | `ep.context_embed_mode` | `0`, only with `--ep-cache build`/`use` or `--init-breakdown` (see below) |
@@ -202,6 +204,60 @@ than the device's makes the context unusable), so it is not set. The note is
 harmless: the outputs of the context are verified bit-identical to a compiled
 session.
 
+### What the QNN EP reports
+
+`runtime.qnn` records the QNN values as the QNN EP reports them while the run
+is in progress, never derived from file names, package versions or a table;
+`runtime.qnn.value_sources` says where each one came from, and a value nothing
+reports is `null` with a `value_unavailable` warning:
+
+| Field | Value (this machine) | Source (`value_sources`) |
+|---|---|---|
+| `backend_build` | `v2.52.0.261104115025` | `qnn_ep_log_backend_build_id`: the backend's build id, which the QNN EP logs when it sets up its backend. edgebench asks the EP to rate a fixed compatibility string once per process, before any session, with the log level raised, and reads the id from that log |
+| `sdk_version` | `2.52.0` | the same: the `major.minor.patch` of the build id |
+| `htp_arch` | `v73` | `ep_compatibility_info`: the compatibility info the QNN EP stores in every EP context it compiles. Only known when the run built or loaded a context (`--ep-cache build`/`use`, or `--init-breakdown`); null otherwise |
+| `soc_model` | null | not reported: the QNN EP keeps only its `soc_model` option (0) in the context |
+
+`runtime.qnn.backend_file_version` is a separate fact: the version resource of
+the `QnnHtp.dll` that was loaded (source `loaded_module_version_resource`). The
+validator checks that `sdk_version` is the `major.minor.patch` of
+`backend_build` and warns if the build differs from the file's product version.
+
+The QNN EP 2.8.0 crashes (access violation) if ONNX Runtime asks it to rate
+compatibility info after any QNN session has existed in the process, so the
+build id is read once per process before the first session and kept, and the
+cache verdict (`config.ep_context_cache.compatibility.verdict`) is only asked
+for before the first session.
+
+### Accelerator time (`--profile-accelerator`)
+
+`--profile-accelerator` (NPU only; a usage error with `--provider cpu`) adds
+one more session after the trials and the placement session: created like the
+timed sessions (from the model, or from the EP context when the cache is used)
+with the QNN EP's `profiling_level` `basic` and a profile file in a temporary
+directory, it runs `--warmup` unrecorded and `--profile-iterations` (default
+50) recorded inferences and is then released, which makes the QNN EP write its
+profile. edgebench reads the per-inference "Accelerator (execute) time" from it
+(the HTP's own share of an inference, in microseconds) and records
+`timing.profiled_pass`: `accelerator_ms` (count, median, minimum, maximum), the
+level, the inference counts, every execute event of the profile, the
+initialization events (graph finalization when compiled, the loading of the
+context binary from an EP context) and the profile files, copied into the run
+directory with their sizes and SHA256 (`qnn_profile.csv` and the binary log for
+Qualcomm's profile viewer). The modules are checked while that session exists
+(stage `profiled_session`); a failure of the pass fails the run with stage
+`profiled_pass`.
+
+Nothing from the profiled session enters the timed results: profiling adds
+host-side work to every inference of that session, so only the
+backend-reported accelerator time is used, never its wall time
+([methodology.md](methodology.md#accelerator-time)). Warnings:
+`accelerator_time_exceeds_latency` (the median accelerator time is above the
+timed median latency, so one of the two is wrong) and
+`profiled_pass_incomplete` (the profile holds fewer inferences than were run).
+How to read accelerator time against latency is in
+[npu.md](npu.md#accelerator-time-and-latency).
+
 ### What `run` measures
 
 A run consists of `--trials` trials. Each trial:
@@ -309,8 +365,10 @@ A model with batch size N > 1 does not always compute, per item, what the
 batch-1 file of the same model computes: on the NPU the INT8 image models at
 batch 8 give different outputs, and on the CPU the FP32 MobileNetV2 and
 EfficientNet-Lite0 files at batch 4 and 8 differ in the last bits. `run` looks
-the model up by its SHA256, the provider and the compute precision in
-`batch_equivalence.json` (the file in the model's directory or the nearest
+the model up by its SHA256, the provider, the compute precision and the
+compile-relevant EP options (every entry of `config.ep_options` except
+`backend_path`, `htp_performance_mode` and `enable_htp_fp16_precision`; none
+by default) in `batch_equivalence.json` (the file in the model's directory or the nearest
 parent directory that has one: `models/batch_equivalence.json`, written by
 `scripts/make_references.py`; see [models.md](models.md#batch-equivalence)) and
 records the answer in `execution.batch_equivalence`: whether the outputs are
@@ -324,6 +382,12 @@ images, or the anomaly flags of the autoencoder's test split).
 - Only the bits differ: a `batch_rounding_only` note (in `notes`, not a
   warning). The result may be compared with batch 1.
 - Not listed: `not_available` with a `value_unavailable` warning.
+- Listed, but only with other compile-relevant EP options than the run's (e.g.
+  `--htp-graph-finalization-mode 2`): `not_available` with a `value_unavailable`
+  warning and a `batch_equivalence_options_not_covered` note. Facts measured
+  with other options are never reused: options can change how the backend
+  compiles the graph. `--htp-graph-finalization-mode 1` has its own entries for
+  the INT8 image models.
 
 The summary prints a `Batch` line for batch sizes above 1, and the notes after
 the warnings.
@@ -845,7 +909,7 @@ to fail internally and that a test cannot provoke.
 | ONNX Runtime loads the model but its metadata cannot be decoded | `invalid_onnx` | 1 | yes, `model_load` | not triggerable |
 | The placement session fails | as reported by ONNX Runtime | 3 | yes, `session_creation`, all trials kept | `FailurePaths.PlacementFailureFailsTheRun` |
 | The placement session logs no placement | `placement_unavailable` | 1 | yes, `session_creation` | not triggerable |
-| `--npu-fp16`, `--no-strict` or `--htp-performance-mode` without `--provider npu`; unknown `--htp-performance-mode` | `usage_error` | 2 | no | `NpuCli.NpuOptionsWithTheCpuProviderAreUsageErrors`, `NpuCli.UnknownPerformanceModeIsAUsageError` |
+| `--npu-fp16`, `--no-strict`, `--htp-performance-mode` or `--htp-graph-finalization-mode` without `--provider npu`; unknown `--htp-performance-mode`; `--htp-graph-finalization-mode` other than `0` to `3` | `usage_error` | 2 | no | `NpuCli.NpuOptionsWithTheCpuProviderAreUsageErrors`, `NpuCli.UnknownPerformanceModeIsAUsageError`, `NpuCli.GraphFinalizationModeIsParsedAndValidated` |
 | NPU: FP32 model without `--npu-fp16` | `npu_fp32_needs_fp16` | 2 | no | `Cli.RunNpuPrecisionRulesAreUsageErrors`, `ComputePrecision.Fp32WithoutTheFlagIsRefused` |
 | NPU: `--npu-fp16` with an INT8 model | `npu_fp16_needs_fp32_model` | 2 | no | `ComputePrecision.TheFlagOnAnInt8ModelIsAUsageError` |
 | NPU: other stored precision (FP16, mixed, dynamic or QOperator quantization) | `npu_precision_unsupported` | 2 | no | `ComputePrecision.OtherStoredPrecisionsAreNotSupported` |
@@ -873,7 +937,9 @@ to fail internally and that a test cannot provoke.
 | A crash (structured exception) | `internal_error` | 1 | no | `ExitPaths.UnhandledExceptionIsReportedAndExits1` |
 
 Notes (in `notes`, not warnings): `batch_rounding_only`
-(`BenchmarkModels.BatchEquivalenceComesFromTheReferenceSummary`) and
+(`BenchmarkModels.BatchEquivalenceComesFromTheReferenceSummary`),
+`batch_equivalence_options_not_covered`
+(`QnnProviderNpu.BatchEquivalenceFollowsTheGraphFinalizationMode`) and
 `ep_context_recompilation_suggested`
 (`EpCacheNpu.LoadingAContextIsNotedWhenOnnxRuntimeSuggestsRecompiling`).
 

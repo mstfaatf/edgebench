@@ -24,7 +24,7 @@ from typing import Any, Callable
 
 from common.manifests import EVAL_QUICK_MANIFEST, REPO_ROOT
 from common.model_registry import IMPORTED_MODELS, MODELS, MODELS_DIR
-from common.reference_outputs import sha256_file
+from common.reference_outputs import entry_key, sha256_file
 
 EVAL_QUICK_TOP1 = "eval_quick_top1"
 TEST_SPLIT_FLAGS = "test_split_flags"
@@ -100,11 +100,11 @@ def _window_scores(session, windows, batch: int):
 
 
 def compute(entries: list[dict[str, Any]], session: SessionFactory,
-            progress: Callable[[str], None] = print) -> dict[tuple[str, str, str], dict[str, Any]]:
+            progress: Callable[[str], None] = print) -> dict[tuple, dict[str, Any]]:
     """Prediction comparisons for the summary entries that are not bitwise equal to b1.
 
-    Returns {(sha256, provider, compute_precision): {predictions_equal_to_b1,
-    predictions_basis, predictions_compared, predictions_differing}}.
+    Returns {entry_key: {predictions_equal_to_b1, predictions_basis,
+    predictions_compared, predictions_differing}}.
     """
     import gc
 
@@ -146,10 +146,71 @@ def compute(entries: list[dict[str, Any]], session: SessionFactory,
             compared, basis = len(b1), EVAL_QUICK_TOP1
         progress(f"  {e['file']} ({e['provider']}, {e['compute_precision']}): "
                  f"{differing} of {compared} predictions differ from batch 1")
-        out[(e["sha256"], e["provider"], e["compute_precision"])] = {
+        out[entry_key(e)] = {
             "predictions_equal_to_b1": differing == 0,
             "predictions_basis": basis,
             "predictions_compared": compared,
             "predictions_differing": differing,
         }
+    return out
+
+
+def _image_logits(session, model: str, variant: str, batch: int, data: _Data):
+    """The full logits [N, classes] of every eval-quick image."""
+    import numpy as np
+
+    from common import imagenet_eval as ie
+
+    spec = MODELS[model]
+    normalization = "folded" if "folded" in variant else "external"
+    cache = data.quick()
+    name = session.get_inputs()[0].name
+    out = []
+    for start in range(0, len(cache), ie.CHUNK):
+        x = ie.model_input(cache, start, min(start + ie.CHUNK, len(cache)), normalization,
+                           spec.mean, spec.std)
+        out += [session.run(None, {name: x[b:b + batch]})[0] for b in range(0, len(x), batch)]
+    return np.concatenate(out)
+
+
+def confirm(entries: list[dict[str, Any]], session: SessionFactory,
+            progress: Callable[[str], None] = print) -> dict[tuple, dict[str, Any]]:
+    """Whole-split confirmation of image entries: batch N against batch 1 on every
+    eval-quick image, same reference device.
+
+    The 8 reference images decide bitwise_equal_to_b1; this checks the same claim on
+    all 1,000 eval-quick images: how many images' full logits differ in any bit, and
+    how many get a different top-1 class. Returns {entry_key: {basis, compared,
+    outputs_differing, top1_differing, outputs_bitwise_equal_to_b1}}.
+    """
+    import gc
+
+    import numpy as np
+
+    data = _Data()
+    cache: dict[tuple[str, str], Any] = {}
+
+    def logits(file: str, model: str, variant: str, batch: int, device: str):
+        key = (file, device)
+        if key not in cache:
+            s = session(MODELS_DIR / file, device)
+            cache[key] = _image_logits(s, model, variant, batch, data)
+            del s
+            gc.collect()
+        return cache[key]
+
+    out = {}
+    for e in entries:
+        if e["model"] in IMPORTED_MODELS:
+            raise ValueError(f"{e['file']}: eval-quick confirmation is for image models only")
+        device = e["reference_device"]
+        b1 = logits(e["b1_file"], e["model"], e["variant"], 1, device)
+        bn = logits(e["file"], e["model"], e["variant"], e["batch_size"], device)
+        differing = int(np.count_nonzero(np.any(b1 != bn, axis=1)))
+        top1 = int(np.count_nonzero(b1.argmax(axis=1) != bn.argmax(axis=1)))
+        progress(f"  {e['file']} ({device}): {differing} of {len(b1)} eval-quick images differ "
+                 f"from batch 1 in any output bit, {top1} in top-1")
+        out[entry_key(e)] = {"basis": EVAL_QUICK_TOP1, "compared": len(b1),
+                             "outputs_differing": differing, "top1_differing": top1,
+                             "outputs_bitwise_equal_to_b1": differing == 0}
     return out

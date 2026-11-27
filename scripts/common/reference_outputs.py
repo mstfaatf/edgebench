@@ -30,7 +30,10 @@ Layout (under ``models/references/``, not committed, like the models)::
 
 Devices: ``cpu`` (CPU EP, ``CPU_THREADS`` intra-op threads, the same session
 settings as the engine's CPU provider) for every file; ``npu`` (QNN HTP, strict:
-CPU fallback disabled) for every INT8 file.
+CPU fallback disabled) for every INT8 file; ``npu_fp16`` (the same, with
+``enable_htp_fp16_precision`` 1) for every FP32 file; ``npu_finalization1`` (the
+``npu`` settings plus ``htp_graph_finalization_optimization_mode`` 1) for the
+INT8 files of the image models, whose batch-8 outputs that option changes.
 
 The format is the one ``tools/ort_probe/make_reference.py`` uses: raw float32
 files plus a tab-separated index. This module's index, record and check code
@@ -48,7 +51,7 @@ from pathlib import Path
 from typing import Any
 
 from common.manifests import EVAL_QUICK_MANIFEST, ManifestEntry, read_manifest
-from common.model_registry import MODELS_DIR, ManifestFile
+from common.model_registry import MODELS, MODELS_DIR, ManifestFile
 
 REFERENCE_DIR = MODELS_DIR / "references"
 INPUTS_JSON = REFERENCE_DIR / "inputs.json"
@@ -181,13 +184,31 @@ def record_path(model_rel: str, device: str, root: Path = REFERENCE_DIR) -> Path
 
 
 NPU_DEVICES = {"int8": "npu", "fp32": "npu_fp16"}  # NPU reference device per precision
+FINALIZATION1 = "npu_finalization1"
+# The QNN EP provider options of each NPU reference device beyond backend_path and
+# htp_performance_mode (burst), exactly as passed.
+NPU_DEVICE_OPTIONS: dict[str, dict[str, str]] = {
+    "npu": {},
+    "npu_fp16": {"enable_htp_fp16_precision": "1"},
+    FINALIZATION1: {"htp_graph_finalization_optimization_mode": "1"},
+}
+# The provider options that can change the compiled graph (the engine's
+# compile_relevant_ep_options(): all but backend_path, htp_performance_mode and
+# enable_htp_fp16_precision, which the compute precision already says).
+DEVICE_COMPILE_OPTIONS: dict[str, dict[str, str]] = {
+    FINALIZATION1: {"htp_graph_finalization_optimization_mode": "1"},
+}
 
 
 def expected_devices(entry: ManifestFile) -> list[str]:
     """cpu for every file; npu (INT8 as stored) for INT8 files, npu_fp16 (FP16 compute,
-    ``enable_htp_fp16_precision`` 1) for FP32 files."""
+    ``enable_htp_fp16_precision`` 1) for FP32 files; npu_finalization1 for the INT8
+    files of the image models."""
     npu = NPU_DEVICES.get(entry.precision)
-    return ["cpu", npu] if npu else ["cpu"]
+    devices = ["cpu", npu] if npu else ["cpu"]
+    if entry.precision == "int8" and entry.model in MODELS:
+        devices.append(FINALIZATION1)
+    return devices
 
 
 def check_problems(manifest: list[ManifestFile], root: Path = REFERENCE_DIR,
@@ -268,9 +289,13 @@ def check_problems(manifest: list[ManifestFile], root: Path = REFERENCE_DIR,
 # model SHA256, whether a result at batch N may be compared with b1.
 
 BATCH_EQUIVALENCE_JSON = MODELS_DIR / "batch_equivalence.json"
-BATCH_EQUIVALENCE_VERSION = "1.1.0"
-DEVICE_PROVIDER = {"cpu": "cpu", "npu": "npu", "npu_fp16": "npu"}
-NPU_COMPUTE_PRECISION = {"npu": "int8", "npu_fp16": "fp16"}
+BATCH_EQUIVALENCE_VERSION = "1.2.0"
+DEVICE_PROVIDER = {"cpu": "cpu", "npu": "npu", "npu_fp16": "npu", FINALIZATION1: "npu"}
+NPU_COMPUTE_PRECISION = {"npu": "int8", "npu_fp16": "fp16", FINALIZATION1: "int8"}
+# Devices whose batch-N entries also carry a whole-split confirmation on eval-quick
+# (common/batch_predictions.confirm), because the 8 reference images alone are the
+# only evidence that the option removes the batch-size difference.
+CONFIRMED_DEVICES = (FINALIZATION1,)
 PREDICTION_KEYS = ("predictions_equal_to_b1", "predictions_basis", "predictions_compared",
                    "predictions_differing")
 BITWISE_PREDICTIONS = {"predictions_equal_to_b1": True, "predictions_basis": "bitwise",
@@ -308,21 +333,37 @@ def _max_abs_diff(a: bytes, b: bytes) -> float:
     return max((abs(p - q) for p, q in zip(x, y)), default=0.0)
 
 
-def entry_key(entry: dict[str, Any]) -> tuple[str, str, str]:
-    return entry["sha256"], entry["provider"], entry["compute_precision"]
+def entry_key(entry: dict[str, Any]) -> tuple[str, str, str, str]:
+    """(sha256, provider, compute precision, compile options as sorted compact JSON)."""
+    return (entry["sha256"], entry["provider"], entry["compute_precision"],
+            json.dumps(entry["ep_compile_options"], sort_keys=True, separators=(",", ":")))
+
+
+def _items(record_file: Path, root: Path) -> list[bytes] | None:
+    if not record_file.is_file():
+        return None
+    return _item_bytes(json.loads(record_file.read_text(encoding="utf-8")), root)
 
 
 def batch_equivalence(manifest: list[ManifestFile], root: Path = REFERENCE_DIR,
-                      predictions: dict[tuple[str, str, str], dict[str, Any]] | None = None,
-                      prediction_inputs: dict[str, Any] | None = None) -> dict[str, Any]:
+                      predictions: dict[tuple, dict[str, Any]] | None = None,
+                      prediction_inputs: dict[str, Any] | None = None,
+                      confirmations: dict[tuple, dict[str, Any]] | None = None) -> dict[str, Any]:
     """The batch-equivalence summary of every file with references for it and its b1 sibling.
 
     ``predictions`` (common/batch_predictions.compute, keyed by entry_key) fills
     the prediction fields of the entries that are not bitwise equal; without one,
     an entry gets basis ``not_available``. Bitwise-equal entries are trivially
-    prediction-equal (basis ``bitwise``).
+    prediction-equal (basis ``bitwise``). Each entry records the compile-relevant
+    EP options of its reference device (``ep_compile_options``, {} for the EP
+    defaults): the engine uses an entry only for runs with exactly those options.
+    Entries of a non-default device also compare their items with the default
+    device's outputs of the same file (``vs_default_options``), and batch-N entries
+    of CONFIRMED_DEVICES carry ``eval_quick_confirmation`` (from
+    ``confirmations``, common/batch_predictions.confirm; null if missing).
     """
     predictions = predictions or {}
+    confirmations = confirmations or {}
     by_key = {(e.model, e.variant, e.batch_size): e for e in manifest}
     entries = []
     for entry in sorted(manifest, key=lambda e: (e.model, e.variant, e.batch_size)):
@@ -347,6 +388,7 @@ def batch_equivalence(manifest: list[ManifestFile], root: Path = REFERENCE_DIR,
                 "batch_size": entry.batch_size,
                 "provider": DEVICE_PROVIDER[device],
                 "compute_precision": compute_precision(entry, device),
+                "ep_compile_options": DEVICE_COMPILE_OPTIONS.get(device, {}),
                 "reference_device": device,
                 "bitwise_equal_to_b1": not differing,
                 "b1_file": b1.file,
@@ -361,6 +403,18 @@ def batch_equivalence(manifest: list[ManifestFile], root: Path = REFERENCE_DIR,
             else:
                 found = predictions.get(entry_key(e))
                 e.update({k: found[k] for k in PREDICTION_KEYS} if found else NO_PREDICTIONS)
+            if device in DEVICE_COMPILE_OPTIONS:
+                default = NPU_DEVICES[entry.precision]
+                base = _items(record_path(entry.file, default, root), root)
+                if base is not None and len(base) == len(items):
+                    other = [i for i, (a, b) in enumerate(zip(items, base)) if a != b]
+                    e["vs_default_options"] = {
+                        "reference_device": default, "items_compared": len(items),
+                        "items_differing": len(other),
+                        "max_abs_diff": (max(_max_abs_diff(items[i], base[i]) for i in other)
+                                         if other else 0.0)}
+            if device in CONFIRMED_DEVICES and entry.batch_size > 1:
+                e["eval_quick_confirmation"] = confirmations.get(entry_key(e))
             entries.append(e)
     return {
         "batch_equivalence_version": BATCH_EQUIVALENCE_VERSION,
@@ -370,18 +424,26 @@ def batch_equivalence(manifest: list[ManifestFile], root: Path = REFERENCE_DIR,
                        "models/references, written by scripts/make_references.py), and, where it "
                        "does not, whether any prediction changes (predictions_equal_to_b1: top-1 "
                        "class on ImageNetV2 eval-quick, or anomaly flags on the autoencoder's test "
-                       "split). Keyed by model SHA256, provider and compute precision.",
+                       "split). Keyed by model SHA256, provider, compute precision and the "
+                       "compile-relevant EP options (ep_compile_options, {} for the EP defaults); "
+                       "an entry applies only to runs with exactly those options.",
         "prediction_inputs": prediction_inputs,
         "entries": entries,
     }
 
 
-def committed_predictions(doc: dict[str, Any]) -> dict[tuple[str, str, str], dict[str, Any]]:
+def committed_predictions(doc: dict[str, Any]) -> dict[tuple, dict[str, Any]]:
     """The prediction fields of a summary's entries that are not bitwise equal."""
     return {entry_key(e): {k: e.get(k) for k in PREDICTION_KEYS}
             for e in doc.get("entries", [])
             if e.get("bitwise_equal_to_b1") is False
             and e.get("predictions_basis") not in (None, "not_available")}
+
+
+def committed_confirmations(doc: dict[str, Any]) -> dict[tuple, dict[str, Any]]:
+    """The eval-quick confirmations of a summary's entries."""
+    return {entry_key(e): e["eval_quick_confirmation"] for e in doc.get("entries", [])
+            if e.get("eval_quick_confirmation") is not None}
 
 
 def format_batch_equivalence(doc: dict[str, Any]) -> str:
@@ -405,7 +467,8 @@ def batch_equivalence_problems(manifest: list[ManifestFile], root: Path = REFERE
         return [f"{path.name} has version {committed.get('batch_equivalence_version')!r}, not "
                 f"{BATCH_EQUIVALENCE_VERSION}; run scripts/make_references.py --batch-equivalence"]
     current = batch_equivalence(manifest, root, committed_predictions(committed),
-                                committed.get("prediction_inputs"))
+                                committed.get("prediction_inputs"),
+                                committed_confirmations(committed))
     old = {entry_key(e): e for e in committed.get("entries", [])}
     new = {entry_key(e): e for e in current["entries"]}
     problems = []
@@ -414,16 +477,19 @@ def batch_equivalence_problems(manifest: list[ManifestFile], root: Path = REFERE
                         "split manifest changed); run scripts/make_references.py "
                         "--batch-equivalence")
     for key in sorted(set(old) | set(new)):
-        name = (new.get(key) or old[key])["file"]
+        e = new.get(key) or old[key]
+        name = f"{e['file']} ({key[1]}, {key[2]}, {e['reference_device']})"
         if key not in new:
-            problems.append(f"{path.name}: {name} ({key[1]}, {key[2]}) has no current references")
+            problems.append(f"{path.name}: {name} has no current references")
         elif key not in old:
-            problems.append(f"{path.name}: {name} ({key[1]}, {key[2]}) is not listed")
+            problems.append(f"{path.name}: {name} is not listed")
         elif old[key] != new[key]:
-            problems.append(f"{path.name}: {name} ({key[1]}, {key[2]}) differs from the references")
+            problems.append(f"{path.name}: {name} differs from the references")
         elif new[key]["predictions_basis"] == "not_available":
-            problems.append(f"{path.name}: {name} ({key[1]}, {key[2]}) is not bitwise equal to "
-                            "batch 1 and has no prediction comparison")
+            problems.append(f"{path.name}: {name} is not bitwise equal to batch 1 and has no "
+                            "prediction comparison")
+        elif "eval_quick_confirmation" in new[key] and new[key]["eval_quick_confirmation"] is None:
+            problems.append(f"{path.name}: {name} has no eval-quick confirmation")
     return problems
 
 

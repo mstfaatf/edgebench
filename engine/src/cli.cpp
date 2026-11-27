@@ -60,7 +60,7 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
     RunConfig defaults;
     std::string model, provider = "cpu", binding = "iobinding", input = "random", graph = "all";
     std::string label, name, format = "summary", output_dir = defaults.output_dir.string();
-    std::string htp_mode(kDefaultHtpPerformanceMode);
+    std::string htp_mode(kDefaultHtpPerformanceMode), finalization_mode;
     std::string ep_cache = "off", ep_cache_dir;
     int profile_iterations = kDefaultProfileIterations;
     bool no_strict = false;
@@ -142,6 +142,14 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
             ->check(choice([](std::string_view v) { return is_htp_performance_mode(v); },
                            htp_performance_modes_list(), "HTP performance mode"))
             ->capture_default_str();
+    CLI::Option* finalization_opt =
+        run->add_option("--htp-graph-finalization-mode", finalization_mode,
+                        "NPU: QNN HTP graph finalization optimization mode "
+                        "(htp_graph_finalization_optimization_mode), passed only when given "
+                        "[default: not passed, the EP's default]")
+            ->type_name("MODE")
+            ->check(choice([](std::string_view v) { return is_htp_graph_finalization_mode(v); },
+                           htp_graph_finalization_modes_list(), "HTP graph finalization mode"));
     run->add_option("--ep-cache", ep_cache,
                     "NPU: EP context cache. off: compile every session from the model; build: "
                     "rebuild the cache once, then create every timed session from it; use: create "
@@ -246,6 +254,8 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
         cfg.strict = !no_strict;
         if (htp_opt->count() > 0)
             cfg.htp_performance_mode = htp_mode;
+        if (finalization_opt->count() > 0)
+            cfg.htp_graph_finalization_mode = finalization_mode;
         cfg.ep_cache = *parse_ep_cache_mode(ep_cache);
         if (cache_dir_opt->count() > 0)
             cfg.ep_cache_dir =

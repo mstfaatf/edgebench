@@ -35,6 +35,20 @@ inline constexpr std::array<std::string_view, 10> kHtpPerformanceModes = {
 };
 inline constexpr std::string_view kDefaultHtpPerformanceMode = "burst";
 
+/// The QNN EP provider option --htp-graph-finalization-mode sets, and the values
+/// the EP documents for it: 0 (the EP default), 1 (faster preparation, less
+/// optimal graph), 2 (longer preparation, more optimal graph), 3 (longest
+/// preparation, most likely even more optimal graph).
+inline constexpr std::string_view kHtpGraphFinalizationOption =
+    "htp_graph_finalization_optimization_mode";
+inline constexpr std::array<std::string_view, 4> kHtpGraphFinalizationModes = {"0", "1", "2",
+                                                                               "3"};
+
+bool is_htp_graph_finalization_mode(std::string_view mode);
+
+/// Comma-separated list of kHtpGraphFinalizationModes.
+std::string htp_graph_finalization_modes_list();
+
 bool is_htp_performance_mode(std::string_view mode);
 
 /// Comma-separated list of kHtpPerformanceModes, for help and error messages.
@@ -45,9 +59,20 @@ std::string effective_htp_performance_mode(const RunConfig& config);
 
 /// QNN EP provider options for `config`: backend_path (absolute path of the HTP
 /// backend, never a bare name), htp_performance_mode, and
-/// enable_htp_fp16_precision = 1 only with --npu-fp16.
+/// enable_htp_fp16_precision = 1 only with --npu-fp16, and
+/// htp_graph_finalization_optimization_mode only with --htp-graph-finalization-mode.
 std::map<std::string, std::string> qnn_ep_options(const RunConfig& config,
                                                   const std::filesystem::path& backend_path);
+
+/// The provider options that can change what the compiled graph computes: every
+/// option except backend_path (where the backend is), htp_performance_mode (clock
+/// and power votes at run time; no output changes) and enable_htp_fp16_precision
+/// (already part of the compute precision). Options that are not known to be
+/// output-neutral count, so an unknown option never reuses facts measured
+/// without it. Empty for the EP defaults and for the CPU provider. Batch
+/// equivalence is looked up with these (batch_equivalence.hpp).
+std::map<std::string, std::string> compile_relevant_ep_options(
+    const std::map<std::string, std::string>& ep_options);
 
 /// Session config entries of an NPU session: session.disable_cpu_ep_fallback (1 in
 /// strict mode, 0 with --no-strict), ep.context_enable = 0 (the session writes no

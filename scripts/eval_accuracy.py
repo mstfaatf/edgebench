@@ -8,14 +8,19 @@ Runs (pruned files only; the unpruned references give bit-identical outputs):
   folded;
 - QNN HTP, strict mode, FP16 compute (``enable_htp_fp16_precision=1``) on the
   FP32 external file. A strict session the EP refuses is recorded as a
-  ``refused`` result.
+  ``refused`` result;
+- QNN HTP, strict mode, INT8 external and INT8 folded at batch 8 (``*_npu_b8``):
+  the batch size the default graph finalization computes differently from
+  batch 1 (docs/npu.md, "Batch size and INT8 outputs"), measured as it is.
 
 Batch size: for each run, batch 1, 4 and 8 are tried on eval-quick (1,000
 images) on that device; the largest one whose top-5 predictions equal batch 1's
-on every image is used for eval-full (larger batches have less per-call
-overhead, and a fixed rule keeps reruns identical; the eval-quick times are
-printed, not recorded). On the NPU, INT8 files at batch 8 compute different
-outputs from batch 1, so INT8 NPU runs use batch 4.
+on every image is used for eval-full (batch_rule ``largest_identical``: larger
+batches have less per-call overhead, and a fixed rule keeps reruns identical;
+the eval-quick times are printed, not recorded). On the NPU, INT8 files at
+batch 8 compute different outputs from batch 1, so INT8 NPU runs use batch 4.
+The ``*_npu_b8`` runs are asked for batch 8 (batch_rule ``fixed``) and record how
+many eval-quick images differ from batch 1 there.
 
 Images: eval-full (10,000 images) in manifest order, labels checked against
 their folders and the class list, preprocessed with the shared helper through
@@ -24,7 +29,7 @@ each file gets the input its recipe expects (normalized with the model's own
 mean/std, or [0, 1] for folded files).
 
 Output: one result per run (``<run_id>.json``, schema
-``schemas/accuracy-result.v1.0.0.schema.json``) and ``comparisons.json`` (paired
+``schemas/accuracy-result.v1.1.0.schema.json``) and ``comparisons.json`` (paired
 comparisons with McNemar's exact test) in ``--output-dir`` (default
 ``benchmarks/results/published/accuracy/``); per-image top-5 predictions as
 ``.npy`` files in ``--predictions-dir`` (default
@@ -60,7 +65,7 @@ from common.accuracy_stats import (  # noqa: E402
 )
 from common.model_registry import MODELS, MODELS_DIR, REPO_ROOT, read_manifest, relative_path  # noqa: E402
 
-ACCURACY_SCHEMA_VERSION = "1.0.0"
+ACCURACY_SCHEMA_VERSION = "1.1.0"
 OUTPUT_DIR = REPO_ROOT / "benchmarks" / "results" / "published" / "accuracy"
 PREDICTIONS_DIR = REPO_ROOT / "benchmarks" / "results" / "local" / "accuracy" / "predictions"
 CPU_THREADS = 4
@@ -77,6 +82,7 @@ class Run:
     device: str                 # "cpu" or "npu"
     compute_precision: str      # "fp32", "int8" or "fp16"
     provider_options: dict = field(default_factory=dict)
+    batch: int | None = None    # a fixed batch size; None: the largest identical to batch 1
 
 
 def planned_runs() -> list[Run]:
@@ -87,6 +93,8 @@ def planned_runs() -> list[Run]:
         for v in ("int8", "int8_folded"):
             runs.append(Run(f"{m}_{v}_npu", m, v, "npu", "int8", dict(QNN_BASE)))
         runs.append(Run(f"{m}_fp32_npu_fp16", m, "fp32", "npu", "fp16", {**QNN_BASE, **FP16}))
+        for v in ("int8", "int8_folded"):
+            runs.append(Run(f"{m}_{v}_npu_b8", m, v, "npu", "int8", dict(QNN_BASE), batch=8))
     return runs
 
 
@@ -110,6 +118,13 @@ def comparison_plan() -> list[tuple[str, str, str, str]]:
              "accuracy?", f"{m}_int8_folded_cpu", f"{m}_int8_cpu"),
             (f"{m}: NPU FP16 vs CPU FP32", "What does FP16 compute on the NPU cost against FP32 "
              "on the CPU (same FP32 file)?", f"{m}_fp32_npu_fp16", f"{m}_fp32_cpu"),
+            (f"{m}: NPU INT8 b8 vs NPU INT8 b4", "Does batch 8, which the NPU computes differently "
+             "from batch 1, change accuracy against batch 4, which it computes exactly like batch "
+             "1 (same INT8 variant, external normalization)?", f"{m}_int8_npu_b8",
+             f"{m}_int8_npu"),
+            (f"{m}: NPU INT8 folded b8 vs NPU INT8 folded b4", "Does batch 8 change accuracy "
+             "against batch 4 on the NPU (same INT8 variant, normalization folded)?",
+             f"{m}_int8_folded_npu_b8", f"{m}_int8_folded_npu"),
         ]
     return plan
 
@@ -178,14 +193,15 @@ def environment() -> dict:
 
 
 def choose_batch(run: Run, sessions: Sessions, quick, quick_cache, recipe) -> tuple[int, dict]:
-    """The largest batch size whose eval-quick top-5 predictions equal batch 1's."""
+    """The largest batch size whose eval-quick top-5 predictions equal batch 1's, or the
+    run's fixed batch size (compared with batch 1 all the same)."""
     import numpy as np
 
     from common import imagenet_eval as ie
 
     pre = recipe["preprocessing"]
-    reference, timings, candidates = None, {}, {}
-    for batch in BATCHES:
+    reference, timings, candidates, differing = None, {}, {}, {}
+    for batch in BATCHES if run.batch is None else sorted({1, run.batch}):
         path = MODELS_DIR / relative_path(run.model, run.variant, batch)
         try:
             session = sessions.create(run, path)
@@ -203,14 +219,22 @@ def choose_batch(run: Run, sessions: Sessions, quick, quick_cache, recipe) -> tu
         gc.collect()
         if batch == 1:
             reference = top5
-        identical = bool(np.array_equal(top5, reference))
+        differing[batch] = int(np.count_nonzero(np.any(top5 != reference, axis=1)))
+        identical = differing[batch] == 0
         candidates[f"b{batch}"] = "identical" if identical else "differs"
         print(f"  b{batch}: eval-quick {timings[batch]:.1f} s, top-5 vs b1 "
               f"{'identical' if identical else 'DIFFERENT'}")
     # The largest equivalent batch size: the least per-call overhead, and (unlike the
     # measured times, which differ by noise) the same choice on every run.
-    best = max(b for b in timings if candidates[f"b{b}"] == "identical")
-    return best, {"split": "eval-quick", "reference_batch": 1, "identical_top5": True,
+    if run.batch is not None:
+        if run.batch not in timings:
+            raise RuntimeError(f"batch {run.batch}: the strict session was refused")
+        best, rule = run.batch, "fixed"
+    else:
+        best, rule = max(b for b in timings if candidates[f"b{b}"] == "identical"), \
+            "largest_identical"
+    return best, {"split": "eval-quick", "reference_batch": 1, "batch_rule": rule,
+                  "identical_top5": differing[best] == 0, "top5_differing": differing[best],
                   "images": len(quick.entries), "candidates": candidates}
 
 

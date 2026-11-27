@@ -72,6 +72,8 @@ TEST(EpCacheKey, EveryFieldChangesTheKey) {
         {"ep option value", [](auto& k) { k.ep_options["htp_performance_mode"] = "balanced"; }},
         {"ep option added", [](auto& k) { k.ep_options["enable_htp_fp16_precision"] = "1"; }},
         {"ep option removed", [](auto& k) { k.ep_options.erase("htp_performance_mode"); }},
+        {"finalization mode",
+         [](auto& k) { k.ep_options["htp_graph_finalization_optimization_mode"] = "1"; }},
         {"backend path", [](auto& k) { k.ep_options["backend_path"] = "D:\\QnnHtp.dll"; }},
         {"strict mode", [](auto& k) { k.session_config["session.disable_cpu_ep_fallback"] = "0"; }},
         {"embed mode", [](auto& k) { k.session_config["ep.context_embed_mode"] = "1"; }},

@@ -45,10 +45,10 @@ The ARM64 build is the one tagged `-arm64`. Confirm it with `sysconfig`:
 >
 > | Kind of script | Behaviour on a non-native interpreter | Examples |
 > |---|---|---|
-> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `scripts/export_models.py`, `scripts/export_mobilenetv2.py`, `scripts/fold_models.py`, `scripts/quantize_models.py`, `scripts/make_references.py` (except `--check`), `scripts/eval_accuracy.py`, `scripts/prepare_autoencoder.py`, `scripts/eval_anomaly.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `scripts/npu_overhead.py`, `scripts/check_autoencoder_npu.py`, `scripts/make_probe_references.py`, `scripts/investigate_batch_equivalence.py`, `tools/qnn_rejection_check.py`, `tools/ort_probe/reference.py`, `tools/ort_probe/make_reference.py` |
+> | Runs models, loads ONNX Runtime, or measures the machine | Refuses to run (exit code 2) | `scripts/export_models.py`, `scripts/export_mobilenetv2.py`, `scripts/fold_models.py`, `scripts/quantize_models.py`, `scripts/make_references.py` (except `--check`), `scripts/eval_accuracy.py`, `scripts/prepare_autoencoder.py`, `scripts/eval_anomaly.py`, `scripts/quantize_qnn.py`, `scripts/eval_cpu.py`, `scripts/npu_check.py`, `scripts/compare_aihub.py`, `scripts/npu_overhead.py`, `scripts/check_autoencoder_npu.py`, `scripts/make_probe_references.py`, `scripts/investigate_batch_equivalence.py`, `scripts/run_matrix.py`, `tools/qnn_rejection_check.py`, `tools/ort_probe/reference.py`, `tools/ort_probe/make_reference.py` |
 > | Environment diagnostic | Runs and reports the problem prominently | `scripts/check_env.py` |
-> | Downloads and platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/get_data.py`, `scripts/get_aihub_baseline.py`, `scripts/validate_results.py`, `scripts/make_test_models.py`, `scripts/check_hygiene.py`, `scripts/coverage_summary.py`, `scripts/validate_accuracy.py`, `scripts/check_doc_numbers.py`, `scripts/model_recipes.py`, `scripts/model_info.py` (they read model files with onnx but never run them), and the tests in `scripts/tests/` |
-> | Shared modules in `scripts/common/` | Not checked themselves. `npu_harness.py` and `ort_qnn.py` load ONNX Runtime and are imported only by guarded scripts, after the check; `onnx_export.py` and `onnx_quantize.py` import torch, onnx and ONNX Runtime inside their functions and are used by `export_models.py`, `fold_models.py`, `quantize_models.py` and their tests; `onnx_fold.py` needs onnx and NumPy only; `model_recipe.py` imports onnx inside the functions that read model files; `reference_outputs.py` imports NumPy only to generate the SplitMix64 input; `timeseries.py` is standard library only except for the two functions that build NumPy arrays; `autoencoder.py`, `autoencoder_pipeline.py` and `onnx_cleanup.py` import onnx and NumPy (the pipeline also ONNX Runtime) inside their functions, so the source-bundle checks of `autoencoder_pipeline.py` run anywhere; `anomaly_stats.py` is standard library only; `imagenet_eval.py` needs NumPy and Pillow; `accuracy_stats.py` is standard library only; the others (`preprocess.py`, `manifests.py`, `model_registry.py`, `accuracy.py`, `qnn_log.py`, `onnx_prune.py`, `qdq_inspect.py`, `results_io.py`, `cli.py`) do not | – |
+> | Downloads and platform-independent tooling | Not checked; runs on any OS/architecture | `scripts/get_data.py`, `scripts/get_aihub_baseline.py`, `scripts/validate_results.py`, `scripts/make_test_models.py`, `scripts/check_hygiene.py`, `scripts/coverage_summary.py`, `scripts/validate_accuracy.py`, `scripts/check_doc_numbers.py`, `scripts/check_matrix.py`, `scripts/model_recipes.py`, `scripts/model_info.py` (they read model files with onnx but never run them), and the tests in `scripts/tests/` |
+> | Shared modules in `scripts/common/` | Not checked themselves. `npu_harness.py` and `ort_qnn.py` load ONNX Runtime and are imported only by guarded scripts, after the check; `onnx_export.py` and `onnx_quantize.py` import torch, onnx and ONNX Runtime inside their functions and are used by `export_models.py`, `fold_models.py`, `quantize_models.py` and their tests; `onnx_fold.py` needs onnx and NumPy only; `model_recipe.py` imports onnx inside the functions that read model files; `reference_outputs.py` imports NumPy only to generate the SplitMix64 input; `timeseries.py` is standard library only except for the two functions that build NumPy arrays; `autoencoder.py`, `autoencoder_pipeline.py` and `onnx_cleanup.py` import onnx and NumPy (the pipeline also ONNX Runtime) inside their functions, so the source-bundle checks of `autoencoder_pipeline.py` run anywhere; `anomaly_stats.py` is standard library only; `imagenet_eval.py` needs NumPy and Pillow; `accuracy_stats.py` and `matrix.py` are standard library only; the others (`preprocess.py`, `manifests.py`, `model_registry.py`, `accuracy.py`, `qnn_log.py`, `onnx_prune.py`, `qdq_inspect.py`, `results_io.py`, `cli.py`) do not | – |
 >
 > The C++ build accepts ARM64 (the measurement build) and x64 (CPU only, for
 > continuous integration; it reports emulation at run time), and rejects
@@ -671,6 +671,32 @@ run directory with the probe's JSON output to `benchmarks/results/local/feasibil
 `tools\ort_probe\reference.py` is a quick Python check with an input filled
 with 0.5; `ort_probe --fill 0.5` runs the same input from C++.
 
+### 4. Run the CPU/NPU matrix (optional)
+
+`scripts/run_matrix.py` runs `edgebench run` over the comparison matrix of
+`scripts/common/matrix.py`: every model (the three image classifiers with
+external normalization and pruned INT8 files, the autoencoder's cleaned graph)
+at batch 1, 4 and 8 on CPU FP32, CPU INT8, NPU INT8 and NPU FP16, plus NPU INT8
+at batch 8 with `--htp-graph-finalization-mode 1` and the folded INT8 files at
+batch 1 on both devices. NPU runs use `--ep-cache use` (each entry built just
+before its run, in a cache directory of the matrix), `--init-breakdown` and
+`--profile-accelerator`. It runs `edgebench doctor` first and stops unless the
+power and background-load checks pass (AC power, the Best performance power
+mode, an idle machine). `scripts/check_matrix.py` then checks every result:
+strict validation, the planned configuration, effective precision, batch
+equivalence against `models/batch_equivalence.json`, the cache hit and output
+verification, module checks, one QNN partition, accelerator time against
+latency and an explicit list of expected warnings, and prints a sanity table.
+The results stay local; they check the engine and are not published numbers.
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_matrix.py --trials 3 --iterations 100   # writes benchmarks\results\local\matrix\<stamp>\
+.\.venv\Scripts\python.exe scripts\check_matrix.py benchmarks\results\local\matrix\<stamp>
+.\.venv\Scripts\python.exe scripts\validate_results.py --strict benchmarks\results\local\matrix\<stamp>\results benchmarks\results\local\matrix\<stamp>\cache_build
+```
+
+`--only RUN_ID ...` runs a subset (a quick rerun of the check).
+
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs on pushes to `main`, pull requests to `main`, and
@@ -694,7 +720,7 @@ To run the same checks locally:
 
 ```powershell
 # python job (any OS; with the full .venv or a venv with requirements-ci.txt)
-python -m pytest scripts/tests/test_validate_results.py scripts/tests/test_check_hygiene.py scripts/tests/test_coverage_summary.py scripts/tests/test_manifests.py scripts/tests/test_export_models.py scripts/tests/test_model_recipes.py scripts/tests/test_references.py scripts/tests/test_accuracy_eval.py scripts/tests/test_timeseries.py scripts/tests/test_autoencoder.py scripts/tests/test_autoencoder_pipeline.py scripts/tests/test_anomaly_eval.py scripts/tests/test_doc_numbers.py scripts/tests/test_validate_doctor.py
+python -m pytest scripts/tests/test_validate_results.py scripts/tests/test_check_hygiene.py scripts/tests/test_coverage_summary.py scripts/tests/test_manifests.py scripts/tests/test_export_models.py scripts/tests/test_model_recipes.py scripts/tests/test_references.py scripts/tests/test_accuracy_eval.py scripts/tests/test_timeseries.py scripts/tests/test_autoencoder.py scripts/tests/test_autoencoder_pipeline.py scripts/tests/test_anomaly_eval.py scripts/tests/test_doc_numbers.py scripts/tests/test_validate_doctor.py scripts/tests/test_matrix.py
 python scripts/validate_accuracy.py benchmarks/results/published/accuracy
 python scripts/validate_results.py --strict docs/examples benchmarks/results/published
 python scripts/check_doc_numbers.py

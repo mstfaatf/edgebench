@@ -1,7 +1,7 @@
 {
-  "accuracy_schema_version": "1.0.0",
+  "accuracy_schema_version": "1.1.0",
   "kind": "comparisons",
-  "timestamp_utc": "2026-11-25T00:03:20.121Z",
+  "timestamp_utc": "2026-11-27T15:21:43.254Z",
   "dataset": {
     "name": "ImageNetV2 matched-frequency",
     "split": "eval-full",
@@ -36,9 +36,17 @@
       "status": "success",
       "top5_indices_sha256": "1ec828b02a3e2b66c287aba5d48a273a3f8ceb6c9d9ec7106d45f7e0df765e31"
     },
+    "efficientnet_lite0_int8_folded_npu_b8": {
+      "status": "success",
+      "top5_indices_sha256": "4fb38e0abff59acdfc87ceff0b1438b7d58d069d7191ccbfa0003cc9525ff1ff"
+    },
     "efficientnet_lite0_int8_npu": {
       "status": "success",
       "top5_indices_sha256": "aca99339db4549bb8234a40df14d1d602777a3a81e06486c485b7b69408685e2"
+    },
+    "efficientnet_lite0_int8_npu_b8": {
+      "status": "success",
+      "top5_indices_sha256": "3a352131c0992690555f77bd9f332b0065afb417effbdd50f4a880f833d913d1"
     },
     "mobilenetv2_fp32_cpu": {
       "status": "success",
@@ -64,9 +72,17 @@
       "status": "success",
       "top5_indices_sha256": "9cc58b004968111a358307023558b20ca616414dafc6763ea21aade86dde61fe"
     },
+    "mobilenetv2_int8_folded_npu_b8": {
+      "status": "success",
+      "top5_indices_sha256": "9a5ddb34a7528dba9e77e15149edd1970bc9bb82dd7a2acd52ac9be9d044cc57"
+    },
     "mobilenetv2_int8_npu": {
       "status": "success",
       "top5_indices_sha256": "e5e071ca4197164d5eaea05c86a0ebf89b3fae1cd05191691bb5fc14626e9bdb"
+    },
+    "mobilenetv2_int8_npu_b8": {
+      "status": "success",
+      "top5_indices_sha256": "57c34005751fee80dd2330a9acb980a2ef5788fafd885148be97681898ac48f3"
     },
     "resnet18_fp32_cpu": {
       "status": "success",
@@ -92,9 +108,17 @@
       "status": "success",
       "top5_indices_sha256": "34e10db3a92a8a359bcdf9368fa5b6fdf974c04e0735a7ab0aea3c074dd782e6"
     },
+    "resnet18_int8_folded_npu_b8": {
+      "status": "success",
+      "top5_indices_sha256": "70280524a849b884ecaaa1a339c29d4353e8095f84f71a12e48d423c1a774461"
+    },
     "resnet18_int8_npu": {
       "status": "success",
       "top5_indices_sha256": "02a479b6271f4003f5b914abd0d04f835b74dde904fc134843075f53e0c722ec"
+    },
+    "resnet18_int8_npu_b8": {
+      "status": "success",
+      "top5_indices_sha256": "352e7f704ac4e3f228b63ed8037fa0a138094b2140b132310ce08322d7e0b772"
     }
   },
   "comparisons": [
@@ -218,6 +242,40 @@
       "p_value": 1.0
     },
     {
+      "name": "efficientnet_lite0: NPU INT8 b8 vs NPU INT8 b4",
+      "question": "Does batch 8, which the NPU computes differently from batch 1, change accuracy against batch 4, which it computes exactly like batch 1 (same INT8 variant, external normalization)?",
+      "a": "efficientnet_lite0_int8_npu_b8",
+      "b": "efficientnet_lite0_int8_npu",
+      "top1_a": 0.6262,
+      "top1_b": 0.626,
+      "top1_delta": 0.00019999999999997797,
+      "top1_agreement": 0.9952,
+      "counts": {
+        "both_correct": 6248,
+        "only_a_correct": 14,
+        "only_b_correct": 12,
+        "both_wrong": 3726
+      },
+      "p_value": 0.8450189828872681
+    },
+    {
+      "name": "efficientnet_lite0: NPU INT8 folded b8 vs NPU INT8 folded b4",
+      "question": "Does batch 8 change accuracy against batch 4 on the NPU (same INT8 variant, normalization folded)?",
+      "a": "efficientnet_lite0_int8_folded_npu_b8",
+      "b": "efficientnet_lite0_int8_folded_npu",
+      "top1_a": 0.628,
+      "top1_b": 0.6285,
+      "top1_delta": -0.0004999999999999449,
+      "top1_agreement": 0.995,
+      "counts": {
+        "both_correct": 6270,
+        "only_a_correct": 10,
+        "only_b_correct": 15,
+        "both_wrong": 3705
+      },
+      "p_value": 0.42435622215270996
+    },
+    {
       "name": "mobilenetv2: NPU INT8 vs CPU INT8",
       "question": "Does the NPU get the same accuracy as the CPU on the same INT8 file (external normalization)?",
       "a": "mobilenetv2_int8_npu",
@@ -337,6 +395,40 @@
       "p_value": 0.1795654296875
     },
     {
+      "name": "mobilenetv2: NPU INT8 b8 vs NPU INT8 b4",
+      "question": "Does batch 8, which the NPU computes differently from batch 1, change accuracy against batch 4, which it computes exactly like batch 1 (same INT8 variant, external normalization)?",
+      "a": "mobilenetv2_int8_npu_b8",
+      "b": "mobilenetv2_int8_npu",
+      "top1_a": 0.5914,
+      "top1_b": 0.5913,
+      "top1_delta": 9.999999999998899e-05,
+      "top1_agreement": 0.996,
+      "counts": {
+        "both_correct": 5906,
+        "only_a_correct": 8,
+        "only_b_correct": 7,
+        "both_wrong": 4079
+      },
+      "p_value": 1.0
+    },
+    {
+      "name": "mobilenetv2: NPU INT8 folded b8 vs NPU INT8 folded b4",
+      "question": "Does batch 8 change accuracy against batch 4 on the NPU (same INT8 variant, normalization folded)?",
+      "a": "mobilenetv2_int8_folded_npu_b8",
+      "b": "mobilenetv2_int8_folded_npu",
+      "top1_a": 0.5929,
+      "top1_b": 0.5933,
+      "top1_delta": -0.00040000000000006697,
+      "top1_agreement": 0.9948,
+      "counts": {
+        "both_correct": 5919,
+        "only_a_correct": 10,
+        "only_b_correct": 14,
+        "both_wrong": 4057
+      },
+      "p_value": 0.5412561893463135
+    },
+    {
       "name": "resnet18: NPU INT8 vs CPU INT8",
       "question": "Does the NPU get the same accuracy as the CPU on the same INT8 file (external normalization)?",
       "a": "resnet18_int8_npu",
@@ -452,6 +544,40 @@
         "only_a_correct": 3,
         "only_b_correct": 2,
         "both_wrong": 4269
+      },
+      "p_value": 1.0
+    },
+    {
+      "name": "resnet18: NPU INT8 b8 vs NPU INT8 b4",
+      "question": "Does batch 8, which the NPU computes differently from batch 1, change accuracy against batch 4, which it computes exactly like batch 1 (same INT8 variant, external normalization)?",
+      "a": "resnet18_int8_npu_b8",
+      "b": "resnet18_int8_npu",
+      "top1_a": 0.5714,
+      "top1_b": 0.5721,
+      "top1_delta": -0.0007000000000000339,
+      "top1_agreement": 0.9884,
+      "counts": {
+        "both_correct": 5690,
+        "only_a_correct": 24,
+        "only_b_correct": 31,
+        "both_wrong": 4255
+      },
+      "p_value": 0.41875418826901556
+    },
+    {
+      "name": "resnet18: NPU INT8 folded b8 vs NPU INT8 folded b4",
+      "question": "Does batch 8 change accuracy against batch 4 on the NPU (same INT8 variant, normalization folded)?",
+      "a": "resnet18_int8_folded_npu_b8",
+      "b": "resnet18_int8_folded_npu",
+      "top1_a": 0.5727,
+      "top1_b": 0.5727,
+      "top1_delta": 0.0,
+      "top1_agreement": 0.9901,
+      "counts": {
+        "both_correct": 5711,
+        "only_a_correct": 16,
+        "only_b_correct": 16,
+        "both_wrong": 4257
       },
       "p_value": 1.0
     }

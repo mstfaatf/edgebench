@@ -76,6 +76,8 @@ std::vector<ConfigError> validate(const RunConfig& c) {
             add("no-strict", only_npu + " (the CPU provider has no fallback to disable)");
         if (c.htp_performance_mode)
             add("htp-performance-mode", only_npu);
+        if (c.htp_graph_finalization_mode)
+            add("htp-graph-finalization-mode", only_npu);
         if (c.ep_cache != EpCacheMode::off)
             add("ep-cache", only_npu + " (the CPU provider has no EP context cache)");
         if (c.init_breakdown)
@@ -95,6 +97,12 @@ std::vector<ConfigError> validate(const RunConfig& c) {
     if (c.htp_performance_mode && !is_htp_performance_mode(*c.htp_performance_mode)) {
         add("htp-performance-mode", "unsupported mode '" + *c.htp_performance_mode +
                                         "'; supported modes: " + htp_performance_modes_list());
+    }
+    if (c.htp_graph_finalization_mode &&
+        !is_htp_graph_finalization_mode(*c.htp_graph_finalization_mode)) {
+        add("htp-graph-finalization-mode", "unsupported mode '" + *c.htp_graph_finalization_mode +
+                                               "'; supported modes: " +
+                                               htp_graph_finalization_modes_list());
     }
 
     if (c.label && c.label->empty())

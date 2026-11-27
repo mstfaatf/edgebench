@@ -6,7 +6,7 @@ reference. Never add illustrative examples or partial/experimental runs; those
 belong in `../local/`.
 
 `accuracy/` holds the accuracy results of every model variant on ImageNetV2
-(`scripts/eval_accuracy.py`; schema `schemas/accuracy-result.v1.0.0.schema.json`,
+(`scripts/eval_accuracy.py`; schema `schemas/accuracy-result.v1.1.0.schema.json`,
 checked by `scripts/validate_accuracy.py`; see [docs/accuracy.md](../../../docs/accuracy.md)).
 `accuracy/anomaly/` holds the anomaly-detection results of the Conv1D autoencoder on
 the NAB machine-temperature series (`scripts/eval_anomaly.py`; schema

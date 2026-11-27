@@ -79,13 +79,13 @@ def published():
 
 def test_published_results_validate(published):
     results = va.validate_directory(sorted(PUBLISHED.glob("*.json")))
-    assert len(results) == 22
+    assert len(results) == 28
     assert {str(p): i for p, i in results.items() if i} == {}
 
 
 def test_published_runs_cover_the_plan(published):
     runs = {k: v for k, v in published.items() if v["kind"] == "run"}
-    assert len(runs) == 21
+    assert len(runs) == 27
     manifest = {f.file: f for f in reg.read_manifest()[0]}
     eval_full_sha = hashlib.sha256(EVAL_FULL.read_bytes()).hexdigest()
     for run_id, r in runs.items():
@@ -104,9 +104,17 @@ def test_published_runs_cover_the_plan(published):
         elif ex["device"] == "npu":
             assert ex["compute_precision"] == "int8"
         if r["status"] == "success":
-            assert ex["batch_equivalence"]["identical_top5"] is True
+            be = ex["batch_equivalence"]
             batch = r["model"]["batch_size"]
-            assert ex["batch_equivalence"]["candidates"][f"b{batch}"] == "identical"
+            if run_id.endswith("_npu_b8"):
+                # Asked for batch 8, which the NPU computes differently from batch 1.
+                assert (be["batch_rule"], batch, be["identical_top5"]) == ("fixed", 8, False)
+                assert be["top5_differing"] > 0
+                assert be["candidates"] == {"b1": "identical", "b8": "differs"}
+            else:
+                assert be["batch_rule"] == "largest_identical"
+                assert be["identical_top5"] is True and be["top5_differing"] == 0
+                assert be["candidates"][f"b{batch}"] == "identical"
         pre = r["preprocessing"]
         assert pre["image_cache"]["bit_identical"] is True
         assert (pre["mean"] is None) == (r["model"]["normalization"] == "folded")
@@ -118,6 +126,20 @@ def test_published_comparisons_include_the_npu_cpu_question(published):
     for m in reg.MODELS:
         assert f"{m}: NPU INT8 vs CPU INT8" in names
         assert f"{m}: NPU INT8 folded vs CPU INT8 folded" in names
+
+
+def test_published_b8_runs_are_compared_with_b4_on_the_same_variant(published):
+    by_name = {c["name"]: c for c in published["comparisons"]["comparisons"]}
+    for m in reg.MODELS:
+        for variant, label in (("int8", "NPU INT8"), ("int8_folded", "NPU INT8 folded")):
+            c = by_name[f"{m}: {label} b8 vs {label} b4"]
+            assert (c["a"], c["b"]) == (f"{m}_{variant}_npu_b8", f"{m}_{variant}_npu")
+            a, b = published[c["a"]], published[c["b"]]
+            assert (a["model"]["batch_size"], b["model"]["batch_size"]) == (8, 4)
+            assert a["model"]["variant"] == b["model"]["variant"] == variant
+            assert a["execution"]["provider_options"] == b["execution"]["provider_options"]
+            # Batch 8 changes some top-1 predictions (a different computation).
+            assert c["top1_agreement"] < 1
 
 
 @pytest.mark.parametrize("change,message", [

@@ -758,18 +758,31 @@ were made on has changed:
 .\.venv\Scripts\python.exe scripts\make_references.py --batch-equivalence
 ```
 
-Each entry is keyed by the model file's SHA256, the provider (`cpu`, `npu`)
-and the compute precision (the stored precision on the CPU; `int8` or `fp16`
-on the NPU), and records `bitwise_equal_to_b1`, the items compared and
-differing, the largest absolute difference, and `predictions_equal_to_b1` with
-its basis and counts. `edgebench run` looks every model up there and records the
+Each entry is keyed by the model file's SHA256, the provider (`cpu`, `npu`),
+the compute precision (the stored precision on the CPU; `int8` or `fp16`
+on the NPU) and the compile-relevant EP options (`ep_compile_options`: `{}` for
+the EP defaults; every option except `backend_path`, `htp_performance_mode` and
+`enable_htp_fp16_precision`, which the compute precision already says), and
+records `bitwise_equal_to_b1`, the items compared and differing, the largest
+absolute difference, and `predictions_equal_to_b1` with its basis and counts.
+An entry is used only for runs with exactly its options: a run with options
+that no entry was measured with gets basis `not_available` and a
+`batch_equivalence_options_not_covered` note, never the default options'
+answer. The INT8 image files also have entries for
+`htp_graph_finalization_optimization_mode` `1` (reference device
+`npu_finalization1`), which also compare their outputs with the default
+options' (`vs_default_options`) and, at batch 4 and 8, carry an
+`eval_quick_confirmation`: every eval-quick image's full logits, batch N
+against batch 1. `edgebench run` looks every model up there and records the
 answer in its result (`execution.batch_equivalence`): a model whose predictions
 differ gets a `batch_not_equivalent` warning, one whose outputs differ only in
 their bits gets a `batch_rounding_only` note (see
 [cli.md](cli.md#batch-equivalence)). Why the NPU INT8 image models differ at
-batch 8 is explained in [npu.md](npu.md#batch-size-and-int8-outputs). The summary lists 132 entries (every model
+batch 8 is explained in [npu.md](npu.md#batch-size-and-int8-outputs). The summary lists 168 entries (every model
 file on each of its reference devices), 22 of them not bitwise equal, 14 with
-different predictions. Bitwise, by group ("same": every file of the group
+different predictions. With finalization mode 1, all 36 image INT8 files compute
+exactly their batch-1 outputs, at batch 4 and 8 on the reference images and on
+all 1,000 eval-quick images. Bitwise, by group ("same": every file of the group
 computes the batch-1 outputs exactly; "differs": none does):
 
 | Model | Variants | Provider, compute | b4 vs b1 | b8 vs b1 | Largest difference |
@@ -782,10 +795,13 @@ computes the batch-1 outputs exactly; "differs": none does):
 | `efficientnet_lite0` | FP32, FP32 folded | NPU, FP16 | same | same | 0 |
 | `mobilenetv2` | INT8 (all four) | CPU, INT8 | same | same | 0 |
 | `mobilenetv2` | INT8 (all four) | NPU, INT8 | same | differs | 0.059 |
+| `mobilenetv2` | INT8 (all four) | NPU, INT8, finalization mode 1 | same | same | 0 |
 | `resnet18` | INT8 (all four) | CPU, INT8 | same | same | 0 |
 | `resnet18` | INT8 (all four) | NPU, INT8 | same | differs | 0.17 |
+| `resnet18` | INT8 (all four) | NPU, INT8, finalization mode 1 | same | same | 0 |
 | `efficientnet_lite0` | INT8 (all four) | CPU, INT8 | same | same | 0 |
 | `efficientnet_lite0` | INT8 (all four) | NPU, INT8 | same | differs | 0.085 |
+| `efficientnet_lite0` | INT8 (all four) | NPU, INT8, finalization mode 1 | same | same | 0 |
 | `conv1d_autoencoder` | FP32 imported | CPU, FP32 | same | same | 0 |
 | `conv1d_autoencoder` | FP32 imported | NPU, FP16 | differs | differs | 0.0078 |
 | `conv1d_autoencoder` | FP32 | CPU, FP32 | same | same | 0 |

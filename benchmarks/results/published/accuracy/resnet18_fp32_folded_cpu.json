@@ -1,8 +1,8 @@
 {
-  "accuracy_schema_version": "1.0.0",
+  "accuracy_schema_version": "1.1.0",
   "kind": "run",
   "run_id": "resnet18_fp32_folded_cpu",
-  "timestamp_utc": "2026-11-24T23:52:30.760Z",
+  "timestamp_utc": "2026-11-27T15:14:16.208Z",
   "status": "success",
   "error": null,
   "model": {
@@ -25,7 +25,9 @@
     "batch_equivalence": {
       "split": "eval-quick",
       "reference_batch": 1,
+      "batch_rule": "largest_identical",
       "identical_top5": true,
+      "top5_differing": 0,
       "images": 1000,
       "candidates": {
         "b1": "identical",

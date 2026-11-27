@@ -140,6 +140,12 @@ def test_expected_devices_per_precision():
                                 None, None)
     assert ro.expected_devices(entry("int8")) == ["cpu", "npu"]
     assert ro.expected_devices(entry("fp32")) == ["cpu", "npu_fp16"]
+    # INT8 files of the image models also get the finalization-mode-1 device.
+    image = reg.ManifestFile("mobilenetv2/x.onnx", "0" * 64, 1, "mobilenetv2", "int8", "int8",
+                             "external", 1, True, "c" * 64)
+    assert ro.expected_devices(image) == ["cpu", "npu", "npu_finalization1"]
+    assert ro.NPU_DEVICE_OPTIONS["npu_finalization1"] == {
+        "htp_graph_finalization_optimization_mode": "1"}
 
 
 def test_changed_selection_is_found(tree):
@@ -283,6 +289,8 @@ def test_batch_equivalence_of_identical_items(tmp_path):
     b4 = entries["m/m_int8_b4.onnx"]
     assert (b4["bitwise_equal_to_b1"], b4["items_compared"], b4["items_differing"]) == (True, 4, 0)
     assert (b4["sha256"], b4["provider"], b4["compute_precision"]) == ("4" * 64, "cpu", "int8")
+    assert b4["ep_compile_options"] == {}  # the EP defaults
+    assert ro.entry_key(b4) == ("4" * 64, "cpu", "int8", "{}")
     # Bit-identical outputs make identical predictions: nothing to run.
     assert {k: b4[k] for k in ro.PREDICTION_KEYS} == ro.BITWISE_PREDICTIONS
 
@@ -299,11 +307,11 @@ def test_batch_equivalence_takes_prediction_comparisons_by_key(tmp_path):
     root, manifest, _ = batch_tree(tmp_path, [_floats(0.0), _floats(1.0), _floats(2.5), _floats(3.0)])
     found = {"predictions_equal_to_b1": False, "predictions_basis": "eval_quick_top1",
              "predictions_compared": 1000, "predictions_differing": 6}
-    doc = ro.batch_equivalence(manifest, root, {("4" * 64, "cpu", "int8"): found}, {"x": 1})
+    doc = ro.batch_equivalence(manifest, root, {("4" * 64, "cpu", "int8", "{}"): found}, {"x": 1})
     b4 = next(e for e in doc["entries"] if e["batch_size"] == 4)
     assert {k: b4[k] for k in ro.PREDICTION_KEYS} == found
     assert doc["prediction_inputs"] == {"x": 1}
-    assert ro.committed_predictions(doc) == {("4" * 64, "cpu", "int8"): found}
+    assert ro.committed_predictions(doc) == {("4" * 64, "cpu", "int8", "{}"): found}
 
 
 def test_batch_equivalence_problems_name_changed_entries(tmp_path):
@@ -327,12 +335,71 @@ def test_batch_equivalence_problems_need_a_prediction_comparison(tmp_path):
                for p in ro.batch_equivalence_problems(manifest, root, path))
     found = {"predictions_equal_to_b1": True, "predictions_basis": "eval_quick_top1",
              "predictions_compared": 1000, "predictions_differing": 0}
-    doc = ro.batch_equivalence(manifest, root, {("4" * 64, "cpu", "int8"): found}, {"x": 1})
+    doc = ro.batch_equivalence(manifest, root, {("4" * 64, "cpu", "int8", "{}"): found}, {"x": 1})
     path.write_text(ro.format_batch_equivalence(doc), encoding="utf-8")
     assert ro.batch_equivalence_problems(manifest, root, path, {"x": 1}) == []
     # A split manifest changed since the comparison was made.
     assert any("other inputs" in p
                for p in ro.batch_equivalence_problems(manifest, root, path, {"x": 2}))
+
+
+def finalization_tree(tmp_path, b4_default: list[bytes], b4_mode1: list[bytes]):
+    """batch_tree plus npu and npu_finalization1 records of a b1 and b4 image INT8 file."""
+    root = tmp_path / "references"
+    b1 = reg.ManifestFile("mobilenetv2/mobilenetv2_int8_b1.onnx", "1" * 64, 5, "mobilenetv2",
+                          "int8", "int8", "external", 1, True, "f" * 64)
+    b4 = reg.ManifestFile("mobilenetv2/mobilenetv2_int8_b4.onnx", "4" * 64, 5, "mobilenetv2",
+                          "int8", "int8", "external", 4, True, "e" * 64)
+    items = [_floats(float(i)) for i in range(4)]
+    for device, b4_items in (("cpu", items), ("npu", b4_default),
+                             ("npu_finalization1", b4_mode1)):
+        outputs = []
+        for run, item in enumerate(items):
+            out = f"outputs/mobilenetv2/mobilenetv2_int8_b1/{device}/images-x-{run}.f32"
+            write(root / out, item)
+            outputs.append({"input_set": "images-x", "run": run, "file": out, "shape": [1, 1]})
+        ro.write_json(ro.record_path(b1.file, device, root),
+                      {"model_sha256": b1.sha256, "outputs": outputs})
+        out = f"outputs/mobilenetv2/mobilenetv2_int8_b4/{device}/images-x-0.f32"
+        write(root / out, b"".join(b4_items))
+        ro.write_json(ro.record_path(b4.file, device, root), {
+            "model_sha256": b4.sha256,
+            "outputs": [{"input_set": "images-x", "run": 0, "file": out, "shape": [4, 1]}]})
+    return root, [b1, b4], items
+
+
+def test_finalization_entries_have_their_own_options_and_compare_with_the_defaults(tmp_path):
+    differ = [_floats(0.0), _floats(1.0), _floats(2.5), _floats(3.0)]
+    same = [_floats(float(i)) for i in range(4)]
+    root, manifest, _ = finalization_tree(tmp_path, differ, same)
+    doc = ro.batch_equivalence(manifest, root)
+    by = {(e["batch_size"], e["reference_device"]): e for e in doc["entries"]}
+    default, mode1 = by[(4, "npu")], by[(4, "npu_finalization1")]
+    assert default["ep_compile_options"] == {} and default["bitwise_equal_to_b1"] is False
+    assert mode1["ep_compile_options"] == {"htp_graph_finalization_optimization_mode": "1"}
+    assert mode1["bitwise_equal_to_b1"] is True
+    assert ro.entry_key(default) != ro.entry_key(mode1)
+    # Compared with the default-options outputs of the same file: item 2 differs.
+    assert mode1["vs_default_options"] == {"reference_device": "npu", "items_compared": 4,
+                                           "items_differing": 1, "max_abs_diff": 0.5}
+    assert "vs_default_options" not in default
+    # Batch-N entries of the confirmed device need an eval-quick confirmation.
+    assert mode1["eval_quick_confirmation"] is None
+    assert "eval_quick_confirmation" not in by[(1, "npu_finalization1")]
+    path = tmp_path / "batch_equivalence.json"
+    found = {"predictions_equal_to_b1": False, "predictions_basis": "eval_quick_top1",
+             "predictions_compared": 1000, "predictions_differing": 6}
+    preds = {ro.entry_key(default): found}
+    path.write_text(ro.format_batch_equivalence(ro.batch_equivalence(manifest, root, preds)),
+                    encoding="utf-8")
+    assert any("no eval-quick confirmation" in p
+               for p in ro.batch_equivalence_problems(manifest, root, path))
+    confirmation = {"basis": "eval_quick_top1", "compared": 1000, "outputs_differing": 0,
+                    "top1_differing": 0, "outputs_bitwise_equal_to_b1": True}
+    doc = ro.batch_equivalence(manifest, root, preds, confirmations={ro.entry_key(mode1): confirmation})
+    path.write_text(ro.format_batch_equivalence(doc), encoding="utf-8")
+    assert ro.batch_equivalence_problems(manifest, root, path) == []
+    assert ro.committed_confirmations(doc) == {ro.entry_key(mode1): confirmation}
 
 
 def test_npu_compute_precision_per_reference_device():
@@ -351,7 +418,8 @@ def test_committed_batch_equivalence_matches_the_manifest():
         f = manifest[e["file"]]
         assert e["sha256"] == f.sha256 and e["batch_size"] == f.batch_size, e["file"]
         assert e["b1_sha256"] == manifest[e["b1_file"]].sha256
-        key = (e["sha256"], e["provider"], e["compute_precision"])
+        key = ro.entry_key(e)
+        assert e["ep_compile_options"] == ro.DEVICE_COMPILE_OPTIONS.get(e["reference_device"], {})
         assert key not in keys
         keys.add(key)
         if e["batch_size"] == 1:
@@ -364,7 +432,18 @@ def test_committed_batch_equivalence_matches_the_manifest():
                                               else "eval_quick_top1"), e["file"]
             assert e["predictions_equal_to_b1"] == (e["predictions_differing"] == 0)
             assert 0 <= e["predictions_differing"] <= e["predictions_compared"]
+        if e["reference_device"] in ro.CONFIRMED_DEVICES and e["batch_size"] > 1:
+            c = e["eval_quick_confirmation"]
+            assert c["compared"] == 1000 and c["outputs_bitwise_equal_to_b1"] == (
+                c["outputs_differing"] == 0), e["file"]
     assert len(keys) == sum(len(ro.expected_devices(f)) for f in manifest.values())
+    # Finalization mode 1 makes every image INT8 file at batch 4 and 8 compute exactly
+    # batch 1's outputs, on the references and on all of eval-quick.
+    mode1 = [e for e in doc["entries"] if e["reference_device"] == "npu_finalization1"]
+    assert len(mode1) == 36
+    assert all(e["bitwise_equal_to_b1"] for e in mode1)
+    assert all(e["eval_quick_confirmation"]["outputs_differing"] == 0
+               for e in mode1 if e["batch_size"] > 1)
     assert ro.BATCH_EQUIVALENCE_JSON.stat().st_size < 1 << 20
 
 

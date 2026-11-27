@@ -9,14 +9,19 @@
 // windows, and for the files that differ compares their predictions with batch
 // 1's (top-1 on ImageNetV2 eval-quick, or anomaly flags on the autoencoder's
 // test split); it writes models/batch_equivalence.json. The engine looks the
-// model up there by its SHA256, the provider ("cpu" or "npu") and the compute
-// precision. A file that is not listed gets basis "not_available".
+// model up there by its SHA256, the provider ("cpu" or "npu"), the compute
+// precision and the compile-relevant EP options of the run
+// (compile_relevant_ep_options(): empty for the EP defaults). An entry is only
+// used for exactly the options it was measured with: a run with options no
+// entry was made with gets basis "not_available", never the facts of the
+// default options. A file that is not listed gets basis "not_available" too.
 #pragma once
 
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -25,7 +30,7 @@ namespace edgebench {
 
 inline constexpr std::string_view kBatchEquivalenceFileName = "batch_equivalence.json";
 
-inline constexpr std::string_view kBatchEquivalenceVersion = "1.1.0";
+inline constexpr std::string_view kBatchEquivalenceVersion = "1.2.0";
 
 struct BatchEquivalence {
     std::optional<bool> bitwise_equal_to_b1;  // null: not available
@@ -37,6 +42,9 @@ struct BatchEquivalence {
     std::optional<std::int64_t> predictions_compared;   // images or windows compared
     std::optional<std::int64_t> predictions_differing;  // of those, predictions that differ
     std::string reason;                                 // why it is not available (for a warning)
+    /// Not available only because no entry was made with the run's compile-relevant
+    /// EP options, although the file is listed with other options.
+    bool options_not_covered = false;
 
     /// The outputs differ from batch 1 in their bits but no prediction changes.
     bool rounding_only() const {
@@ -50,13 +58,18 @@ struct BatchEquivalence {
 std::optional<std::filesystem::path> find_batch_equivalence_file(
     const std::filesystem::path& model);
 
+/// Provider options that can change the compiled graph (compile_relevant_ep_options()).
+using EpCompileOptions = std::map<std::string, std::string>;
+
 /// Looks up one model file in a parsed summary. Pure. Batch size 1 is equal by
-/// definition (basis batch_size_1) and needs no entry. A summary of another
+/// definition (basis batch_size_1) and needs no entry. An entry matches only if
+/// its ep_compile_options equal `compile_options` exactly. A summary of another
 /// version, or an entry whose batch size differs from `batch_size` or whose fields
 /// are inconsistent, gives not_available with the reason.
 BatchEquivalence batch_equivalence_from(const nlohmann::json& summary, std::string_view sha256,
                                         std::string_view provider,
                                         std::string_view compute_precision,
+                                        const EpCompileOptions& compile_options,
                                         std::int64_t batch_size);
 
 /// find_batch_equivalence_file() + batch_equivalence_from(). A missing or
@@ -64,6 +77,10 @@ BatchEquivalence batch_equivalence_from(const nlohmann::json& summary, std::stri
 BatchEquivalence lookup_batch_equivalence(const std::filesystem::path& model,
                                           std::string_view sha256, std::string_view provider,
                                           std::string_view compute_precision,
+                                          const EpCompileOptions& compile_options,
                                           std::int64_t batch_size);
+
+/// "key=value, key=value" of `options`, or "the EP defaults" if empty.
+std::string describe_compile_options(const EpCompileOptions& options);
 
 }  // namespace edgebench

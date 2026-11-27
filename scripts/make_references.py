@@ -213,14 +213,15 @@ def generate(npu: bool) -> int:
                         "session.intra_op.allow_spinning": "1"},
             "outputs": outputs})
         line = f"{entry.file}: cpu {len(outputs)} runs"
-        device = ro.NPU_DEVICES.get(entry.precision)
-        if npu and device:
+        for device in (ro.expected_devices(entry)[1:] if npu else []):
             fp16 = device == "npu_fp16"
+            extra = {k: v for k, v in ro.NPU_DEVICE_OPTIONS[device].items()
+                     if k != "enable_htp_fp16_precision"}
             try:
-                session = oq.npu_session(path, fp16=fp16)
+                session = oq.npu_session(path, fp16=fp16, extra_options=extra)
             except Exception as exc:  # noqa: BLE001 - reported, the run fails at the end
                 failures += 1
-                print(f"{entry.file}: NPU strict session failed: {str(exc)[:300]}",
+                print(f"{entry.file}: NPU strict session ({device}) failed: {str(exc)[:300]}",
                       file=sys.stderr)
                 continue
             outputs_npu, identical = run_all(session, entry, recipe, device, repeat=True)
@@ -243,9 +244,7 @@ def generate(npu: bool) -> int:
                 agreement = {"images_top1_agreement_with_cpu": f"{agree}/{len(cpu_top1)}"}
                 said = f"image top-1 vs cpu {agree}/{len(cpu_top1)}"
             provider_options = {"backend_path": "<onnxruntime_qnn>/QnnHtp.dll",
-                                "htp_performance_mode": "burst"}
-            if fp16:
-                provider_options["enable_htp_fp16_precision"] = "1"
+                                "htp_performance_mode": "burst", **ro.NPU_DEVICE_OPTIONS[device]}
             ro.write_json(ro.record_path(entry.file, device, tmp), {
                 **common, "device": device, "execution_provider": "QNNExecutionProvider",
                 "strict": True, "session": {"session.disable_cpu_ep_fallback": "1"},
@@ -294,7 +293,9 @@ def reference_session(path: Path, device: str):
         return cpu_session(path)
     from common import onnx_quantize as oq
 
-    return oq.npu_session(path, fp16=device == "npu_fp16")
+    extra = {k: v for k, v in ro.NPU_DEVICE_OPTIONS[device].items()
+             if k != "enable_htp_fp16_precision"}
+    return oq.npu_session(path, fp16=device == "npu_fp16", extra_options=extra)
 
 
 def write_batch_equivalence() -> int:
@@ -307,14 +308,25 @@ def write_batch_equivalence() -> int:
     print(f"comparing predictions with batch 1 for {len(differ)} file(s) whose outputs are not "
           "bitwise equal")
     predictions = bp.compute(differ, reference_session)
-    doc = ro.batch_equivalence(files, predictions=predictions, prediction_inputs=bp.basis_inputs())
+    confirm = [e for e in bitwise["entries"]
+               if e["reference_device"] in ro.CONFIRMED_DEVICES and e["batch_size"] > 1]
+    print(f"confirming {len(confirm)} entries of devices {', '.join(ro.CONFIRMED_DEVICES)} on "
+          "all of eval-quick")
+    confirmations = bp.confirm(confirm, reference_session)
+    doc = ro.batch_equivalence(files, predictions=predictions, prediction_inputs=bp.basis_inputs(),
+                               confirmations=confirmations)
     ro.BATCH_EQUIVALENCE_JSON.write_text(ro.format_batch_equivalence(doc), encoding="utf-8",
                                          newline="\n")
     changed = [e for e in doc["entries"] if e["predictions_equal_to_b1"] is False]
+    unconfirmed = [e["file"] for e in doc["entries"]
+                   if e.get("eval_quick_confirmation") is not None
+                   and not e["eval_quick_confirmation"]["outputs_bitwise_equal_to_b1"]]
+    for f in unconfirmed:
+        print(f"  NOTE: {f}: eval-quick outputs are not all bitwise equal to batch 1")
     print(f"wrote {ro.BATCH_EQUIVALENCE_JSON.name}: {len(doc['entries'])} entries, "
           f"{len(differ)} not bitwise equal to batch 1, {len(changed)} with different predictions")
     for e in differ:
-        print(f"  {e['file']} ({e['provider']}, {e['compute_precision']}): max abs diff "
+        print(f"  {e['file']} ({e['reference_device']}): max abs diff "
               f"{e['max_abs_diff']:.2g}; predictions "
               + next(f"{x['predictions_differing']} of {x['predictions_compared']} differ"
                      for x in doc["entries"] if ro.entry_key(x) == ro.entry_key(e)))

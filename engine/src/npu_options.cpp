@@ -22,6 +22,32 @@ std::string htp_performance_modes_list() {
     return out;
 }
 
+bool is_htp_graph_finalization_mode(std::string_view mode) {
+    return std::find(kHtpGraphFinalizationModes.begin(), kHtpGraphFinalizationModes.end(),
+                     mode) != kHtpGraphFinalizationModes.end();
+}
+
+std::string htp_graph_finalization_modes_list() {
+    std::string out;
+    for (std::string_view mode : kHtpGraphFinalizationModes) {
+        if (!out.empty())
+            out += ", ";
+        out += mode;
+    }
+    return out;
+}
+
+std::map<std::string, std::string> compile_relevant_ep_options(
+    const std::map<std::string, std::string>& ep_options) {
+    std::map<std::string, std::string> out;
+    for (const auto& [key, value] : ep_options) {
+        if (key != "backend_path" && key != "htp_performance_mode" &&
+            key != "enable_htp_fp16_precision")
+            out.emplace(key, value);
+    }
+    return out;
+}
+
 std::string effective_htp_performance_mode(const RunConfig& config) {
     return config.htp_performance_mode.value_or(std::string(kDefaultHtpPerformanceMode));
 }
@@ -34,6 +60,8 @@ std::map<std::string, std::string> qnn_ep_options(const RunConfig& config,
     };
     if (config.npu_fp16)
         options["enable_htp_fp16_precision"] = "1";
+    if (config.htp_graph_finalization_mode)
+        options[std::string(kHtpGraphFinalizationOption)] = *config.htp_graph_finalization_mode;
     return options;
 }
 

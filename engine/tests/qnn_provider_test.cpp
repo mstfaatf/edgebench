@@ -205,6 +205,59 @@ TEST_F(QnnProviderNpu, StrictRunIsAllOnQnnAndRecordsWhatWasPassed) {
     write_and_validate(r, out);
 }
 
+// Batch equivalence depends on the compile-relevant EP options: the image INT8
+// MobileNetV2 at batch 8 computes other outputs than at batch 1 with the default
+// graph finalization (batch_not_equivalent), the same outputs with
+// --htp-graph-finalization-mode 1, and with a mode no entry was made for the
+// default-mode answer is not reused (not available, with a note).
+TEST_F(QnnProviderNpu, BatchEquivalenceFollowsTheGraphFinalizationMode) {
+    const fs::path model = fs::path(EDGEBENCH_SOURCE_DIR).make_preferred() / "models" /
+                           "mobilenetv2" / "mobilenetv2_int8_b8.onnx";
+    if (!fs::is_regular_file(model))
+        GTEST_SKIP() << model.string() << " is not present (see docs/models.md)";
+    const auto has_note = [](const eb::BenchmarkResult& r, const std::string& code) {
+        return std::any_of(r.notes.begin(), r.notes.end(),
+                           [&code](const eb::ResultWarning& n) { return n.code == code; });
+    };
+    for (const char* mode : {"", "1", "2"}) {
+        SCOPED_TRACE(std::string("finalization mode '") + mode + "'");
+        eb::RunConfig c = npu_config(model);
+        c.npu_fp16 = false;
+        c.trials = 1;
+        if (*mode)
+            c.htp_graph_finalization_mode = mode;
+        const eb::BenchmarkResult r = eb::run_benchmark(shared_runtime(), c);
+        ASSERT_FALSE(r.failure) << r.failure->error.kind << ": " << r.failure->error.message;
+        const auto& options = r.runtime.provider.ep_options;
+        EXPECT_EQ(options.contains("htp_graph_finalization_optimization_mode"), *mode != 0);
+        if (*mode)
+            EXPECT_EQ(options.at("htp_graph_finalization_optimization_mode"), mode);
+        ASSERT_TRUE(r.batch_equivalence);
+        const eb::BatchEquivalence& be = *r.batch_equivalence;
+        const std::string m = mode;
+        if (m.empty()) {
+            EXPECT_EQ(be.bitwise_equal_to_b1, false) << be.reason;
+            EXPECT_EQ(be.predictions_equal_to_b1, false);
+            EXPECT_TRUE(has_warning(r, "batch_not_equivalent"));
+        } else if (m == "1") {
+            EXPECT_EQ(be.bitwise_basis, "reference_outputs") << be.reason;
+            EXPECT_EQ(be.bitwise_equal_to_b1, true);
+            EXPECT_EQ(be.predictions_equal_to_b1, true);
+            EXPECT_EQ(be.predictions_basis, "bitwise");
+            EXPECT_FALSE(has_warning(r, "batch_not_equivalent"));
+            EXPECT_FALSE(has_note(r, "batch_equivalence_options_not_covered"));
+        } else {
+            EXPECT_EQ(be.bitwise_basis, "not_available");
+            EXPECT_FALSE(be.predictions_equal_to_b1);
+            EXPECT_TRUE(be.options_not_covered) << be.reason;
+            EXPECT_FALSE(has_warning(r, "batch_not_equivalent"));
+            EXPECT_TRUE(has_note(r, "batch_equivalence_options_not_covered"));
+        }
+        TempDir out;
+        write_and_validate(r, out);
+    }
+}
+
 TEST_F(QnnProviderNpu, WithoutStrictModeUnsupportedNodesRunOnTheCpuWithAWarning) {
     eb::RunConfig c = npu_config(kUnsupported);
     c.strict = false;
