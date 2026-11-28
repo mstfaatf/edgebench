@@ -1,0 +1,6 @@
+{
+  "description": "An aggregate spike count that is not the sum of the trials' counts.",
+  "base": "docs/examples/v1.2.0/example-cpu-fp32.json",
+  "set": {"/timing/aggregate/spikes/count": 99},
+  "expect": {"severity": "error", "code": "spikes_mismatch", "path": "/timing/aggregate/spikes/count"}
+}

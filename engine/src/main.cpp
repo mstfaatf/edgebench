@@ -159,6 +159,12 @@ int run_command(const eb::RunConfig& config) {
                               "--output-dir " + eb::path_to_utf8(fs::absolute(config.output_dir)) +
                                   " is an existing file, not a directory"});
     }
+    if (config.process_priority == eb::ProcessPriority::high &&
+        !SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS)) {
+        return fail(eb::Error{eb::ExitCode::internal_error, "process_priority_failed",
+                              "cannot set the process priority class to high (Windows error " +
+                                  std::to_string(GetLastError()) + ")"});
+    }
     // A benchmark stops gracefully on Ctrl+C and writes a partial result; a dry
     // run has nothing to save.
     eb::install_interrupt_handler(config.dry_run ? eb::InterruptMode::exit_immediately

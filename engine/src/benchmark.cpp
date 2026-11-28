@@ -1195,6 +1195,20 @@ void finish_result(BenchmarkResult& r) {
         t.aggregate =
             AggregateResult{compute_stats(pooled, r.batch_size), compute_trial_variation(means),
                             compute_trial_variation(medians)};
+        std::vector<std::vector<double>> latencies;
+        for (const TrialResult& trial : t.trials)
+            latencies.push_back(trial.latencies_ms);
+        if (const SpikeStats s = combine_spikes(latencies); spikes_high(s)) {
+            char text[320];
+            std::snprintf(text, sizeof(text),
+                          "%zu of %zu measured iterations (%.1f%%) are spikes (over %.1fx their "
+                          "trial's median and %.2f ms above it); they move the mean by %+.1f%%. "
+                          "Medians and percentiles are unaffected; every sample is kept.",
+                          s.count, s.iterations, 100.0 * s.rate, kSpikeFactor, kSpikeFloorMs,
+                          100.0 * s.mean_shift_ratio);
+            r.warnings.push_back(
+                {"latency_spikes_high", text, std::string("/timing/aggregate/spikes")});
+        }
         if (const TrialVariation& v = t.aggregate->trial_spread; trial_spread_high(v)) {
             r.warnings.push_back(
                 {"trial_spread_high",

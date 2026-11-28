@@ -114,9 +114,76 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "checks": {"type": "array", "uniqueItems": true, "items": {"enum": ["doctor"]}, "default": ["doctor"]},
-        "fail_on_warn": {"type": "boolean", "default": false}
+        "checks": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["power", "sleep", "npu_users", "idle", "doctor", "sustained_load"]},
+          "default": ["power", "sleep", "npu_users", "idle", "doctor", "sustained_load"],
+          "description": "The checks to run, in this order. A suite is publishable only if every one of the default list ran and passed."
+        },
+        "fail_on_warn": {"type": "boolean", "default": false},
+        "idle": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "window_s": {"type": "number", "minimum": 1, "maximum": 3600, "default": 30},
+            "max_cpu_ratio": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.05}
+          }
+        },
+        "sleep": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"margin_s": {"type": "number", "minimum": 0, "maximum": 86400, "default": 1800}}
+        },
+        "sustained_load": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "window_s": {"type": "number", "minimum": 1, "maximum": 3600, "default": 30},
+            "max_drift_ratio": {"type": "number", "minimum": 0, "maximum": 10, "default": 0.05},
+            "legs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["provider", "precision", "duration_s"],
+                "oneOf": [{"required": ["model"]}, {"required": ["path"]}],
+                "properties": {
+                  "model": {"$ref": "#/$defs/name"},
+                  "path": {"type": "string", "minLength": 1},
+                  "provider": {"$ref": "#/$defs/provider"},
+                  "precision": {"$ref": "#/$defs/precision"},
+                  "batch": {"$ref": "#/$defs/batch"},
+                  "variant": {"type": "string", "minLength": 1},
+                  "npu_fp16": {"type": "boolean"},
+                  "htp_performance_mode": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/htpPerformanceMode"}]},
+                  "duration_s": {"type": "number", "minimum": 10, "maximum": 7200}
+                }
+              },
+              "description": "Default: ResNet-18 FP32 on the CPU for 180 s, then ResNet-18 INT8 on the NPU for 120 s."
+            }
+          }
+        }
       }
+    },
+    "in_flight": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "load_sample_s": {"type": "number", "minimum": 0.5, "maximum": 600, "default": 5},
+        "max_wait_s": {"type": "number", "minimum": 0, "maximum": 86400, "default": 600},
+        "power_max_wait_s": {"type": "number", "minimum": 0, "maximum": 86400, "default": 600},
+        "on_gate_loss": {"enum": ["wait", "stop"], "default": "wait"}
+      },
+      "description": "The check before every run (when the gate includes power and idle)."
+    },
+    "retry_flagged": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5,
+      "default": 1,
+      "description": "How many times a run whose result is flagged for background load or trial spread runs again after the main pass."
     }
   },
   "$defs": {
@@ -171,6 +238,7 @@
         "init_breakdown": {"type": "boolean"},
         "profile_accelerator": {"type": "boolean"},
         "profile_iterations": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "process_priority": {"enum": ["normal", "high"], "description": "`run --process-priority` (default normal)."},
         "cooldown_s": {"$ref": "#/$defs/cooldown"}
       }
     },
@@ -207,7 +275,7 @@
           "model", "provider", "precision", "batch", "variant", "npu_fp16", "htp_performance_mode",
           "htp_graph_finalization_mode", "strict", "warmup", "iterations", "trials", "trial_cooldown_ms",
           "load_sample_ms", "threads", "binding", "init", "init_breakdown", "profile_accelerator",
-          "profile_iterations", "cooldown_s"
+          "profile_iterations", "cooldown_s", "process_priority"
         ]
       },
       "properties": {
@@ -222,6 +290,7 @@
         "init_breakdown": {"$ref": "#/$defs/runParams/properties/init_breakdown"},
         "profile_accelerator": {"$ref": "#/$defs/runParams/properties/profile_accelerator"},
         "profile_iterations": {"$ref": "#/$defs/runParams/properties/profile_iterations"},
+        "process_priority": {"$ref": "#/$defs/runParams/properties/process_priority"},
         "cooldown_s": {"$ref": "#/$defs/cooldown"}
       }
     }

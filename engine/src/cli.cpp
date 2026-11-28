@@ -61,7 +61,7 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
     std::string model, provider = "cpu", binding = "iobinding", input = "random", graph = "all";
     std::string label, name, format = "summary", output_dir = defaults.output_dir.string();
     std::string htp_mode(kDefaultHtpPerformanceMode), finalization_mode;
-    std::string ep_cache = "off", ep_cache_dir;
+    std::string ep_cache = "off", ep_cache_dir, priority = "normal";
     int profile_iterations = kDefaultProfileIterations;
     bool no_strict = false;
     std::uint64_t seed = 0;
@@ -81,6 +81,12 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
                     "run: Session::Run per call; iobinding: IoBinding with buffers allocated once")
         ->type_name("MODE")
         ->check(choice(parse_binding, "run, iobinding", "binding"))
+        ->capture_default_str();
+    run->add_option("--process-priority", priority,
+                    "Windows priority class of the run: normal, or high (opt-in; fewer latency "
+                    "spikes on a loaded machine); always recorded")
+        ->type_name("CLASS")
+        ->check(choice(parse_process_priority, "normal, high", "process priority"))
         ->capture_default_str();
     run->add_option("--warmup", cfg.warmup,
                     "Unmeasured iterations before each trial" + range(0, kMaxWarmup))
@@ -191,6 +197,12 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
         run->add_option("--suite-cooldown-s-before", link.cooldown_s_before)->group("");
     CLI::Option* suite_skipped_opt =
         run->add_flag("--suite-preflight-skipped", link.preflight_skipped)->group("");
+    CLI::Option* suite_attempt_opt = run->add_option("--suite-attempt", link.attempt)->group("");
+    CLI::Option* suite_wait_opt =
+        run->add_option("--suite-in-flight-wait-s", link.in_flight_wait_s)->group("");
+    CLI::Option* suite_gate_opt = run->add_flag("--suite-gate-passed", link.gate_passed)->group("");
+    CLI::Option* suite_publishable_opt =
+        run->add_flag("--suite-publishable", link.publishable)->group("");
 
     // ---------------------------------------------------------------- doctor
     CLI::App* doctor = app.add_subcommand(
@@ -290,6 +302,7 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
         cfg.model = std::filesystem::path(std::u8string(model.begin(), model.end()));
         cfg.provider = *parse_provider(provider);
         cfg.binding = *parse_binding(binding);
+        cfg.process_priority = *parse_process_priority(priority);
         cfg.input = *parse_input_kind(input);
         cfg.graph_opt = *parse_graph_opt(graph);
         if (seed_opt->count() > 0)
@@ -315,19 +328,23 @@ ParseResult parse_command_line(const std::vector<std::string>& args) {
             cfg.profile_iterations = profile_iterations;
         const std::size_t suite_given = suite_name_opt->count() + suite_hash_opt->count() +
                                         suite_run_opt->count() + suite_rep_opt->count() +
-                                        suite_order_opt->count() + suite_cooldown_opt->count();
-        if (suite_given > 0 && suite_given != 6) {
+                                        suite_order_opt->count() + suite_cooldown_opt->count() +
+                                        suite_attempt_opt->count() + suite_wait_opt->count();
+        if (suite_given > 0 && suite_given != 8) {
             result.err = format_error(
                 "usage_error",
                 "--suite-name, --suite-config-hash, --suite-run-id, --suite-repetition, "
-                "--suite-order-index and --suite-cooldown-s-before go together",
+                "--suite-order-index, --suite-cooldown-s-before, --suite-attempt and "
+                "--suite-in-flight-wait-s go together",
                 "They are set by 'edgebench suite'.");
             result.exit = ExitCode::usage_error;
             return result;
         }
-        if (suite_given == 0 && suite_skipped_opt->count() > 0) {
+        if (suite_given == 0 && (suite_skipped_opt->count() + suite_gate_opt->count() +
+                                 suite_publishable_opt->count()) > 0) {
             result.err = format_error("usage_error",
-                                      "--suite-preflight-skipped needs the other --suite options",
+                                      "--suite-preflight-skipped, --suite-gate-passed and "
+                                      "--suite-publishable need the other --suite options",
                                       "They are set by 'edgebench suite'.");
             result.exit = ExitCode::usage_error;
             return result;

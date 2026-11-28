@@ -25,7 +25,7 @@ EXAMPLE_MANIFEST = REPO / "docs" / "examples" / "suite" / "example-suite-manifes
 CONFIGS = sorted((REPO / "benchmarks" / "configs").glob("*.json"))
 
 # The canonical hash of valid/explicit_cpu.json; the engine's test pins the same value.
-EXPLICIT_CPU_HASH = "3234ed5a4fe45e164cf6e0e42aced9fc3b0eb382a1321afe8918062cbc04f571"
+EXPLICIT_CPU_HASH = "ec3a3527ee0872df1e2872db3b511d64a8fe3ef221395162dff32ff4ddf2a5bb"
 
 
 def load(path: Path):
@@ -139,3 +139,51 @@ def test_result_files_are_checked_when_present(tmp_path):
     doc = manifest()
     issues = vs.manifest_issues(doc, tmp_path)  # no result files next to the copy
     assert any("does not exist" in i for i in issues)
+
+
+def test_gate_passed_follows_the_latest_preflight():
+    def change(m):
+        m["gate_passed"] = not m["gate_passed"]
+    assert any("/gate_passed" in i for i in tampered(change))
+
+
+def test_a_lost_gate_is_not_publishable():
+    def change(m):
+        for c in m["preflight"][-1]["checks"]:
+            c["status"] = "pass"
+        names = {c["name"] for c in m["preflight"][-1]["checks"]}
+        for name in vs.GATE_CHECKS:
+            if name not in names:
+                m["preflight"][-1]["checks"].append(
+                    {"name": name, "status": "pass", "summary": "", "details": {}})
+        m["gate_passed"] = True
+        m["gate_lost"] = "not on AC power"
+        m["publishable"] = True
+        m["not_publishable_reasons"] = []
+    assert any("/publishable" in i for i in tampered(change))
+
+
+def test_retries_need_a_history():
+    def change(m):
+        m["runs"][0]["retries"] = 1
+    assert any("/retries" in i for i in tampered(change))
+
+
+@pytest.mark.parametrize("bad", [
+    {"preflight": {"checks": ["thermals"]}},
+    {"preflight": {"idle": {"max_cpu_ratio": 2}}},
+    {"preflight": {"sustained_load": {"legs": [{"provider": "cpu", "precision": "fp32", "duration_s": 60}]}}},
+    {"in_flight": {"on_gate_loss": "ignore"}},
+    {"retry_flagged": 9},
+])
+def test_gate_settings_outside_the_schema_are_rejected(bad):
+    doc = load(FIXTURES / "valid" / "explicit_cpu.json")
+    doc.update(bad)
+    assert vs.schema_issues(doc, "suite-config", "1.0.0")
+
+
+def test_the_default_gate_is_the_engines():
+    schema = json.loads((REPO / "schemas" / "suite-config.v1.0.0.schema.json").read_text(encoding="utf-8"))
+    checks = schema["properties"]["preflight"]["properties"]["checks"]
+    assert tuple(checks["default"]) == vs.GATE_CHECKS
+    assert tuple(checks["items"]["enum"]) == vs.GATE_CHECKS

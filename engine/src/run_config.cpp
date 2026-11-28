@@ -123,6 +123,12 @@ std::vector<ConfigError> validate(const RunConfig& c) {
             add("suite-order-index", "must not be negative");
         if (!std::isfinite(c.suite->cooldown_s_before) || c.suite->cooldown_s_before < 0)
             add("suite-cooldown-s-before", "must be a non-negative number");
+        if (c.suite->attempt < 1)
+            add("suite-attempt", "must be at least 1");
+        if (!std::isfinite(c.suite->in_flight_wait_s) || c.suite->in_flight_wait_s < 0)
+            add("suite-in-flight-wait-s", "must be a non-negative number");
+        if (c.suite->publishable && (!c.suite->gate_passed || c.suite->preflight_skipped))
+            add("suite-publishable", "needs a passed gate that was not skipped");
         if (c.dry_run)
             add("suite-name", "is not used with --dry-run");
     }
@@ -172,6 +178,18 @@ std::optional<OutputFormat> parse_output_format(std::string_view text) {
     if (text == "json")
         return OutputFormat::json;
     return std::nullopt;
+}
+
+std::optional<ProcessPriority> parse_process_priority(std::string_view text) {
+    if (text == "normal")
+        return ProcessPriority::normal;
+    if (text == "high")
+        return ProcessPriority::high;
+    return std::nullopt;
+}
+
+std::string_view to_string(ProcessPriority priority) {
+    return priority == ProcessPriority::high ? "high" : "normal";
 }
 
 std::optional<EpCacheMode> parse_ep_cache_mode(std::string_view text) {
@@ -317,6 +335,7 @@ nlohmann::ordered_json resolved_config_json(const RunConfig& c) {
                                                                     {"key", nullptr}}
                                                              : json(nullptr)},
         {"run_binding", schema_name(c.binding)},
+        {"process_priority", to_string(c.process_priority)},
         {"profiling", {{"ort", false}, {"qnn_level", "off"}}},
     };
     return {

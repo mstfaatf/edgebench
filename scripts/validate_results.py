@@ -376,6 +376,10 @@ V1_2_RULES = {
     "preflight_skipped_unflagged": ERROR,
     "preflight_skipped_unfounded": ERROR,
     "result_not_publishable": WARNING,
+    "suite_publishable_inconsistent": ERROR,
+    "spikes_mismatch": ERROR,
+    "spikes_unflagged": ERROR,
+    "spikes_unfounded": ERROR,
     "missing_1_2_0_key": WARNING,
 }
 
@@ -388,6 +392,14 @@ TRIAL_SPREAD_WARNING = "trial_spread_high"
 TRIAL_SPREAD_STATISTIC = "trial_p50"
 TRIAL_SPREAD_CV = 0.10
 TRIAL_SPREAD_RATIO = 1.25
+
+# Latency spikes (engine stats.hpp): an iteration above max(factor x its trial's median,
+# median + floor) is a spike; latency_spikes_high when they move the mean or are frequent.
+SPIKES_WARNING = "latency_spikes_high"
+SPIKE_FACTOR = 2.0
+SPIKE_FLOOR_MS = 0.25
+SPIKE_MEAN_SHIFT = 0.05
+SPIKE_RATE = 0.02
 
 BATCH_NOT_EQUIVALENT_WARNING = "batch_not_equivalent"
 ACCELERATOR_EXCEEDS_LATENCY_WARNING = "accelerator_time_exceeds_latency"
@@ -840,14 +852,146 @@ def v1_2_issues(doc: dict[str, Any]) -> list[Issue]:
         report("/suite/preflight_skipped", "a result of a suite that skipped its pre-flight check "
                                            f"needs a '{PREFLIGHT_SKIPPED_WARNING}' warning",
                "preflight_skipped_unflagged")
-    if suite is not None and suite["preflight_skipped"] and skipped_warning:
+    if suite is not None and suite["publishable"] and (suite["preflight_skipped"]
+                                                       or not suite["gate_passed"]):
+        report("/suite/publishable", "a publishable result needs a passed pre-flight gate that "
+                                     "was not skipped", "suite_publishable_inconsistent")
+    elif suite is not None and not suite["publishable"] and (
+            skipped_warning or not suite["preflight_skipped"]):
         # Valid, but --strict (how published results are checked) must reject it.
-        report("/suite/preflight_skipped", "the suite skipped its pre-flight check: the result "
-                                           "is not publishable", "result_not_publishable")
+        report("/suite/publishable", "the suite was not publishable when this run started "
+                                     "(gate not passed, skipped, a dirty build or a lost gate)",
+               "result_not_publishable")
     if skipped_warning and (suite is None or not suite["preflight_skipped"]):
         report("/suite/preflight_skipped", f"a '{PREFLIGHT_SKIPPED_WARNING}' warning requires "
                                            "suite.preflight_skipped to be true",
                "preflight_skipped_unfounded")
+    return issues
+
+
+def spike_values(latencies: list[float]) -> dict[str, Any]:
+    """The spike fields of one trial (as the engine computes them: sums over sorted values)."""
+    values = sorted(latencies)
+    n = len(values)
+    median = values[max(1, -(-50 * n // 100)) - 1]
+    threshold = max(SPIKE_FACTOR * median, median + SPIKE_FLOOR_MS)
+    total = without = 0.0
+    count = 0
+    for x in values:
+        total += x
+        if x > threshold:
+            count += 1
+        else:
+            without += x
+    return {"iterations": n, "threshold_ms": threshold, "count": count, "sum": total,
+            "sum_without": without, "max_ratio": values[-1] / median if median > 0 else 0.0}
+
+
+def combined_spikes(parts: list[dict[str, Any]]) -> dict[str, Any]:
+    n = sum(p["iterations"] for p in parts)
+    count = sum(p["count"] for p in parts)
+    mean = sum(p["sum"] for p in parts) / n
+    without = sum(p["sum_without"] for p in parts) / (n - count)
+    return {"iterations": n, "count": count, "rate": count / n,
+            "max_to_median_ratio": max(p["max_ratio"] for p in parts), "mean_ms": mean,
+            "mean_without_spikes_ms": without,
+            "mean_shift_ratio": mean / without - 1 if without > 0 else 0.0}
+
+
+def _read_trial_latencies(doc: dict[str, Any], result_path: Path | None) -> dict[int, list[float]] | None:
+    raw = doc["raw"]
+    if raw is None or result_path is None:
+        return None
+    path = result_path.parent / raw["latencies_file"]
+    if not path.is_file():
+        return None
+    trials: dict[int, list[float]] = {}
+    try:
+        with path.open(newline="", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            next(reader, None)
+            for row in reader:
+                trials.setdefault(int(row[0]), []).append(float(row[2]))
+    except (ValueError, IndexError):
+        return None
+    return trials
+
+
+def spike_issues(doc: dict[str, Any], result_path: Path | None) -> list[Issue]:
+    """timing.trials[].spikes and timing.aggregate.spikes: recomputed from the latency file
+    when it is there; otherwise checked for consistency with each trial's stats (count, mean,
+    a spike exactly when the slowest iteration is above the recorded threshold)."""
+    timing = doc["timing"]
+    issues: list[Issue] = []
+
+    def report(path: str, message: str, code: str) -> None:
+        issues.append(Issue(path, message, V1_2_RULES[code], code))
+
+    if timing is None or timing["aggregate"] is None or "spikes" not in timing["aggregate"]:
+        return issues
+    raw = _read_trial_latencies(doc, result_path)
+    parts = []
+    for i, trial in enumerate(timing["trials"]):
+        got = trial.get("spikes")
+        if got is None:
+            continue
+        base = f"/timing/trials/{i}/spikes"
+        st = trial["stats"]
+        latencies = raw.get(trial["trial_index"]) if raw is not None else None
+        if latencies:
+            want = spike_values(latencies)
+            parts.append(want)
+            expected = {"iterations": want["iterations"], "threshold_ms": want["threshold_ms"],
+                        "count": want["count"], **{k: v for k, v in combined_spikes([want]).items()
+                                                   if k not in ("iterations", "count")}}
+        else:
+            # Without the latencies: internally consistent and in line with the trial's count,
+            # mean and slowest iteration.
+            threshold = got["threshold_ms"]
+            expected = {"iterations": st["count"], "mean_ms": st["mean_ms"]}
+            if (got["count"] > 0) != (st["max_ms"] > threshold):
+                report(f"{base}/count", f"count {got['count']} but the slowest iteration "
+                                        f"({st['max_ms']} ms) is {'not ' if got['count'] else ''}above "
+                                        f"the threshold {threshold} ms", "spikes_mismatch")
+            n, c = got["iterations"], got["count"]
+            if c >= n or not math.isclose(got["rate"], c / n, rel_tol=1e-9, abs_tol=1e-12):
+                report(f"{base}/rate", f"is {got['rate']}, count / iterations is {c}/{n}",
+                       "spikes_mismatch")
+            shift = got["mean_ms"] / got["mean_without_spikes_ms"] - 1 if got["mean_without_spikes_ms"] > 0 else 0.0
+            if not math.isclose(got["mean_shift_ratio"], shift, rel_tol=1e-9, abs_tol=1e-12):
+                report(f"{base}/mean_shift_ratio", f"is {got['mean_shift_ratio']}, the means give {shift}",
+                       "spikes_mismatch")
+            parts.append({"iterations": n, "count": c, "sum": got["mean_ms"] * n,
+                          "sum_without": got["mean_without_spikes_ms"] * (n - c),
+                          "max_ratio": got["max_to_median_ratio"]})
+        for key, value in expected.items():
+            if not math.isclose(got[key], value, rel_tol=1e-9, abs_tol=1e-12):
+                report(f"{base}/{key}", f"is {got[key]!r}, expected {value!r}", "spikes_mismatch")
+    agg = timing["aggregate"]["spikes"]
+    base = "/timing/aggregate/spikes"
+    fixed = {"factor": SPIKE_FACTOR, "floor_ms": SPIKE_FLOOR_MS,
+             "mean_shift_threshold_ratio": SPIKE_MEAN_SHIFT, "rate_threshold_ratio": SPIKE_RATE}
+    for key, value in fixed.items():
+        if agg[key] != value:
+            report(f"{base}/{key}", f"is {agg[key]!r}, the engine's value is {value!r}",
+                   "spikes_mismatch")
+    if parts and len(parts) == len(timing["trials"]):
+        want = combined_spikes(parts)
+        for key, value in want.items():
+            same = (agg[key] == value if isinstance(value, int)
+                    else math.isclose(agg[key], value, rel_tol=1e-9, abs_tol=1e-12))
+            if not same:
+                report(f"{base}/{key}", f"is {agg[key]!r}, the trials give {value!r}", "spikes_mismatch")
+    high = agg["mean_shift_ratio"] > SPIKE_MEAN_SHIFT or agg["rate"] > SPIKE_RATE
+    if agg["high"] is not high:
+        report(f"{base}/high", f"is {agg['high']!r}, the values give {high}", "spikes_mismatch")
+    warned = any(w["code"] == SPIKES_WARNING for w in doc["warnings"])
+    if high and not warned:
+        report(f"{base}/high", f"frequent or mean-moving spikes need a '{SPIKES_WARNING}' warning",
+               "spikes_unflagged")
+    if warned and not high:
+        report(f"{base}/high", f"a '{SPIKES_WARNING}' warning requires the spikes to exceed a "
+                               "threshold", "spikes_unfounded")
     return issues
 
 
@@ -862,6 +1006,7 @@ def consistency_issues(doc: dict[str, Any], result_path: Path | None = None,
         issues += v1_1_issues(doc)
         if version_key(doc["schema_version"]) >= (1, 2, 0):
             issues += v1_2_issues(doc)
+            issues += spike_issues(doc, result_path)
         if schema is not None:
             issues += missing_key_issues(doc, schema)
     return issues

@@ -258,7 +258,8 @@
       "tool": "onnxruntime.quantization 1.32.0 (qnn_preprocess_model, get_qnn_qdq_config, quantize_static)"
     },
     "precision_notes": null,
-    "normalization": "external"
+    "normalization": "external",
+    "variant": "int8"
   },
   "config": {
     "requested": {
@@ -344,7 +345,8 @@
       "ort": false,
       "qnn_level": "off"
     },
-    "init_breakdown": true
+    "init_breakdown": true,
+    "process_priority": "normal"
   },
   "execution": {
     "full_device_execution_verified": true,
@@ -566,6 +568,16 @@
           "cold_ms": 2040.2644,
           "context_build_ms": 2156.5552,
           "cached_init_ms": 319.3338
+        },
+        "spikes": {
+          "iterations": 50,
+          "threshold_ms": 0.6204,
+          "count": 2,
+          "rate": 0.04,
+          "max_to_median_ratio": 3.1002578981302387,
+          "mean_ms": 0.34029200000000004,
+          "mean_without_spikes_ms": 0.3164666666666667,
+          "mean_shift_ratio": 0.07528544343796084
         }
       },
       {
@@ -586,6 +598,16 @@
           "cold_ms": 1936.753,
           "context_build_ms": 2200.1746,
           "cached_init_ms": 308.6356
+        },
+        "spikes": {
+          "iterations": 50,
+          "threshold_ms": 0.6678,
+          "count": 1,
+          "rate": 0.02,
+          "max_to_median_ratio": 2.090146750524109,
+          "mean_ms": 0.35456599999999994,
+          "mean_without_spikes_ms": 0.34755918367346933,
+          "mean_shift_ratio": 0.020160066704246526
         }
       },
       {
@@ -606,6 +628,16 @@
           "cold_ms": 2177.8299,
           "context_build_ms": 2149.7834,
           "cached_init_ms": 310.5047
+        },
+        "spikes": {
+          "iterations": 50,
+          "threshold_ms": 0.6498,
+          "count": 0,
+          "rate": 0.0,
+          "max_to_median_ratio": 1.732840874115112,
+          "mean_ms": 0.3389459999999999,
+          "mean_without_spikes_ms": 0.3389459999999999,
+          "mean_shift_ratio": 0.0
         }
       }
     ],
@@ -636,6 +668,20 @@
         "trial_cv_ratio": 0.037039303657492695,
         "cv_threshold_ratio": 0.1,
         "max_to_min_threshold": 1.25,
+        "high": false
+      },
+      "spikes": {
+        "factor": 2.0,
+        "floor_ms": 0.25,
+        "iterations": 150,
+        "count": 3,
+        "rate": 0.02,
+        "max_to_median_ratio": 3.1002578981302387,
+        "mean_ms": 0.34460133333333326,
+        "mean_without_spikes_ms": 0.3344768707482993,
+        "mean_shift_ratio": 0.03026954468445986,
+        "mean_shift_threshold_ratio": 0.05,
+        "rate_threshold_ratio": 0.02,
         "high": false
       }
     },

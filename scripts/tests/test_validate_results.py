@@ -302,7 +302,7 @@ def remove_pointer(doc: Any, pointer: str) -> None:
     node = doc
     for key in parents:
         node = node[int(key)] if isinstance(node, list) else node[key]
-    del node[last]
+    del node[int(last) if isinstance(node, list) else last]
 
 
 def test_missing_keys_only_reported_for_cpp_results(validators):

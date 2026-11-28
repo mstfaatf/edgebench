@@ -73,6 +73,7 @@ add_library(edgebench_core STATIC
   src/stats.cpp
   src/suite.cpp
   src/suite_config.cpp
+  src/suite_gate.cpp
   src/system_info.cpp
   src/tensor_info.cpp
   src/timer_info.cpp
@@ -144,6 +145,7 @@ if(EDGEBENCH_BUILD_TESTS)
     tests/qnn_backend_info_test.cpp
     tests/result_files_test.cpp
     tests/run_config_test.cpp
+    tests/suite_gate_test.cpp
     tests/suite_test.cpp
     tests/system_state_test.cpp
     tests/timing_test.cpp

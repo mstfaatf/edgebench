@@ -30,6 +30,11 @@
       "code": "value_unavailable",
       "message": "The QNN EP does not report the device's SoC model: its compatibility info carries only its soc_model option (not set).",
       "path": "/runtime/qnn/soc_model"
+    },
+    {
+      "code": "latency_spikes_high",
+      "message": "10 of 300 measured iterations are spikes; they move the mean by +7.6%.",
+      "path": "/timing/aggregate/spikes"
     }
   ],
   "notes": [
@@ -253,7 +258,8 @@
       "tool": "onnxruntime.quantization 1.32.0 (qnn_preprocess_model, get_qnn_qdq_config, quantize_static)"
     },
     "precision_notes": null,
-    "normalization": "external"
+    "normalization": "external",
+    "variant": "int8"
   },
   "config": {
     "requested": {
@@ -343,7 +349,8 @@
       "ort": false,
       "qnn_level": "off"
     },
-    "init_breakdown": false
+    "init_breakdown": false,
+    "process_priority": "normal"
   },
   "execution": {
     "full_device_execution_verified": true,
@@ -503,6 +510,16 @@
           "cold_ms": null,
           "context_build_ms": null,
           "cached_init_ms": 433.4753
+        },
+        "spikes": {
+          "iterations": 100,
+          "threshold_ms": 0.7484,
+          "count": 5,
+          "rate": 0.05,
+          "max_to_median_ratio": 5.691608765366115,
+          "mean_ms": 0.43469499999999994,
+          "mean_without_spikes_ms": 0.3891052631578946,
+          "mean_shift_ratio": 0.11716556201812534
         }
       },
       {
@@ -523,6 +540,16 @@
           "cold_ms": null,
           "context_build_ms": null,
           "cached_init_ms": 403.0301
+        },
+        "spikes": {
+          "iterations": 100,
+          "threshold_ms": 0.6732,
+          "count": 2,
+          "rate": 0.02,
+          "max_to_median_ratio": 4.191919191919192,
+          "mean_ms": 0.36469699999999994,
+          "mean_without_spikes_ms": 0.3500489795918367,
+          "mean_shift_ratio": 0.041845630932114464
         }
       },
       {
@@ -543,6 +570,16 @@
           "cold_ms": null,
           "context_build_ms": null,
           "cached_init_ms": 424.3348
+        },
+        "spikes": {
+          "iterations": 100,
+          "threshold_ms": 0.7346,
+          "count": 3,
+          "rate": 0.03,
+          "max_to_median_ratio": 3.8287503403212635,
+          "mean_ms": 0.40016799999999997,
+          "mean_without_spikes_ms": 0.3762639175257732,
+          "mean_shift_ratio": 0.06353009512954255
         }
       }
     ],
@@ -574,6 +611,20 @@
         "cv_threshold_ratio": 0.1,
         "max_to_min_threshold": 1.25,
         "high": false
+      },
+      "spikes": {
+        "factor": 2.0,
+        "floor_ms": 0.25,
+        "iterations": 300,
+        "count": 10,
+        "rate": 0.03333333333333333,
+        "max_to_median_ratio": 5.691608765366115,
+        "mean_ms": 0.3998533333333333,
+        "mean_without_spikes_ms": 0.371611724137931,
+        "mean_shift_ratio": 0.07599762698800072,
+        "mean_shift_threshold_ratio": 0.05,
+        "rate_threshold_ratio": 0.02,
+        "high": true
       }
     },
     "scope": "model_execution",

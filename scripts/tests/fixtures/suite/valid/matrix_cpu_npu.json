@@ -37,6 +37,11 @@
     "load_sample_ms": 0
   },
   "cooldown_s": 0,
+  "preflight": {
+    "checks": [
+      "doctor"
+    ]
+  },
   "matrix": {
     "models": [
       "probe"

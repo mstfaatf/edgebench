@@ -62,6 +62,7 @@ struct RunParams {
     bool profile_accelerator = false;
     std::optional<int> profile_iterations;
     double cooldown_s = 5.0;  // the suite's idle period before the run
+    ProcessPriority process_priority = ProcessPriority::normal;
     bool operator==(const RunParams&) const = default;
 };
 
@@ -96,6 +97,7 @@ struct ResolvedConfiguration {
     std::string label;                // e.g. "conv1d_autoencoder_b1_npu_int8"
     std::string configuration_id;     // SHA256 of the resolved configuration (no repetition)
     nlohmann::ordered_json resolved;  // what configuration_id hashes (also in the manifest)
+    double sustained_duration_s = 0;  // sustained-load legs only
 };
 
 struct PlannedRun {
@@ -106,10 +108,41 @@ struct PlannedRun {
     std::string short_id() const { return run_id.substr(0, kShortIdLength); }
 };
 
+/// The checks of the pre-flight gate, in the order they run (the default list)
+/// and the ones a suite must pass to be publishable.
+const std::vector<std::string>& gate_check_names();
+
+/// One continuous run of the sustained-load check, as configured.
+struct SustainedLegSpec {
+    Identity identity;  // model (manifest name), provider, precision, batch, NPU options
+    std::optional<std::string> path;  // a model file instead of a manifest name
+    double duration_s = 0;
+    bool operator==(const SustainedLegSpec&) const = default;
+};
+
+/// The pre-flight gate and its thresholds (configuration: `preflight`).
 struct PreflightSettings {
-    std::vector<std::string> checks = {"doctor"};
+    std::vector<std::string> checks = gate_check_names();
     bool fail_on_warn = false;
+    double idle_window_s = 30;
+    double idle_max_cpu_ratio = 0.05;
+    double sleep_margin_s = 1800;  // sleep/hibernate must not come within estimate + this
+    double sustained_window_s = 30;
+    double sustained_max_drift_ratio = 0.05;
+    /// Default: ResNet-18 FP32 on the CPU for 3 min, then ResNet-18 INT8 on the NPU for 2 min.
+    std::vector<SustainedLegSpec> sustained_legs = default_sustained_legs();
+    static std::vector<SustainedLegSpec> default_sustained_legs();
     bool operator==(const PreflightSettings&) const = default;
+};
+
+/// The check before every run (configuration: `in_flight`).
+struct InFlightSettings {
+    double load_sample_s = 5;  // load sample before a run (during its cooldown if long enough)
+    double max_wait_s = 600;   // longest wait for the load to drop (then the run starts anyway)
+    double power_max_wait_s = 600;  // longest wait for AC + Best performance to come back
+    /// "wait": wait up to power_max_wait_s for the power state, then stop; "stop": stop at once.
+    std::string on_gate_loss = "wait";
+    bool operator==(const InFlightSettings&) const = default;
 };
 
 struct SuitePlan {
@@ -122,6 +155,13 @@ struct SuitePlan {
     int repetitions = 1;
     Rotation rotation = Rotation::rotated;
     PreflightSettings preflight;
+    InFlightSettings in_flight;
+    /// How many times a run whose result is flagged for background load or trial
+    /// spread runs again after the main pass (configuration: retry_flagged).
+    int retry_flagged = 1;
+    /// The sustained-load legs, resolved like configurations (run parameters:
+    /// one trial, 20 warm-up, no idle periods; iterations set at run time).
+    std::vector<ResolvedConfiguration> sustained;
     std::vector<ResolvedConfiguration> configurations;
     std::vector<PlannedRun> runs;  // in run order
 };

@@ -1,62 +1,81 @@
 {
   "suite_manifest_version": "1.0.0",
   "suite": {
-    "name": "smoke",
-    "config_file": "C:\\dev\\edgebench\\benchmarks\\configs\\smoke.json",
-    "config_sha256": "b6ff9607c4de301c16627364109b8de31bf7c0658c6b0bacc26681a517d21db0",
+    "name": "fixture",
+    "config_file": "C:\\dev\\edgebench\\scripts\\tests\\fixtures\\suite\\valid\\explicit_cpu.json",
+    "config_sha256": "ec3a3527ee0872df1e2872db3b511d64a8fe3ef221395162dff32ff4ddf2a5bb",
     "config": {
-      "cooldown_s": 2,
+      "configurations": [
+        {
+          "batch": 1,
+          "model": "tiny",
+          "precision": "fp32",
+          "provider": "cpu"
+        },
+        {
+          "batch": 1,
+          "iterations": 7,
+          "model": "probe",
+          "precision": "int8",
+          "provider": "cpu"
+        }
+      ],
+      "cooldown_s": 0,
       "defaults": {
-        "iterations": 50,
-        "trial_cooldown_ms": 500,
-        "trials": 2,
-        "warmup": 5
-      },
-      "description": "A quick end-to-end check of the suite command: the autoencoder on the CPU (FP32 and INT8) and on the NPU (INT8), batch 1, two repetitions, short runs. Not a benchmark.",
-      "matrix": {
-        "batches": [
-          1
-        ],
-        "exclude": [
-          {
-            "precision": "fp32",
-            "provider": "npu"
-          }
-        ],
-        "precisions": [
-          "fp32",
-          "int8"
-        ],
-        "providers": [
-          "cpu",
-          "npu"
-        ]
+        "iterations": 5,
+        "load_sample_ms": 0,
+        "trial_cooldown_ms": 0,
+        "trials": 1,
+        "warmup": 1
       },
       "models": [
-        "conv1d_autoencoder"
+        {
+          "files": [
+            {
+              "batch": 1,
+              "path": "../../../../../engine/tests/fixtures/models/fixed_float32.onnx",
+              "precision": "fp32"
+            }
+          ],
+          "name": "tiny"
+        },
+        {
+          "files": [
+            {
+              "batch": 1,
+              "path": "../../../../../engine/resources/doctor/npu_probe_fp32.onnx",
+              "precision": "fp32"
+            },
+            {
+              "batch": 1,
+              "path": "../../../../../engine/resources/doctor/npu_probe_int8.onnx",
+              "precision": "int8"
+            }
+          ],
+          "name": "probe"
+        }
       ],
-      "name": "smoke",
-      "output_dir": "../results/local/suites",
+      "name": "fixture",
+      "output_dir": "out",
       "preflight": {
         "checks": [
           "doctor"
         ]
       },
       "repetitions": 2,
-      "rotation": "rotated",
       "suite_config_version": "1.0.0"
     }
   },
-  "created_utc": "2026-11-27T22:13:23.348Z",
-  "updated_utc": "2026-11-27T22:15:32.534Z",
+  "created_utc": "2026-11-28T02:01:49.816Z",
+  "updated_utc": "2026-11-28T02:01:52.836Z",
   "status": "completed",
   "tool": {
-    "build_type": "Release",
-    "git_commit": "d4bea53e0849ba78d9995e0b335ee1ae5d488d3c",
-    "git_dirty": true,
     "name": "edgebench",
-    "results_schema_version": "1.2.0",
-    "version": "0.1.0"
+    "version": "0.1.0",
+    "git_commit": "2dba98005ff2916568dfe9770638ec7d3305e0f5",
+    "git_dirty": true,
+    "build_type": "Release",
+    "results_schema_version": "1.2.0"
   },
   "versions": {
     "onnxruntime": {
@@ -80,69 +99,59 @@
   },
   "publishable": false,
   "not_publishable_reasons": [
+    "the pre-flight gate did not include 'power'",
+    "the pre-flight gate did not include 'sleep'",
+    "the pre-flight gate did not include 'npu_users'",
+    "the pre-flight gate did not include 'idle'",
+    "the pre-flight gate did not include 'sustained_load'",
     "built from a working tree with uncommitted changes"
   ],
+  "gate_passed": false,
+  "gate_lost": null,
+  "in_flight_wait_s": 0.0,
   "preflight_ever_skipped": false,
   "preflight": [
     {
-      "started_utc": "2026-11-27T22:13:23.350Z",
+      "started_utc": "2026-11-28T02:01:49.818Z",
       "skipped": false,
       "passed": true,
+      "settings": {
+        "checks": [
+          "doctor"
+        ],
+        "fail_on_warn": false,
+        "idle": {
+          "window_s": 30.0,
+          "max_cpu_ratio": 0.05
+        },
+        "sleep": {
+          "margin_s": 1800.0,
+          "estimate_s": 22.535428600000003
+        },
+        "sustained_load": {
+          "window_s": 30.0,
+          "max_drift_ratio": 0.05,
+          "legs": []
+        },
+        "in_flight": {
+          "load_sample_s": 5.0,
+          "max_wait_s": 600.0,
+          "power_max_wait_s": 600.0,
+          "on_gate_loss": "wait"
+        },
+        "retry_flagged": 1
+      },
       "checks": [
         {
           "name": "doctor",
-          "status": "warn",
-          "summary": "doctor exit 0, warn (background_load warn)",
+          "status": "pass",
+          "summary": "doctor exit 0, pass",
           "details": {
-            "checks": {
-              "backend_versions": "not_applicable",
-              "background_load": "warn",
-              "devices": "pass",
-              "ep_cache_dir": "pass",
-              "npu_context": "not_applicable",
-              "npu_probe": "not_applicable",
-              "ort_bundle": "pass",
-              "power": "pass",
-              "qnn_bundle": "pass"
-            },
             "command": "edgebench doctor --json --quick",
-            "exit_code": 0,
-            "log_file": "preflight/doctor-1.log",
-            "overall": "warn",
             "report_file": "preflight/doctor-1.json",
-            "versions": {
-              "onnxruntime": {
-                "loaded": "1.32.0",
-                "pinned": "1.32.0"
-              },
-              "qairt_sdk": {
-                "pinned": "2.52.0",
-                "reported": null
-              },
-              "qnn_ep": {
-                "pinned": "2.8.0",
-                "reported": "2.8.0"
-              }
-            }
-          }
-        }
-      ]
-    },
-    {
-      "started_utc": "2026-11-27T22:14:59.204Z",
-      "skipped": false,
-      "passed": true,
-      "checks": [
-        {
-          "name": "doctor",
-          "status": "warn",
-          "summary": "doctor exit 0, warn (background_load warn)",
-          "details": {
-            "command": "edgebench doctor --json --quick",
-            "report_file": "preflight/doctor-2.json",
-            "log_file": "preflight/doctor-2.log",
+            "log_file": "preflight/doctor-1.log",
             "exit_code": 0,
-            "overall": "warn",
+            "overall": "pass",
             "checks": {
               "ort_bundle": "pass",
               "qnn_bundle": "pass",
@@ -152,7 +161,7 @@
               "npu_context": "not_applicable",
               "ep_cache_dir": "pass",
               "power": "pass",
-              "background_load": "warn"
+              "background_load": "pass"
             },
             "versions": {
               "onnxruntime": {
@@ -175,29 +184,22 @@
   ],
   "invocations": [
     {
-      "started_utc": "2026-11-27T22:13:23.348Z",
-      "ended_utc": "2026-11-27T22:13:56.269Z",
+      "started_utc": "2026-11-28T02:01:49.816Z",
+      "ended_utc": "2026-11-28T02:01:52.836Z",
       "resumed": false,
-      "fail_fast": false,
-      "skip_preflight": false,
-      "exit_code": 1
-    },
-    {
-      "started_utc": "2026-11-27T22:14:59.201Z",
-      "ended_utc": "2026-11-27T22:15:32.534Z",
-      "resumed": true,
       "fail_fast": false,
       "skip_preflight": false,
       "exit_code": 0
     }
   ],
   "estimate": {
-    "total_s": 80.28507896666667,
-    "configurations_from_prior_results": 3,
-    "configurations_from_heuristic": 0
+    "total_s": 22.535428600000003,
+    "gate_s": 7.5,
+    "configurations_from_prior_results": 0,
+    "configurations_from_heuristic": 2
   },
   "counts": {
-    "done": 6,
+    "done": 4,
     "failed": 0,
     "pending": 0,
     "running": 0,
@@ -205,394 +207,284 @@
   },
   "runs": [
     {
-      "run_id": "6bdac65d426c071da81dd0e8359fd478bf2cfdbbae107a217375b9bf7035323e",
-      "short_id": "6bdac65d426c",
-      "configuration_id": "b99e5f971789f2ac2e1452f7aa22a1eedfbc0ab9e8c82822dcd5682c5642bcbc",
-      "label": "conv1d_autoencoder_b1_cpu_fp32",
+      "run_id": "72092a796864f033f9c820bc1bbb588407feb76063a2a9c721ea0ba785ead835",
+      "short_id": "72092a796864",
+      "configuration_id": "b452eb83f66632019b82d8f8a569a35cc57fcb65fc215c97048e5b1ae934d7ce",
+      "label": "tiny_b1_cpu_fp32",
       "order_index": 0,
       "repetition": 0,
       "configuration": {
-        "batch": 1,
-        "binding": "iobinding",
+        "run_id_version": 1,
+        "model": "tiny",
+        "model_file": "../../../../../engine/tests/fixtures/models/fixed_float32.onnx",
+        "model_sha256": "8a13392d4cf2cbdb51193cadb7b8f95602ed607b717329b2a8a0a2ddfe1fcdb6",
+        "variant": null,
+        "provider": "cpu",
+        "precision": "fp32",
         "compute_precision": "fp32",
-        "cooldown_s": 2.0,
-        "ep_compile_options": null,
-        "graph_optimization_level": "enable_all",
-        "htp_graph_finalization_mode": null,
+        "batch": 1,
+        "strict": false,
+        "npu_fp16": false,
         "htp_performance_mode": null,
+        "htp_graph_finalization_mode": null,
+        "ep_compile_options": null,
+        "warmup": 1,
+        "iterations": 5,
+        "trials": 1,
+        "trial_cooldown_ms": 0,
+        "load_sample_ms": 0,
+        "threads": 4,
+        "binding": "iobinding",
+        "input": "random",
+        "seed": 0,
+        "graph_optimization_level": "enable_all",
         "init": "cold",
         "init_breakdown": false,
-        "input": "random",
-        "iterations": 50,
-        "label": "conv1d_autoencoder_b1_cpu_fp32",
-        "load_sample_ms": 1000,
-        "model": "conv1d_autoencoder",
-        "model_file": "conv1d_autoencoder/conv1d_autoencoder_fp32_b1.onnx",
-        "model_file_path": "C:\\dev\\edgebench\\models\\conv1d_autoencoder\\conv1d_autoencoder_fp32_b1.onnx",
-        "model_sha256": "591757a33c9bbe482eec21ee449e9601512d2d1be615b1528219355c00d5fd3a",
-        "npu_fp16": false,
-        "precision": "fp32",
         "profile_accelerator": false,
         "profile_iterations": null,
-        "provider": "cpu",
-        "run_id_version": 1,
-        "seed": 0,
-        "source": "matrix",
-        "strict": false,
-        "threads": 4,
-        "trial_cooldown_ms": 500,
-        "trials": 2,
-        "variant": "fp32",
-        "warmup": 5
+        "cooldown_s": 0.0,
+        "process_priority": "normal",
+        "model_file_path": "C:\\dev\\edgebench\\engine\\tests\\fixtures\\models\\fixed_float32.onnx",
+        "source": "configurations[0]",
+        "label": "tiny_b1_cpu_fp32"
       },
       "status": "done",
-      "attempts": 2,
+      "attempts": 1,
       "exit_code": 0,
       "exit_code_name": "success",
-      "started_utc": "2026-11-27T22:15:02.487Z",
-      "ended_utc": "2026-11-27T22:15:03.667Z",
-      "duration_s": 1.1716203,
-      "cooldown_s_before": 2.0,
-      "estimate_s": 9.41520975,
-      "output_dir": "runs/6bdac65d426c",
-      "result_file": "runs/6bdac65d426c/conv1d_autoencoder_b1_cpu_fp32_rep0_20261127T221502.564Z.json",
-      "result_sha256": "a3269bd33d7e4014f734fee231d08deac0cd6da34fad0207256cb20c22aaed30",
-      "log_file": "runs/6bdac65d426c/run.log",
+      "started_utc": "2026-11-28T02:01:51.081Z",
+      "ended_utc": "2026-11-28T02:01:51.201Z",
+      "duration_s": 0.1184387,
+      "cooldown_s_before": 0.0,
+      "estimate_s": 3.7575328600000004,
+      "output_dir": "runs/72092a796864",
+      "result_file": "runs/72092a796864/tiny_b1_cpu_fp32_rep0_20261128T020151.141Z.json",
+      "result_sha256": "2318bbbb8fa07de0cbd09433112f5267143717232e0e2d2e34a2d386cd2f8596",
+      "log_file": "runs/72092a796864/run.log",
       "failure": null,
       "validation": "passed",
-      "validation_issues": [],
-      "warnings": [
-        "background_cpu_load_high"
+      "validation_issues": [
+        "warning: /suite/publishable: the suite was not publishable when this run started (gate not passed, skipped, a dirty build or a lost gate) [result_not_publishable]"
       ],
+      "warnings": [],
       "cache_build": null,
-      "discarded": [
-        "discarded/6bdac65d426c-1"
-      ]
+      "discarded": [],
+      "in_flight": {
+        "checked_utc": "2026-11-28T02:01:51.072Z",
+        "wait_s": 0.0
+      },
+      "retries": 0,
+      "history": []
     },
     {
-      "run_id": "81ab2cff4704b6c041b8a95f14af1909a23fd8d45bd4bfd130799897886e8022",
-      "short_id": "81ab2cff4704",
-      "configuration_id": "8df216a27349d3678af911b5792910584b2fa8fb060a8196a989b2f90811d084",
-      "label": "conv1d_autoencoder_b1_cpu_int8",
+      "run_id": "fde3b93ea2ba32cc43d5209a59797306f580ca0ebf66ddf83fa674a5f50acb5e",
+      "short_id": "fde3b93ea2ba",
+      "configuration_id": "fd375edfd7aef9b6940a634a35fafdd7cb713cf836061d59313f7ada32d14474",
+      "label": "probe_b1_cpu_int8",
       "order_index": 1,
       "repetition": 0,
       "configuration": {
-        "batch": 1,
-        "binding": "iobinding",
-        "compute_precision": "int8",
-        "cooldown_s": 2.0,
-        "ep_compile_options": null,
-        "graph_optimization_level": "enable_all",
-        "htp_graph_finalization_mode": null,
-        "htp_performance_mode": null,
-        "init": "cold",
-        "init_breakdown": false,
-        "input": "random",
-        "iterations": 50,
-        "label": "conv1d_autoencoder_b1_cpu_int8",
-        "load_sample_ms": 1000,
-        "model": "conv1d_autoencoder",
-        "model_file": "conv1d_autoencoder/conv1d_autoencoder_int8_b1.onnx",
-        "model_file_path": "C:\\dev\\edgebench\\models\\conv1d_autoencoder\\conv1d_autoencoder_int8_b1.onnx",
-        "model_sha256": "9ef48a4297e3d1d12e42cf39a285667e09343939c4edc9d4d81b0e14ddb3068a",
-        "npu_fp16": false,
-        "precision": "int8",
-        "profile_accelerator": false,
-        "profile_iterations": null,
+        "run_id_version": 1,
+        "model": "probe",
+        "model_file": "../../../../../engine/resources/doctor/npu_probe_int8.onnx",
+        "model_sha256": "6e67d229e4f1edc7ead77c68c6ccf6aeb33680d4502411ed2bfd70d03aaf3ebe",
+        "variant": null,
         "provider": "cpu",
-        "run_id_version": 1,
-        "seed": 0,
-        "source": "matrix",
-        "strict": false,
-        "threads": 4,
-        "trial_cooldown_ms": 500,
-        "trials": 2,
-        "variant": "int8",
-        "warmup": 5
-      },
-      "status": "done",
-      "attempts": 2,
-      "exit_code": 0,
-      "exit_code_name": "success",
-      "started_utc": "2026-11-27T22:15:05.979Z",
-      "ended_utc": "2026-11-27T22:15:07.175Z",
-      "duration_s": 1.1930031,
-      "cooldown_s_before": 2.0,
-      "estimate_s": 9.4196984,
-      "output_dir": "runs/81ab2cff4704",
-      "result_file": "runs/81ab2cff4704/conv1d_autoencoder_b1_cpu_int8_rep0_20261127T221506.052Z.json",
-      "result_sha256": "19f935a4d5ad72cf9e57acaece4980aab4643aca33c598c70411db6c74ab1840",
-      "log_file": "runs/81ab2cff4704/run.log",
-      "failure": null,
-      "validation": "passed",
-      "validation_issues": [],
-      "warnings": [
-        "background_cpu_load_high"
-      ],
-      "cache_build": null,
-      "discarded": [
-        "discarded/81ab2cff4704-1"
-      ]
-    },
-    {
-      "run_id": "639de020889e8bc52e715d524e53b624247f72110c99e98ce17b263735258ec7",
-      "short_id": "639de020889e",
-      "configuration_id": "9a7b975321e2180729cef31421b8f668874a90985e7f21c1efccdd75ce82bbb3",
-      "label": "conv1d_autoencoder_b1_npu_int8",
-      "order_index": 2,
-      "repetition": 0,
-      "configuration": {
-        "batch": 1,
-        "binding": "iobinding",
+        "precision": "int8",
         "compute_precision": "int8",
-        "cooldown_s": 2.0,
-        "ep_compile_options": {},
-        "graph_optimization_level": "enable_all",
+        "batch": 1,
+        "strict": false,
+        "npu_fp16": false,
+        "htp_performance_mode": null,
         "htp_graph_finalization_mode": null,
-        "htp_performance_mode": "burst",
+        "ep_compile_options": null,
+        "warmup": 1,
+        "iterations": 7,
+        "trials": 1,
+        "trial_cooldown_ms": 0,
+        "load_sample_ms": 0,
+        "threads": 4,
+        "binding": "iobinding",
+        "input": "random",
+        "seed": 0,
+        "graph_optimization_level": "enable_all",
         "init": "cold",
         "init_breakdown": false,
-        "input": "random",
-        "iterations": 50,
-        "label": "conv1d_autoencoder_b1_npu_int8",
-        "load_sample_ms": 1000,
-        "model": "conv1d_autoencoder",
-        "model_file": "conv1d_autoencoder/conv1d_autoencoder_int8_b1.onnx",
-        "model_file_path": "C:\\dev\\edgebench\\models\\conv1d_autoencoder\\conv1d_autoencoder_int8_b1.onnx",
-        "model_sha256": "9ef48a4297e3d1d12e42cf39a285667e09343939c4edc9d4d81b0e14ddb3068a",
-        "npu_fp16": false,
-        "precision": "int8",
         "profile_accelerator": false,
         "profile_iterations": null,
-        "provider": "npu",
-        "run_id_version": 1,
-        "seed": 0,
-        "source": "matrix",
-        "strict": true,
-        "threads": 4,
-        "trial_cooldown_ms": 500,
-        "trials": 2,
-        "variant": "int8",
-        "warmup": 5
+        "cooldown_s": 0.0,
+        "process_priority": "normal",
+        "model_file_path": "C:\\dev\\edgebench\\engine\\resources\\doctor\\npu_probe_int8.onnx",
+        "source": "configurations[1]",
+        "label": "probe_b1_cpu_int8"
       },
       "status": "done",
-      "attempts": 2,
+      "attempts": 1,
       "exit_code": 0,
       "exit_code_name": "success",
-      "started_utc": "2026-11-27T22:15:09.529Z",
-      "ended_utc": "2026-11-27T22:15:16.007Z",
-      "duration_s": 6.4686473,
-      "cooldown_s_before": 2.0,
-      "estimate_s": 18.182631333333333,
-      "output_dir": "runs/639de020889e",
-      "result_file": "runs/639de020889e/conv1d_autoencoder_b1_npu_int8_rep0_20261127T221509.845Z.json",
-      "result_sha256": "4987074223d8319e5de0792754213f04954a890ee63cc0c5e079b73267b7532d",
-      "log_file": "runs/639de020889e/run.log",
+      "started_utc": "2026-11-28T02:01:51.523Z",
+      "ended_utc": "2026-11-28T02:01:51.647Z",
+      "duration_s": 0.1219588,
+      "cooldown_s_before": 0.0,
+      "estimate_s": 3.76018144,
+      "output_dir": "runs/fde3b93ea2ba",
+      "result_file": "runs/fde3b93ea2ba/probe_b1_cpu_int8_rep0_20261128T020151.585Z.json",
+      "result_sha256": "82784b97d53b2f6c8af9d1618d3391601650754087cb7aa1d5c3e6bdf19330b5",
+      "log_file": "runs/fde3b93ea2ba/run.log",
       "failure": null,
       "validation": "passed",
-      "validation_issues": [],
-      "warnings": [
-        "background_cpu_load_high"
+      "validation_issues": [
+        "warning: /suite/publishable: the suite was not publishable when this run started (gate not passed, skipped, a dirty build or a lost gate) [result_not_publishable]"
       ],
+      "warnings": [],
       "cache_build": null,
-      "discarded": [
-        "discarded/639de020889e-1"
-      ]
+      "discarded": [],
+      "in_flight": {
+        "checked_utc": "2026-11-28T02:01:51.514Z",
+        "wait_s": 0.0
+      },
+      "retries": 0,
+      "history": []
     },
     {
-      "run_id": "c021bb7c0f224ef4599b70c92d9a83e4ccd3fbc25805fdaea0e6e45d1c09d2a2",
-      "short_id": "c021bb7c0f22",
-      "configuration_id": "8df216a27349d3678af911b5792910584b2fa8fb060a8196a989b2f90811d084",
-      "label": "conv1d_autoencoder_b1_cpu_int8",
+      "run_id": "d3fe29a8c88e812048bd04609b315a6ebb356505c99ab0b958817276bb5bde9b",
+      "short_id": "d3fe29a8c88e",
+      "configuration_id": "fd375edfd7aef9b6940a634a35fafdd7cb713cf836061d59313f7ada32d14474",
+      "label": "probe_b1_cpu_int8",
+      "order_index": 2,
+      "repetition": 1,
+      "configuration": {
+        "run_id_version": 1,
+        "model": "probe",
+        "model_file": "../../../../../engine/resources/doctor/npu_probe_int8.onnx",
+        "model_sha256": "6e67d229e4f1edc7ead77c68c6ccf6aeb33680d4502411ed2bfd70d03aaf3ebe",
+        "variant": null,
+        "provider": "cpu",
+        "precision": "int8",
+        "compute_precision": "int8",
+        "batch": 1,
+        "strict": false,
+        "npu_fp16": false,
+        "htp_performance_mode": null,
+        "htp_graph_finalization_mode": null,
+        "ep_compile_options": null,
+        "warmup": 1,
+        "iterations": 7,
+        "trials": 1,
+        "trial_cooldown_ms": 0,
+        "load_sample_ms": 0,
+        "threads": 4,
+        "binding": "iobinding",
+        "input": "random",
+        "seed": 0,
+        "graph_optimization_level": "enable_all",
+        "init": "cold",
+        "init_breakdown": false,
+        "profile_accelerator": false,
+        "profile_iterations": null,
+        "cooldown_s": 0.0,
+        "process_priority": "normal",
+        "model_file_path": "C:\\dev\\edgebench\\engine\\resources\\doctor\\npu_probe_int8.onnx",
+        "source": "configurations[1]",
+        "label": "probe_b1_cpu_int8"
+      },
+      "status": "done",
+      "attempts": 1,
+      "exit_code": 0,
+      "exit_code_name": "success",
+      "started_utc": "2026-11-28T02:01:51.971Z",
+      "ended_utc": "2026-11-28T02:01:52.098Z",
+      "duration_s": 0.1249324,
+      "cooldown_s_before": 0.0,
+      "estimate_s": 3.76018144,
+      "output_dir": "runs/d3fe29a8c88e",
+      "result_file": "runs/d3fe29a8c88e/probe_b1_cpu_int8_rep1_20261128T020152.036Z.json",
+      "result_sha256": "737efd34ffa698b3410d632090ca9f3cc5c0915f82975097e95a92de419341e3",
+      "log_file": "runs/d3fe29a8c88e/run.log",
+      "failure": null,
+      "validation": "passed",
+      "validation_issues": [
+        "warning: /suite/publishable: the suite was not publishable when this run started (gate not passed, skipped, a dirty build or a lost gate) [result_not_publishable]"
+      ],
+      "warnings": [],
+      "cache_build": null,
+      "discarded": [],
+      "in_flight": {
+        "checked_utc": "2026-11-28T02:01:51.962Z",
+        "wait_s": 0.0
+      },
+      "retries": 0,
+      "history": []
+    },
+    {
+      "run_id": "ac63ff9ae7180aa35c8067484dbaa20bfb36b5856079c1ef5821b596d3b92ed1",
+      "short_id": "ac63ff9ae718",
+      "configuration_id": "b452eb83f66632019b82d8f8a569a35cc57fcb65fc215c97048e5b1ae934d7ce",
+      "label": "tiny_b1_cpu_fp32",
       "order_index": 3,
       "repetition": 1,
       "configuration": {
-        "batch": 1,
-        "binding": "iobinding",
-        "compute_precision": "int8",
-        "cooldown_s": 2.0,
-        "ep_compile_options": null,
-        "graph_optimization_level": "enable_all",
-        "htp_graph_finalization_mode": null,
-        "htp_performance_mode": null,
-        "init": "cold",
-        "init_breakdown": false,
-        "input": "random",
-        "iterations": 50,
-        "label": "conv1d_autoencoder_b1_cpu_int8",
-        "load_sample_ms": 1000,
-        "model": "conv1d_autoencoder",
-        "model_file": "conv1d_autoencoder/conv1d_autoencoder_int8_b1.onnx",
-        "model_file_path": "C:\\dev\\edgebench\\models\\conv1d_autoencoder\\conv1d_autoencoder_int8_b1.onnx",
-        "model_sha256": "9ef48a4297e3d1d12e42cf39a285667e09343939c4edc9d4d81b0e14ddb3068a",
-        "npu_fp16": false,
-        "precision": "int8",
-        "profile_accelerator": false,
-        "profile_iterations": null,
+        "run_id_version": 1,
+        "model": "tiny",
+        "model_file": "../../../../../engine/tests/fixtures/models/fixed_float32.onnx",
+        "model_sha256": "8a13392d4cf2cbdb51193cadb7b8f95602ed607b717329b2a8a0a2ddfe1fcdb6",
+        "variant": null,
         "provider": "cpu",
-        "run_id_version": 1,
-        "seed": 0,
-        "source": "matrix",
-        "strict": false,
-        "threads": 4,
-        "trial_cooldown_ms": 500,
-        "trials": 2,
-        "variant": "int8",
-        "warmup": 5
-      },
-      "status": "done",
-      "attempts": 2,
-      "exit_code": 0,
-      "exit_code_name": "success",
-      "started_utc": "2026-11-27T22:15:18.329Z",
-      "ended_utc": "2026-11-27T22:15:19.505Z",
-      "duration_s": 1.1736546,
-      "cooldown_s_before": 2.0,
-      "estimate_s": 9.4196984,
-      "output_dir": "runs/c021bb7c0f22",
-      "result_file": "runs/c021bb7c0f22/conv1d_autoencoder_b1_cpu_int8_rep1_20261127T221518.396Z.json",
-      "result_sha256": "61d151a3220390194f3a474516cadd5c7bad4e0a7c74a9f4c731c21a96321486",
-      "log_file": "runs/c021bb7c0f22/run.log",
-      "failure": null,
-      "validation": "passed",
-      "validation_issues": [],
-      "warnings": [
-        "background_cpu_load_high"
-      ],
-      "cache_build": null,
-      "discarded": [
-        "discarded/c021bb7c0f22-1"
-      ]
-    },
-    {
-      "run_id": "eef93714acf74ae15ed231e5bc93ce8f525834a13cd21214bb6a5b9c52139843",
-      "short_id": "eef93714acf7",
-      "configuration_id": "9a7b975321e2180729cef31421b8f668874a90985e7f21c1efccdd75ce82bbb3",
-      "label": "conv1d_autoencoder_b1_npu_int8",
-      "order_index": 4,
-      "repetition": 1,
-      "configuration": {
-        "batch": 1,
-        "binding": "iobinding",
-        "compute_precision": "int8",
-        "cooldown_s": 2.0,
-        "ep_compile_options": {},
-        "graph_optimization_level": "enable_all",
-        "htp_graph_finalization_mode": null,
-        "htp_performance_mode": "burst",
-        "init": "cold",
-        "init_breakdown": false,
-        "input": "random",
-        "iterations": 50,
-        "label": "conv1d_autoencoder_b1_npu_int8",
-        "load_sample_ms": 1000,
-        "model": "conv1d_autoencoder",
-        "model_file": "conv1d_autoencoder/conv1d_autoencoder_int8_b1.onnx",
-        "model_file_path": "C:\\dev\\edgebench\\models\\conv1d_autoencoder\\conv1d_autoencoder_int8_b1.onnx",
-        "model_sha256": "9ef48a4297e3d1d12e42cf39a285667e09343939c4edc9d4d81b0e14ddb3068a",
-        "npu_fp16": false,
-        "precision": "int8",
-        "profile_accelerator": false,
-        "profile_iterations": null,
-        "provider": "npu",
-        "run_id_version": 1,
-        "seed": 0,
-        "source": "matrix",
-        "strict": true,
-        "threads": 4,
-        "trial_cooldown_ms": 500,
-        "trials": 2,
-        "variant": "int8",
-        "warmup": 5
-      },
-      "status": "done",
-      "attempts": 2,
-      "exit_code": 0,
-      "exit_code_name": "success",
-      "started_utc": "2026-11-27T22:15:21.805Z",
-      "ended_utc": "2026-11-27T22:15:28.743Z",
-      "duration_s": 6.9345477,
-      "cooldown_s_before": 2.0,
-      "estimate_s": 18.182631333333333,
-      "output_dir": "runs/eef93714acf7",
-      "result_file": "runs/eef93714acf7/conv1d_autoencoder_b1_npu_int8_rep1_20261127T221522.112Z.json",
-      "result_sha256": "8cd3a7377872220a009e9087f1045925ebbb78c54b0df61fb9c61fc5dba4c3c7",
-      "log_file": "runs/eef93714acf7/run.log",
-      "failure": null,
-      "validation": "passed",
-      "validation_issues": [],
-      "warnings": [
-        "background_cpu_load_high"
-      ],
-      "cache_build": null,
-      "discarded": [
-        "discarded/eef93714acf7-1"
-      ]
-    },
-    {
-      "run_id": "cd62c6a4877bd4364f7936f53f33bf27911ca1e093bedf54824d23d0ba21d09a",
-      "short_id": "cd62c6a4877b",
-      "configuration_id": "b99e5f971789f2ac2e1452f7aa22a1eedfbc0ab9e8c82822dcd5682c5642bcbc",
-      "label": "conv1d_autoencoder_b1_cpu_fp32",
-      "order_index": 5,
-      "repetition": 1,
-      "configuration": {
-        "batch": 1,
-        "binding": "iobinding",
-        "compute_precision": "fp32",
-        "cooldown_s": 2.0,
-        "ep_compile_options": null,
-        "graph_optimization_level": "enable_all",
-        "htp_graph_finalization_mode": null,
-        "htp_performance_mode": null,
-        "init": "cold",
-        "init_breakdown": false,
-        "input": "random",
-        "iterations": 50,
-        "label": "conv1d_autoencoder_b1_cpu_fp32",
-        "load_sample_ms": 1000,
-        "model": "conv1d_autoencoder",
-        "model_file": "conv1d_autoencoder/conv1d_autoencoder_fp32_b1.onnx",
-        "model_file_path": "C:\\dev\\edgebench\\models\\conv1d_autoencoder\\conv1d_autoencoder_fp32_b1.onnx",
-        "model_sha256": "591757a33c9bbe482eec21ee449e9601512d2d1be615b1528219355c00d5fd3a",
-        "npu_fp16": false,
         "precision": "fp32",
+        "compute_precision": "fp32",
+        "batch": 1,
+        "strict": false,
+        "npu_fp16": false,
+        "htp_performance_mode": null,
+        "htp_graph_finalization_mode": null,
+        "ep_compile_options": null,
+        "warmup": 1,
+        "iterations": 5,
+        "trials": 1,
+        "trial_cooldown_ms": 0,
+        "load_sample_ms": 0,
+        "threads": 4,
+        "binding": "iobinding",
+        "input": "random",
+        "seed": 0,
+        "graph_optimization_level": "enable_all",
+        "init": "cold",
+        "init_breakdown": false,
         "profile_accelerator": false,
         "profile_iterations": null,
-        "provider": "cpu",
-        "run_id_version": 1,
-        "seed": 0,
-        "source": "matrix",
-        "strict": false,
-        "threads": 4,
-        "trial_cooldown_ms": 500,
-        "trials": 2,
-        "variant": "fp32",
-        "warmup": 5
+        "cooldown_s": 0.0,
+        "process_priority": "normal",
+        "model_file_path": "C:\\dev\\edgebench\\engine\\tests\\fixtures\\models\\fixed_float32.onnx",
+        "source": "configurations[0]",
+        "label": "tiny_b1_cpu_fp32"
       },
       "status": "done",
-      "attempts": 2,
+      "attempts": 1,
       "exit_code": 0,
       "exit_code_name": "success",
-      "started_utc": "2026-11-27T22:15:31.055Z",
-      "ended_utc": "2026-11-27T22:15:32.228Z",
-      "duration_s": 1.1645088,
-      "cooldown_s_before": 2.0,
-      "estimate_s": 9.41520975,
-      "output_dir": "runs/cd62c6a4877b",
-      "result_file": "runs/cd62c6a4877b/conv1d_autoencoder_b1_cpu_fp32_rep1_20261127T221531.125Z.json",
-      "result_sha256": "2d3393a1b97a543b99b171a503c154b081d487498cc24a7a8cfeb46205bbec8f",
-      "log_file": "runs/cd62c6a4877b/run.log",
+      "started_utc": "2026-11-28T02:01:52.418Z",
+      "ended_utc": "2026-11-28T02:01:52.541Z",
+      "duration_s": 0.1207818,
+      "cooldown_s_before": 0.0,
+      "estimate_s": 3.7575328600000004,
+      "output_dir": "runs/ac63ff9ae718",
+      "result_file": "runs/ac63ff9ae718/tiny_b1_cpu_fp32_rep1_20261128T020152.481Z.json",
+      "result_sha256": "d2ffc1db9be8e8f41d9b03a38e12e1efb18168027d768e672f2a5cd847c790e5",
+      "log_file": "runs/ac63ff9ae718/run.log",
       "failure": null,
       "validation": "passed",
-      "validation_issues": [],
-      "warnings": [
-        "background_cpu_load_high"
+      "validation_issues": [
+        "warning: /suite/publishable: the suite was not publishable when this run started (gate not passed, skipped, a dirty build or a lost gate) [result_not_publishable]"
       ],
+      "warnings": [],
       "cache_build": null,
-      "discarded": [
-        "discarded/cd62c6a4877b-1"
-      ]
+      "discarded": [],
+      "in_flight": {
+        "checked_utc": "2026-11-28T02:01:52.407Z",
+        "wait_s": 0.0
+      },
+      "retries": 0,
+      "history": []
     }
   ]
 }

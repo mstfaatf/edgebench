@@ -191,6 +191,14 @@ json calibration_json(const ModelResult& m) {
     return {{"dataset", opt(q.calibration_dataset)}, {"sample_count", opt(q.calibration_count)}};
 }
 
+// model.variant: what EdgeBench's model pipeline wrote into the file (edgebench.variant).
+json variant_from_metadata(const BenchmarkResult& r) {
+    if (!r.graph)
+        return nullptr;
+    const auto it = r.graph->metadata.find("edgebench.variant");
+    return it == r.graph->metadata.end() || it->second.empty() ? json(nullptr) : json(it->second);
+}
+
 json model_json(const BenchmarkResult& r) {
     if (!r.known.model)
         return nullptr;
@@ -217,6 +225,7 @@ json model_json(const BenchmarkResult& r) {
           {"tool", quantized(m) ? opt(m.quantization_record.tool) : json(nullptr)}}},
         {"precision_notes", opt(m.precision_notes)},
         {"normalization", opt(m.normalization)},
+        {"variant", variant_from_metadata(r)},
     };
 }
 
@@ -377,6 +386,7 @@ json config_json(const BenchmarkResult& r) {
         {"run_binding", schema_name(c.binding)},
         {"profiling", {{"ort", false}, {"qnn_level", "off"}}},
         {"init_breakdown", c.init_breakdown},
+        {"process_priority", to_string(c.process_priority)},
     };
 }
 
@@ -455,14 +465,29 @@ json timing_json(const BenchmarkResult& r, const std::optional<std::vector<Linke
     const TimingResult& t = r.timing;
     if (t.trials.empty())
         return nullptr;
+    auto spike_json = [](const SpikeStats& s) {
+        json j = {{"iterations", s.iterations}};
+        if (s.threshold_ms)
+            j["threshold_ms"] = *s.threshold_ms;
+        j["count"] = s.count;
+        j["rate"] = s.rate;
+        j["max_to_median_ratio"] = s.max_to_median_ratio;
+        j["mean_ms"] = s.mean_ms;
+        j["mean_without_spikes_ms"] = s.mean_without_spikes_ms;
+        j["mean_shift_ratio"] = s.mean_shift_ratio;
+        return j;
+    };
     json trials = json::array();
+    std::vector<std::vector<double>> all_latencies;
     for (const TrialResult& trial : t.trials) {
         trials.push_back({{"trial_index", trial.trial_index},
                           {"stats", stats_json(trial.stats)},
                           {"session_init",
                            {{"cold_ms", opt(trial.session_init.cold_ms)},
                             {"context_build_ms", opt(trial.session_init.context_build_ms)},
-                            {"cached_init_ms", opt(trial.session_init.cached_init_ms)}}}});
+                            {"cached_init_ms", opt(trial.session_init.cached_init_ms)}}},
+                          {"spikes", spike_json(compute_spikes(trial.latencies_ms))}});
+        all_latencies.push_back(trial.latencies_ms);
     }
     json aggregate = nullptr;
     if (t.aggregate) {
@@ -484,6 +509,13 @@ json timing_json(const BenchmarkResult& r, const std::optional<std::vector<Linke
                                      {"cv_threshold_ratio", kHighTrialMedianCv},
                                      {"max_to_min_threshold", kHighTrialMedianRatio},
                                      {"high", trial_spread_high(m)}};
+        const SpikeStats s = combine_spikes(all_latencies);
+        json spikes = {{"factor", kSpikeFactor}, {"floor_ms", kSpikeFloorMs}};
+        spikes.update(spike_json(s));
+        spikes["mean_shift_threshold_ratio"] = kHighSpikeMeanShift;
+        spikes["rate_threshold_ratio"] = kHighSpikeRate;
+        spikes["high"] = spikes_high(s);
+        aggregate["spikes"] = spikes;
     }
     const SessionInitResult& si = t.session_init;
     return {
@@ -570,7 +602,11 @@ json to_result_json(const BenchmarkResult& r, const std::optional<RawLatencyLink
                         {"repetition", s->repetition},
                         {"order_index", s->order_index},
                         {"cooldown_s_before", s->cooldown_s_before},
-                        {"preflight_skipped", s->preflight_skipped}};
+                        {"preflight_skipped", s->preflight_skipped},
+                        {"attempt", s->attempt},
+                        {"gate_passed", s->gate_passed},
+                        {"publishable", s->publishable},
+                        {"in_flight_wait_s", s->in_flight_wait_s}};
     }
     return doc;
 }

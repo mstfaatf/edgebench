@@ -87,16 +87,26 @@ def latest_matrix(with_run: str | None = None) -> Path | None:
         if MATRIX_ROOT.is_dir() else []
     for d in reversed(dirs):
         runs = json.loads((d / "plan.json").read_text(encoding="utf-8"))["runs"]
-        if with_run is None or any(r["run_id"] == with_run for r in runs):
+        if (with_run is None or any(r["run_id"] == with_run for r in runs)) and current_schema(d, runs):
             return d
     return None
+
+
+def current_schema(directory: Path, runs: list[dict]) -> bool:
+    """Whether the matrix was written with the final 1.2.0 fields (spikes, process priority);
+    older local matrices would only show the keys they lack."""
+    for run in runs:
+        if run.get("result"):
+            doc = json.loads((directory / run["result"]).read_text(encoding="utf-8"))
+            return "process_priority" in doc["config"]
+    return False
 
 
 @pytest.fixture(scope="module")
 def matrix_dir():
     d = latest_matrix()
     if d is None:
-        pytest.skip("no local matrix run (scripts/run_matrix.py)")
+        pytest.skip("no local matrix run with the current schema (scripts/run_matrix.py)")
     return d
 
 

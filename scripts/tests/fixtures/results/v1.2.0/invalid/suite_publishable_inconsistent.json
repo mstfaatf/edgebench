@@ -1,0 +1,24 @@
+{
+  "description": "A result that says it is publishable although the suite's gate did not pass.",
+  "base": "docs/examples/v1.2.0/example-cpu-fp32.json",
+  "set": {
+    "/suite": {
+      "suite_name": "smoke",
+      "suite_config_hash": "b6ff9607c4de301c16627364109b8de31bf7c0658c6b0bacc26681a517d21db0",
+      "run_id": "6bdac65d426c58bd0e6d5c49b8ea3dbd7a2e0f2f7e6f0e5e2a64f2f5d1e9c3a1",
+      "repetition": 0,
+      "order_index": 0,
+      "cooldown_s_before": 2.0,
+      "preflight_skipped": false,
+      "attempt": 1,
+      "gate_passed": false,
+      "publishable": true,
+      "in_flight_wait_s": 0.0
+    }
+  },
+  "expect": {
+    "severity": "error",
+    "code": "suite_publishable_inconsistent",
+    "path": "/suite/publishable"
+  }
+}

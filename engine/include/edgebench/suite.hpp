@@ -36,6 +36,7 @@
 
 #include "edgebench/result.hpp"
 #include "edgebench/suite_config.hpp"
+#include "edgebench/suite_gate.hpp"
 
 namespace edgebench::suite {
 
@@ -49,22 +50,13 @@ std::optional<RunStatus> parse_run_status(std::string_view text);
 
 // ------------------------------------------------------------------- pre-flight
 
-enum class GateStatus { pass, warn, fail };
-std::string_view to_string(GateStatus status);
-
-/// The outcome of one pre-flight check.
-struct GateResult {
-    std::string name;
-    GateStatus status = GateStatus::fail;
-    std::string summary;
-    nlohmann::ordered_json details = nlohmann::ordered_json::object();
-};
-
 /// What a pre-flight check may use.
 struct PreflightContext {
     std::filesystem::path exe;        // edgebench.exe
     std::filesystem::path suite_dir;  // where reports go
     int attempt = 1;                  // 1-based: the n-th pre-flight of this suite
+    const SuitePlan* plan = nullptr;  // thresholds, sustained-load legs
+    double estimate_s = 0;            // the suite's estimated duration
 };
 
 /// One check of the pre-flight gate. Checks run in order; any fail stops the suite
@@ -83,11 +75,13 @@ public:
 std::unique_ptr<PreflightCheck> make_doctor_check();
 
 /// The checks named in the configuration, in order (unknown names: none; the
-/// configuration loader only accepts known names).
+/// configuration loader only accepts known names): power, sleep, npu_users,
+/// idle, doctor, sustained_load.
 std::vector<std::unique_ptr<PreflightCheck>> make_preflight_checks(
     const std::vector<std::string>& names);
 
-/// The checks a suite must pass for its results to be publishable.
+/// The checks a suite must pass for its results to be publishable: every check
+/// of gate_check_names(), each with status pass.
 const std::vector<std::string>& publish_gate_checks();
 
 /// The gate's verdict over its checks: fail if any check failed, or warned with
@@ -132,15 +126,19 @@ double estimate_run_s(const ResolvedConfiguration& c, const TimingBasis& basis);
 
 /// Fixed costs of a run's process (start, ONNX Runtime load, model hash, placement
 /// session bookkeeping) and of validating its result.
-inline constexpr double kProcessOverheadS = 3.0;
-inline constexpr double kNpuProcessOverheadS = 4.0;
-inline constexpr double kValidationS = 1.5;
+/// Measured on suite runs of the autoencoder: 0.16 s per CPU run and 0.6 s per NPU
+/// run outside the measured iterations, idle periods and session creations, and
+/// 0.3 s per validation; the constants keep a wide margin above that.
+inline constexpr double kProcessOverheadS = 1.0;
+inline constexpr double kNpuProcessOverheadS = 1.5;
+inline constexpr double kValidationS = 1.0;
 inline constexpr double kPreflightS = 5.0;
 /// Every estimate is multiplied by this.
 inline constexpr double kEstimateMargin = 1.25;
 
 struct SuiteEstimate {
     double total_s = 0;
+    double gate_s = 0;          // the pre-flight gate (included in total_s)
     std::vector<double> run_s;  // per planned run, in order
     int from_prior = 0;         // configurations estimated from earlier results
     int from_heuristic = 0;
@@ -177,13 +175,19 @@ struct RunRecord {
     std::vector<std::string> warnings;  // codes of the result's warnings (no value_unavailable)
     nlohmann::ordered_json cache_build = nullptr;  // init "cached": the build run
     std::vector<std::string> discarded;            // output of earlier attempts, moved aside
+    /// The check before the latest attempt: power, load samples, waits.
+    nlohmann::ordered_json in_flight = nullptr;
+    /// Earlier attempts: {attempt, status, exit_code, warnings, result_file, reason, ...}.
+    nlohmann::ordered_json history = nlohmann::ordered_json::array();
+    int retries = 0;  // attempts started by retry_flagged
 };
 
 struct PreflightAttempt {
     std::string started_utc;
     bool skipped = false;
-    bool passed = false;
+    bool passed = false;  // no check failed (the suite may run)
     std::vector<GateResult> checks;
+    nlohmann::ordered_json settings = nullptr;  // the effective thresholds
 };
 
 struct Invocation {
@@ -214,6 +218,12 @@ struct SuiteManifest {
     std::vector<Invocation> invocations;
     SuiteEstimate estimate;
     std::vector<RunRecord> runs;
+    double in_flight_wait_s = 0;  // waiting for power or load before runs, all invocations
+    /// The power state was lost during a run of the suite and not restored in time.
+    std::optional<std::string> gate_lost;
+
+    /// Every gate check of the latest (not skipped) pre-flight passed.
+    bool gate_passed() const;
 
     bool publishable() const;
     std::vector<std::string> not_publishable_reasons() const;
@@ -236,6 +246,9 @@ enum class ResumeAction {
 ResumeAction resume_action(const RunRecord& run,
                            const std::function<bool(const RunRecord&)>& result_valid);
 
+/// Warnings that make retry_flagged run a finished run again.
+bool retry_worthy(const RunRecord& run);
+
 // ----------------------------------------------------------------------- running
 
 struct SuiteOptions {
@@ -253,8 +266,9 @@ struct SuiteOptions {
 struct SuiteHooks {
     /// After a run's child process has started.
     std::function<void(const RunRecord&)> run_started;
-    /// After a run has finished and the manifest was written.
-    std::function<void(const RunRecord&)> run_finished;
+    /// After a run has finished and the manifest was written (the record may be
+    /// changed, e.g. to flag it).
+    std::function<void(RunRecord&)> run_finished;
 };
 
 /// The plan as a table plus the estimate (what --dry-run prints).

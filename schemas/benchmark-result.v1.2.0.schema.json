@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/mstfaatf/edgebench/main/schemas/benchmark-result.v1.2.0.schema.json",
   "title": "EdgeBench benchmark result",
-  "description": "One benchmark run: one model, one provider configuration, one or more trials. Schema version 1.2.0. Fields added in 1.1.0 and 1.2.0 are optional keys, so a 1.0.0 or 1.1.0 document with schema_version set to 1.2.0 is valid. See docs/results-schema.md.",
+  "description": "One benchmark run: one model, one provider configuration, one or more trials. Schema version 1.2.0 (frozen: any change is a new version). Fields added in 1.1.0 and 1.2.0 are optional keys, so a 1.0.0 or 1.1.0 document with schema_version set to 1.2.0 is valid. See docs/results-schema.md.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -432,6 +432,10 @@
             "normalization": {
               "enum": ["external", "in_graph", "folded", null],
               "description": "Where input normalization happens: external (before the model, not timed), in_graph (Sub/Div nodes in the model, timed), folded (merged into the first layer's weights)."
+            },
+            "variant": {
+              "type": ["string", "null"],
+              "description": "The file's variant as EdgeBench's model pipeline recorded it (metadata edgebench.variant, e.g. int8, int8_unpruned, int8_folded); null for files without it."
             }
           }
         }
@@ -637,6 +641,10 @@
         "init_breakdown": {
           "type": "boolean",
           "description": "True if every trial also timed a cold, a context-building and a cached session creation (timing.trials[].session_init) before its timed session. Added in 1.2.0."
+        },
+        "process_priority": {
+          "enum": ["normal", "high"],
+          "description": "Windows priority class of the run's process (run --process-priority): normal as started, or HIGH_PRIORITY_CLASS. No CPU affinity and no timer resolution request are made."
         },
         "profiling": {
           "description": "Profiling settings of the sessions that produced timing.trials. Profiled sessions are never timed; see timing.accelerator.",
@@ -1015,7 +1023,8 @@
                         }
                       }
                     ]
-                  }
+                  },
+                  "spikes": {"$ref": "#/$defs/trialSpikes"}
                 }
               }
             },
@@ -1061,7 +1070,8 @@
                         "max_to_min_threshold": {"type": "number", "minimum": 1},
                         "high": {"type": "boolean"}
                       }
-                    }
+                    },
+                    "spikes": {"$ref": "#/$defs/aggregateSpikes"}
                   }
                 }
               ]
@@ -1250,7 +1260,7 @@
       "additionalProperties": false,
       "required": [
         "suite_name", "suite_config_hash", "run_id", "repetition", "order_index", "cooldown_s_before",
-        "preflight_skipped"
+        "preflight_skipped", "attempt", "gate_passed", "publishable", "in_flight_wait_s"
       ],
       "properties": {
         "suite_name": {"type": "string", "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$"},
@@ -1265,7 +1275,14 @@
         "preflight_skipped": {
           "type": "boolean",
           "description": "True if the suite ran without its pre-flight gate (--skip-preflight): the result is not publishable."
-        }
+        },
+        "attempt": {"type": "integer", "minimum": 1, "description": "1-based attempt of this run in the suite (after an interruption, a failure or a retry_flagged retry)."},
+        "gate_passed": {"type": "boolean", "description": "Every check of the suite's pre-flight gate passed (not skipped, no warning)."},
+        "publishable": {
+          "type": "boolean",
+          "description": "The suite was publishable when the run started: gate passed, never skipped, a clean build, no gate lost. False makes the validator report result_not_publishable, so --strict rejects the result."
+        },
+        "in_flight_wait_s": {"type": "number", "minimum": 0, "description": "Time the suite waited before this run for the power state or the background load."}
       },
       "description": "Present only when `edgebench suite` launched the run: where it belongs in the suite. Absent for a run started by hand."
     }
@@ -1299,6 +1316,45 @@
     }
   ],
   "$defs": {
+    "trialSpikes": {
+      "description": "Iterations slower than factor x this trial's median and at least floor_ms above it (timing.aggregate.spikes). Reported only: every sample stays in the statistics.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["iterations", "threshold_ms", "count", "rate", "max_to_median_ratio", "mean_ms",
+                   "mean_without_spikes_ms", "mean_shift_ratio"],
+      "properties": {
+        "iterations": {"type": "integer", "minimum": 1},
+        "threshold_ms": {"type": "number", "minimum": 0, "description": "max(factor x median, median + floor_ms)."},
+        "count": {"type": "integer", "minimum": 0},
+        "rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "max_to_median_ratio": {"type": "number", "minimum": 0},
+        "mean_ms": {"type": "number", "minimum": 0},
+        "mean_without_spikes_ms": {"type": "number", "minimum": 0},
+        "mean_shift_ratio": {"type": "number"}
+      }
+    },
+    "aggregateSpikes": {
+      "description": "Spikes of every trial pooled, each iteration judged against its own trial's median. high is true if mean_shift_ratio exceeds mean_shift_threshold_ratio or rate exceeds rate_threshold_ratio; then the result carries a latency_spikes_high warning. Medians and percentiles are never changed by it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["factor", "floor_ms", "iterations", "count", "rate", "max_to_median_ratio", "mean_ms",
+                   "mean_without_spikes_ms", "mean_shift_ratio", "mean_shift_threshold_ratio",
+                   "rate_threshold_ratio", "high"],
+      "properties": {
+        "factor": {"type": "number", "exclusiveMinimum": 1},
+        "floor_ms": {"type": "number", "minimum": 0},
+        "iterations": {"type": "integer", "minimum": 1},
+        "count": {"type": "integer", "minimum": 0},
+        "rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "max_to_median_ratio": {"type": "number", "minimum": 0},
+        "mean_ms": {"type": "number", "minimum": 0},
+        "mean_without_spikes_ms": {"type": "number", "minimum": 0},
+        "mean_shift_ratio": {"type": "number"},
+        "mean_shift_threshold_ratio": {"type": "number", "exclusiveMinimum": 0},
+        "rate_threshold_ratio": {"type": "number", "exclusiveMinimum": 0},
+        "high": {"type": "boolean"}
+      }
+    },
     "uuid": {
       "type": "string",
       "format": "uuid",

@@ -27,7 +27,7 @@ const fs::path kSourceDir = fs::path(EDGEBENCH_SOURCE_DIR).make_preferred();
 const fs::path kFixtures = kSourceDir / "scripts" / "tests" / "fixtures" / "suite";
 // Pinned in scripts/tests/test_validate_suite.py too: both sides hash the same way.
 constexpr const char* kExplicitCpuHash =
-    "3234ed5a4fe45e164cf6e0e42aced9fc3b0eb382a1321afe8918062cbc04f571";
+    "ec3a3527ee0872df1e2872db3b511d64a8fe3ef221395162dff32ff4ddf2a5bb";
 
 json read(const fs::path& p) {
     std::ifstream in(p, std::ios::binary);
@@ -413,7 +413,9 @@ TEST(SuiteEstimate, PriorResultsMatchByModelProviderPrecisionAndBatch) {
     EXPECT_EQ(e.from_prior, 1);
     EXPECT_EQ(e.from_heuristic, 1);
     ASSERT_EQ(e.run_s.size(), plan.runs.size());
-    double sum = su::kPreflightS * su::kEstimateMargin;
+    // The gate of this configuration: doctor and the quick checks.
+    EXPECT_NEAR(e.gate_s, (su::kPreflightS + 1.0) * su::kEstimateMargin, 1e-9);
+    double sum = e.gate_s;
     for (double s : e.run_s)
         sum += s;
     EXPECT_NEAR(e.total_s, sum, 1e-9);
@@ -449,7 +451,8 @@ su::SuiteManifest sample_manifest() {
     su::PreflightAttempt a;
     a.started_utc = "2026-11-27T00:00:00.000Z";
     a.passed = true;
-    a.checks.push_back({"doctor", su::GateStatus::warn, "doctor exit 0, warn", {{"exit_code", 0}}});
+    for (const std::string& name : su::publish_gate_checks())
+        a.checks.push_back({name, su::GateStatus::pass, name + " passed", {{"exit_code", 0}}});
     m.preflight.push_back(a);
     for (int i = 0; i < 3; ++i) {
         su::RunRecord r;

@@ -248,7 +248,8 @@
       "tool": null
     },
     "precision_notes": "Stored as FP32; the QNN HTP backend computes in FP16 (enable_htp_fp16_precision = 1). The NPU has no FP32 compute.",
-    "normalization": null
+    "normalization": null,
+    "variant": null
   },
   "config": {
     "requested": {
@@ -302,7 +303,8 @@
       "ort": false,
       "qnn_level": "off"
     },
-    "init_breakdown": false
+    "init_breakdown": false,
+    "process_priority": "normal"
   },
   "execution": null,
   "timing": null,

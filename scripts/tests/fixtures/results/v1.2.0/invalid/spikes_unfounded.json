@@ -1,0 +1,8 @@
+{
+  "description": "A latency_spikes_high warning although the spikes are within both thresholds.",
+  "base": "docs/examples/v1.2.0/example-cpu-fp32.json",
+  "set": {
+    "/warnings/-": {"code": "latency_spikes_high", "message": "Spikes.", "path": "/timing/aggregate/spikes"}
+  },
+  "expect": {"severity": "error", "code": "spikes_unfounded", "path": "/timing/aggregate/spikes/high"}
+}

@@ -46,7 +46,8 @@ const std::vector<std::string> kParamKeys = {"warmup",
                                              "init_breakdown",
                                              "profile_accelerator",
                                              "profile_iterations",
-                                             "cooldown_s"};
+                                             "cooldown_s",
+                                             "process_priority"};
 
 bool contains(const std::vector<std::string>& keys, const std::string& key) {
     return std::find(keys.begin(), keys.end(), key) != keys.end();
@@ -236,6 +237,9 @@ void read_param_key(Reader& rd, const json& v, const std::string& at, const std:
     } else if (key == "profile_iterations") {
         if (auto n = rd.integer(v, at))
             p.profile_iterations = *n;
+    } else if (key == "process_priority") {
+        if (auto s = rd.choice(v, at, {"normal", "high"}))
+            p.process_priority = *parse_process_priority(*s);
     } else if (key == "cooldown_s") {
         if (!v.is_number()) {
             rd.add(at, "must be a number of seconds (got " + type_name(v) + ")");
@@ -317,6 +321,8 @@ struct RawConfiguration {
     json param_keys = json::object();  // the run parameters written in the entry itself
     std::string source;
     std::string pointer;
+    bool sustained = false;  // a sustained-load leg, not a planned run
+    double duration_s = 0;
 };
 
 std::optional<RawConfiguration> read_configuration(Reader& rd, const json& obj,
@@ -399,6 +405,25 @@ std::string_view to_string(Rotation rotation) {
     return rotation == Rotation::blocked ? "blocked" : "rotated";
 }
 
+const std::vector<std::string>& gate_check_names() {
+    static const std::vector<std::string> names = {"power", "sleep",  "npu_users",
+                                                   "idle",  "doctor", "sustained_load"};
+    return names;
+}
+
+std::vector<SustainedLegSpec> PreflightSettings::default_sustained_legs() {
+    SustainedLegSpec cpu;
+    cpu.identity.model = "resnet18";
+    cpu.identity.provider = ProviderKind::cpu;
+    cpu.identity.precision = "fp32";
+    cpu.duration_s = 180;
+    SustainedLegSpec npu = cpu;
+    npu.identity.provider = ProviderKind::npu;
+    npu.identity.precision = "int8";
+    npu.duration_s = 120;
+    return {cpu, npu};
+}
+
 bool is_valid_suite_name(std::string_view name) {
     return is_valid_result_name(name);
 }
@@ -464,6 +489,7 @@ RunConfig to_run_config(const ResolvedConfiguration& c, const fs::path& output_d
     r.provider = c.identity.provider;
     r.threads = c.params.threads;
     r.binding = c.params.binding;
+    r.process_priority = c.params.process_priority;
     r.warmup = c.params.warmup;
     r.iterations = c.params.iterations;
     r.trials = c.params.trials;
@@ -535,6 +561,8 @@ std::vector<std::string> run_arguments(const RunConfig& c) {
                                   std::to_string(c.load_sample_ms),
                                   "--output-dir",
                                   path_to_utf8(c.output_dir)};
+    if (c.process_priority != ProcessPriority::normal)
+        a.insert(a.end(), {"--process-priority", std::string(to_string(c.process_priority))});
     if (c.name)
         a.insert(a.end(), {"--name", *c.name});
     if (c.label)
@@ -565,8 +593,14 @@ std::vector<std::string> run_arguments(const RunConfig& c) {
                   "--suite-run-id", s.run_id, "--suite-repetition", std::to_string(s.repetition),
                   "--suite-order-index", std::to_string(s.order_index), "--suite-cooldown-s-before",
                   format_seconds(s.cooldown_s_before)});
+        a.insert(a.end(), {"--suite-attempt", std::to_string(s.attempt), "--suite-in-flight-wait-s",
+                           format_seconds(s.in_flight_wait_s)});
         if (s.preflight_skipped)
             a.push_back("--suite-preflight-skipped");
+        if (s.gate_passed)
+            a.push_back("--suite-gate-passed");
+        if (s.publishable)
+            a.push_back("--suite-publishable");
     }
     return a;
 }
@@ -587,7 +621,7 @@ LoadOutcome plan_suite(const json& doc, const fs::path& config_file,
     rd.only_keys(doc, "",
                  {"suite_config_version", "name", "description", "output_dir", "models_dir",
                   "models", "configurations", "matrix", "defaults", "overrides", "repetitions",
-                  "rotation", "cooldown_s", "preflight"});
+                  "rotation", "cooldown_s", "preflight", "in_flight", "retry_flagged"});
     for (const char* key : {"suite_config_version", "name", "output_dir", "models"}) {
         if (!doc.contains(key))
             rd.add("", std::string("missing required key '") + key + "'");
@@ -638,13 +672,105 @@ LoadOutcome plan_suite(const json& doc, const fs::path& config_file,
         if (auto s = rd.choice(doc["rotation"], "/rotation", {"rotated", "blocked"}))
             plan.rotation = *s == "blocked" ? Rotation::blocked : Rotation::rotated;
     }
+    // A number in [lo, hi] at `at`, into `target`.
+    auto number = [&rd](const json& obj, const char* key, const std::string& at, double lo,
+                        double hi, double& target) {
+        if (!obj.contains(key))
+            return;
+        const json& v = obj[key];
+        const std::string where = ptr(at, key);
+        if (!v.is_number()) {
+            rd.add(where, "must be a number (got " + type_name(v) + ")");
+            return;
+        }
+        const double x = v.get<double>();
+        if (!std::isfinite(x) || x < lo || x > hi) {
+            rd.add(where, "must be between " + json(lo).dump() + " and " + json(hi).dump() +
+                              " (got " + v.dump() + ")");
+            return;
+        }
+        target = x;
+    };
+    if (doc.contains("in_flight") && rd.is_object(doc["in_flight"], "/in_flight")) {
+        const json& f = doc["in_flight"];
+        rd.only_keys(f, "/in_flight",
+                     {"load_sample_s", "max_wait_s", "power_max_wait_s", "on_gate_loss"});
+        number(f, "load_sample_s", "/in_flight", 0.5, 600, plan.in_flight.load_sample_s);
+        number(f, "max_wait_s", "/in_flight", 0, 86400, plan.in_flight.max_wait_s);
+        number(f, "power_max_wait_s", "/in_flight", 0, 86400, plan.in_flight.power_max_wait_s);
+        if (f.contains("on_gate_loss")) {
+            if (auto s = rd.choice(f["on_gate_loss"], "/in_flight/on_gate_loss", {"wait", "stop"}))
+                plan.in_flight.on_gate_loss = *s;
+        }
+    }
+    if (doc.contains("retry_flagged")) {
+        if (auto n = rd.integer(doc["retry_flagged"], "/retry_flagged")) {
+            if (*n < 0 || *n > 5)
+                rd.add("/retry_flagged",
+                       "must be between 0 and 5 (got " + std::to_string(*n) + ")");
+            plan.retry_flagged = *n;
+        }
+    }
+    std::vector<RawConfiguration> legs;  // resolved with the configurations below
     if (doc.contains("preflight") && rd.is_object(doc["preflight"], "/preflight")) {
         const json& p = doc["preflight"];
-        rd.only_keys(p, "/preflight", {"checks", "fail_on_warn"});
+        rd.only_keys(p, "/preflight",
+                     {"checks", "fail_on_warn", "idle", "sleep", "sustained_load"});
+        if (p.contains("idle") && rd.is_object(p["idle"], "/preflight/idle")) {
+            rd.only_keys(p["idle"], "/preflight/idle", {"window_s", "max_cpu_ratio"});
+            number(p["idle"], "window_s", "/preflight/idle", 1, 3600, plan.preflight.idle_window_s);
+            number(p["idle"], "max_cpu_ratio", "/preflight/idle", 0, 1,
+                   plan.preflight.idle_max_cpu_ratio);
+        }
+        if (p.contains("sleep") && rd.is_object(p["sleep"], "/preflight/sleep")) {
+            rd.only_keys(p["sleep"], "/preflight/sleep", {"margin_s"});
+            number(p["sleep"], "margin_s", "/preflight/sleep", 0, 86400,
+                   plan.preflight.sleep_margin_s);
+        }
+        if (p.contains("sustained_load") &&
+            rd.is_object(p["sustained_load"], "/preflight/sustained_load")) {
+            const json& s = p["sustained_load"];
+            const std::string at = "/preflight/sustained_load";
+            rd.only_keys(s, at, {"legs", "window_s", "max_drift_ratio"});
+            number(s, "window_s", at, 1, 3600, plan.preflight.sustained_window_s);
+            number(s, "max_drift_ratio", at, 0, 10, plan.preflight.sustained_max_drift_ratio);
+            if (s.contains("legs") && rd.is_array(s["legs"], ptr(at, "legs"), true)) {
+                plan.preflight.sustained_legs.clear();
+                for (std::size_t i = 0; i < s["legs"].size(); ++i) {
+                    const json& leg = s["legs"][i];
+                    const std::string lat = ptr(ptr(at, "legs"), i);
+                    if (!rd.is_object(leg, lat))
+                        continue;
+                    rd.only_keys(leg, lat,
+                                 {"model", "path", "provider", "precision", "batch", "variant",
+                                  "npu_fp16", "htp_performance_mode", "duration_s"});
+                    SustainedLegSpec spec;
+                    spec.identity.batch = 1;
+                    for (const char* key : {"provider", "precision", "duration_s"}) {
+                        if (!leg.contains(key))
+                            rd.add(lat, std::string("missing required key '") + key + "'");
+                    }
+                    if (leg.contains("model") == leg.contains("path"))
+                        rd.add(lat, "give exactly one of 'model' (a manifest name) and 'path'");
+                    for (auto it = leg.begin(); it != leg.end(); ++it) {
+                        if (contains(kIdentityKeys, it.key()))
+                            read_identity_key(rd, it.value(), ptr(lat, it.key()), it.key(),
+                                              spec.identity);
+                    }
+                    if (leg.contains("path")) {
+                        if (auto ps = rd.string(leg["path"], ptr(lat, "path")))
+                            spec.path = *ps;
+                    }
+                    number(leg, "duration_s", lat, 10, 7200, spec.duration_s);
+                    plan.preflight.sustained_legs.push_back(spec);
+                }
+            }
+        }
         if (p.contains("checks") && rd.is_array(p["checks"], "/preflight/checks", false)) {
             plan.preflight.checks.clear();
             for (std::size_t i = 0; i < p["checks"].size(); ++i) {
-                if (auto s = rd.choice(p["checks"][i], ptr("/preflight/checks", i), {"doctor"})) {
+                if (auto s = rd.choice(p["checks"][i], ptr("/preflight/checks", i),
+                                       gate_check_names())) {
                     if (contains(plan.preflight.checks, *s))
                         rd.add(ptr("/preflight/checks", i), "'" + *s + "' is listed twice");
                     plan.preflight.checks.push_back(*s);
@@ -727,6 +853,44 @@ LoadOutcome plan_suite(const json& doc, const fs::path& config_file,
             if (!names.insert(entry.name).second)
                 rd.add(at, "model '" + entry.name + "' is listed twice");
             models.push_back(std::move(entry));
+        }
+    }
+
+    // Only these models may be used by configurations (legs add their own below).
+    const std::size_t configured_models = models.size();
+
+    // The sustained-load legs (only when the check runs): their models need not be
+    // listed in `models`.
+    if (contains(plan.preflight.checks, "sustained_load")) {
+        for (std::size_t i = 0; i < plan.preflight.sustained_legs.size(); ++i) {
+            const SustainedLegSpec& spec = plan.preflight.sustained_legs[i];
+            RawConfiguration leg;
+            leg.identity = spec.identity;
+            leg.sustained = true;
+            leg.duration_s = spec.duration_s;
+            leg.source = "preflight.sustained_load.legs[" + std::to_string(i) + "]";
+            leg.pointer = "/preflight/sustained_load/legs/" + std::to_string(i);
+            if (spec.path) {
+                ModelEntry entry;
+                entry.name = "sustained-load-" + std::to_string(i);
+                ModelFileEntry file;
+                file.path = (base_dir / from_utf8(*spec.path)).lexically_normal();
+                file.display = *spec.path;
+                file.precision = spec.identity.precision;
+                file.batch = spec.identity.batch;
+                entry.files.push_back(file);
+                models.push_back(entry);
+                leg.identity.model = entry.name;
+            } else if (std::none_of(models.begin(), models.end(), [&](const ModelEntry& m) {
+                           return m.name == spec.identity.model;
+                       })) {
+                ModelEntry entry;
+                entry.name = spec.identity.model;
+                entry.from_manifest = true;
+                need_manifest = true;
+                models.push_back(entry);
+            }
+            legs.push_back(std::move(leg));
         }
     }
 
@@ -829,8 +993,8 @@ LoadOutcome plan_suite(const json& doc, const fs::path& config_file,
         if (mx.contains("models"))
             axis("models", model_axis);
         else
-            for (const ModelEntry& m : models)
-                model_axis.push_back(m.name);
+            for (std::size_t i = 0; i < configured_models; ++i)
+                model_axis.push_back(models[i].name);
         axis("providers", providers);
         axis("precisions", precisions);
         axis("batches", batches);
@@ -975,6 +1139,10 @@ LoadOutcome plan_suite(const json& doc, const fs::path& config_file,
         return out;
     }
 
+    const std::size_t planned_count = raw.size();
+    for (RawConfiguration& leg : legs)
+        raw.push_back(std::move(leg));
+
     // Resolve every configuration.
     std::map<std::string, std::string> seen_ids;  // configuration id -> source
     std::map<fs::path, std::string> file_hashes;
@@ -985,7 +1153,19 @@ LoadOutcome plan_suite(const json& doc, const fs::path& config_file,
         c.source = rc.source;
         c.source_index = index;
         c.params = defaults;
+        if (rc.sustained) {
+            // One continuous trial; the suite sets the iterations from a short calibration.
+            c.params = RunParams{};
+            c.params.trials = 1;
+            c.params.warmup = 20;
+            c.params.trial_cooldown_ms = 0;
+            c.params.load_sample_ms = 0;
+            c.params.cooldown_s = 0;
+            c.sustained_duration_s = rc.duration_s;
+        }
         for (Override& o : overrides) {
+            if (rc.sustained)
+                break;
             if (matches(o.match, c.identity)) {
                 ++o.match.matched;
                 read_params(rd, o.set,
@@ -1003,9 +1183,12 @@ LoadOutcome plan_suite(const json& doc, const fs::path& config_file,
         const std::string at = rc.pointer;
 
         // The model file.
-        const auto model_it = std::find_if(models.begin(), models.end(),
+        const auto model_end =
+            rc.sustained ? models.end()
+                         : models.begin() + static_cast<std::ptrdiff_t>(configured_models);
+        const auto model_it = std::find_if(models.begin(), model_end,
                                            [&](const ModelEntry& m) { return m.name == id.model; });
-        if (model_it == models.end()) {
+        if (model_it == model_end) {
             rd.add(at, what + ": unknown model '" + id.model + "' (not in 'models')",
                    "unknown_model");
             continue;
@@ -1193,8 +1376,13 @@ LoadOutcome plan_suite(const json& doc, const fs::path& config_file,
                                        ? ojson(run.effective_profile_iterations())
                                        : ojson(nullptr)},
             {"cooldown_s", c.params.cooldown_s},
+            {"process_priority", to_string(c.params.process_priority)},
         };
         c.configuration_id = sha256_hex(canonical_json(json::parse(c.resolved.dump())));
+        if (index >= planned_count) {
+            plan.sustained.push_back(std::move(c));
+            continue;
+        }
         if (const auto dup = seen_ids.find(c.configuration_id); dup != seen_ids.end()) {
             rd.add(at, what + ": the same configuration as " + dup->second,
                    "duplicate_configuration");

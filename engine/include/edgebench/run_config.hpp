@@ -27,6 +27,10 @@ enum class RunBinding { run, iobinding_preallocated };
 enum class InputKind { random, constant };
 enum class GraphOptLevel { disable_all, enable_basic, enable_extended, enable_all };
 enum class OutputFormat { summary, json };
+/// --process-priority: the Windows priority class of the run's process. normal
+/// (the default) leaves it as started; high is HIGH_PRIORITY_CLASS (opt-in: fewer
+/// latency spikes on a loaded machine, docs/methodology.md#spikes).
+enum class ProcessPriority { normal, high };
 /// --ep-cache: off (compile every session from the ONNX model), build (rebuild the
 /// EP context cache once before the trials, then create every timed session from
 /// it), use (create the timed sessions from an existing cache with a matching key;
@@ -44,6 +48,10 @@ struct SuiteLink {
     int order_index = 0;      // 0-based position in the suite's run order
     double cooldown_s_before = 0.0;
     bool preflight_skipped = false;  // the suite ran without its pre-flight gate
+    int attempt = 1;                 // 1-based attempt of this run (interruptions, retries)
+    bool gate_passed = false;        // every pre-flight gate check passed
+    bool publishable = false;        // the suite was publishable when the run started
+    double in_flight_wait_s = 0;     // waiting for power or background load before the run
     bool operator==(const SuiteLink&) const = default;
 };
 
@@ -72,6 +80,7 @@ struct RunConfig {
     std::optional<std::string> name;  // result file name; default: default_result_name()
     OutputFormat format = OutputFormat::summary;
     bool dry_run = false;
+    ProcessPriority process_priority = ProcessPriority::normal;
 
     // NPU only (--provider npu); usage errors with any other provider.
     bool strict = true;     // session.disable_cpu_ep_fallback = 1; --no-strict clears it
@@ -135,8 +144,10 @@ std::optional<InputKind> parse_input_kind(std::string_view text);
 std::optional<GraphOptLevel> parse_graph_opt(std::string_view text);
 std::optional<OutputFormat> parse_output_format(std::string_view text);
 std::optional<EpCacheMode> parse_ep_cache_mode(std::string_view text);
-std::string_view cli_name(RunBinding binding);     // "run" or "iobinding"
-std::string_view cli_name(ProviderKind provider);  // "cpu" or "npu"
+std::optional<ProcessPriority> parse_process_priority(std::string_view text);
+std::string_view to_string(ProcessPriority priority);  // "normal" or "high" (CLI and schema)
+std::string_view cli_name(RunBinding binding);         // "run" or "iobinding"
+std::string_view cli_name(ProviderKind provider);      // "cpu" or "npu"
 
 /// Comma-separated list of the accepted `--provider` values, e.g. "cpu, npu".
 std::string_view supported_providers();

@@ -11,7 +11,9 @@ against schemas/suite-manifest.v<version>.schema.json, plus these rules:
 - rotation "rotated": round r (repetition r) runs every configuration once,
   in one block; "blocked": the repetitions of a configuration are one block;
 - preflight_ever_skipped is true exactly if an invocation had skip_preflight,
-  and then publishable is false;
+  and then publishable is false; gate_passed says whether every gate check of
+  the latest pre-flight passed, and a publishable suite passed it and never lost it;
+- a run's retries are covered by its history of earlier attempts;
 - a done run's result file exists, has the recorded SHA256, and its suite block
   names this suite, run, repetition and order (skipped with --no-files).
 
@@ -38,6 +40,8 @@ import jsonschema
 
 SCHEMA_DIR = Path(__file__).resolve().parent.parent / "schemas"
 MANIFEST_NAME = "suite-manifest.json"
+# The gate checks a publishable suite passed (engine suite_config.cpp gate_check_names()).
+GATE_CHECKS = ("power", "sleep", "npu_users", "idle", "doctor", "sustained_load")
 KINDS = {"suite_config_version": "suite-config", "suite_manifest_version": "suite-manifest"}
 
 
@@ -118,6 +122,17 @@ def manifest_issues(m: dict[str, Any], directory: Path | None) -> list[str]:
         add("/publishable: a suite that skipped its pre-flight check is not publishable")
     if m["publishable"] != (not m["not_publishable_reasons"]):
         add("/publishable: disagrees with not_publishable_reasons")
+    attempts = [a for a in m["preflight"] if not a["skipped"]]
+    gate = bool(attempts) and all(
+        any(c["name"] == name and c["status"] == "pass" for c in attempts[-1]["checks"])
+        for name in GATE_CHECKS)
+    if m["gate_passed"] != gate:
+        add(f"/gate_passed: {m['gate_passed']}, the latest pre-flight says {gate}")
+    if m["publishable"] and (not m["gate_passed"] or m["gate_lost"] is not None):
+        add("/publishable: a suite whose gate did not pass, or was lost, is not publishable")
+    for i, r in enumerate(runs):
+        if r["retries"] > len(r["history"]):
+            add(f"/runs/{i}/retries: {r['retries']} retries but {len(r['history'])} earlier attempts")
     if directory is None:
         return out
     for i, r in enumerate(runs):
@@ -134,7 +149,7 @@ def manifest_issues(m: dict[str, Any], directory: Path | None) -> list[str]:
         want_link = {"suite_name": m["suite"]["name"],
                      "suite_config_hash": m["suite"]["config_sha256"], "run_id": r["run_id"],
                      "repetition": r["repetition"], "order_index": r["order_index"],
-                     "preflight_skipped": m["preflight_ever_skipped"]}
+                     "preflight_skipped": m["preflight_ever_skipped"], "attempt": r["attempts"]}
         if link is None or any(link.get(k) != v for k, v in want_link.items()):
             add(f"/runs/{i}: the result's suite block {link} does not name this run")
     return out

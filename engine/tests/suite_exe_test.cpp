@@ -77,7 +77,8 @@ json cpu_suite(const fs::path& out) {
               {"trial_cooldown_ms", 0},
               {"load_sample_ms", 0}}},
             {"cooldown_s", 0},
-            {"repetitions", 2}};
+            {"repetitions", 2},
+            {"preflight", {{"checks", {"doctor"}}}}};
 }
 
 std::optional<std::string> skip_reason() {
@@ -429,10 +430,163 @@ TEST(SuiteNpu, SmokeConfigurationEndToEnd) {
         GTEST_SKIP() << "the smoke configuration's models are not available: "
                      << plan.error().message;
     TempDir dir(L"suite-smoke");
-    const ProcessResult r = suite({smoke.native(), L"--output-dir", dir.path().native()}, 900000);
+    // The gate has its own tests (and needs an idle machine); this one is about the runs.
+    const ProcessResult r =
+        suite({smoke.native(), L"--output-dir", dir.path().native(), L"--skip-preflight"}, 900000);
     ASSERT_EQ(r.exit_code, 0u) << describe(r);
     const fs::path sd = suite_dir(dir.path());
     const json m = manifest_of(sd);
     EXPECT_EQ(m["counts"]["done"], 6);
     validate_manifest(sd);
+}
+
+// ------------------------------------------------------------- gate and retries
+
+namespace {
+
+// A sustained-load leg on a fixture model: short, with a lenient drift limit (the
+// test checks that the series is recorded, not this machine's throttling).
+json fixture_leg(const fs::path& model, const std::string& provider, const std::string& precision) {
+    return {{"path", utf8(model)},
+            {"provider", provider},
+            {"precision", precision},
+            {"duration_s", 10}};
+}
+
+json short_gate(std::vector<std::string> checks, json legs) {
+    return {{"checks", checks},
+            {"idle", {{"window_s", 3}}},
+            {"sustained_load", {{"window_s", 2}, {"max_drift_ratio", 10}, {"legs", legs}}}};
+}
+
+const json* check_named(const json& manifest, const std::string& name) {
+    for (const json& c : manifest["preflight"].back()["checks"])
+        if (c["name"] == name)
+            return &c;
+    return nullptr;
+}
+
+}  // namespace
+
+TEST(SuiteRun, RetryFlaggedRunsAgainAndKeepsTheFirstAttempt) {
+    if (auto reason = skip_reason())
+        GTEST_SKIP() << *reason;
+    TempDir dir(L"suite-retry");
+    json c = cpu_suite(dir.path() / "out");
+    c["repetitions"] = 1;
+    write(dir.path() / "suite.json", c);
+    su::SuiteOptions o;
+    o.config = dir.path() / "suite.json";
+    su::SuiteHooks hooks;
+    hooks.run_finished = [](su::RunRecord& r) {
+        if (r.order_index == 0 && r.attempts == 1)
+            r.warnings.push_back("trial_spread_high");  // as if the result had been flagged
+    };
+    EXPECT_EQ(run_in_process(o, hooks), 0);
+    const fs::path sd = suite_dir(dir.path() / "out");
+    const json m = manifest_of(sd);
+    EXPECT_EQ(m["runs"][0]["attempts"], 2);
+    EXPECT_EQ(m["runs"][0]["retries"], 1);
+    ASSERT_EQ(m["runs"][0]["history"].size(), 1u);
+    EXPECT_NE(m["runs"][0]["history"][0]["reason"].get<std::string>().find("retry_flagged"),
+              std::string::npos);
+    EXPECT_TRUE(fs::is_directory(
+        sd /
+        eb::path_to_utf8(fs::path(m["runs"][0]["history"][0]["moved_to"].get<std::string>()))));
+    EXPECT_EQ(m["runs"][1]["attempts"], 1);  // not flagged: not retried
+    const json result =
+        read(sd / eb::path_to_utf8(fs::path(m["runs"][0]["result_file"].get<std::string>())));
+    EXPECT_EQ(result["suite"]["attempt"], 2);
+    validate_manifest(sd);
+}
+
+TEST(SuiteRun, GateChecksAreRecordedWithTheirMeasurements) {
+    if (auto reason = skip_reason())
+        GTEST_SKIP() << *reason;
+    TempDir dir(L"suite-gate");
+    json c = cpu_suite(dir.path() / "out");
+    c["repetitions"] = 1;
+    c["configurations"] = json::array({config_entry("tiny", "cpu", "fp32")});
+    c["preflight"] = short_gate({"npu_users", "doctor", "sustained_load"},
+                                json::array({fixture_leg(kProbeInt8, "cpu", "int8")}));
+    c["preflight"]["sustained_load"]["window_s"] = 1;
+    write(dir.path() / "suite.json", c);
+    const ProcessResult r = suite({(dir.path() / "suite.json").native()});
+    ASSERT_EQ(r.exit_code, 0u) << describe(r);
+    EXPECT_NE(r.out.find("Gate        "), std::string::npos) << r.out;
+    const fs::path sd = suite_dir(dir.path() / "out");
+    const json m = manifest_of(sd);
+    const json& attempt = m["preflight"].back();
+    EXPECT_EQ(attempt["checks"].size(), 3u);
+    EXPECT_EQ(attempt["settings"]["sustained_load"]["window_s"], 1.0);
+    const json* sustained = check_named(m, "sustained_load");
+    ASSERT_NE(sustained, nullptr);
+    const json& leg = (*sustained)["details"]["legs"][0];
+    EXPECT_GE(leg["p50_series_ms"].size(), 2u) << sustained->dump(2);
+    EXPECT_TRUE(leg["drift_ratio"].is_number());
+    EXPECT_GT(leg["iterations"].get<int>(), 100);
+    EXPECT_TRUE(check_named(m, "npu_users")->at("details").contains("processes_scanned"));
+    // Not the full gate: never publishable, and every result says so.
+    EXPECT_FALSE(m["gate_passed"].get<bool>());
+    EXPECT_FALSE(m["publishable"].get<bool>());
+    const json result =
+        read(sd / eb::path_to_utf8(fs::path(m["runs"][0]["result_file"].get<std::string>())));
+    EXPECT_FALSE(result["suite"]["gate_passed"].get<bool>());
+    EXPECT_FALSE(result["suite"]["publishable"].get<bool>());
+    validate_manifest(sd);
+}
+
+TEST(SuiteRun, FullGateOnThisMachine) {
+    if (auto reason = skip_reason())
+        GTEST_SKIP() << *reason;
+    TempDir dir(L"suite-full-gate");
+    json c = cpu_suite(dir.path() / "out");
+    c["repetitions"] = 1;
+    c["configurations"] = json::array({config_entry("tiny", "cpu", "fp32")});
+    c["preflight"] = short_gate(su::gate_check_names(),
+                                json::array({fixture_leg(kProbeInt8, "cpu", "int8")}));
+    c["preflight"]["sustained_load"]["window_s"] = 1;
+    c["in_flight"] = {{"load_sample_s", 1}, {"max_wait_s", 0}, {"power_max_wait_s", 0}};
+    write(dir.path() / "suite.json", c);
+    const ProcessResult r = suite({(dir.path() / "suite.json").native()});
+    const json m = manifest_of(suite_dir(dir.path() / "out"));
+    ASSERT_EQ(m["preflight"].back()["checks"].size(), su::gate_check_names().size()) << describe(r);
+    // Power, sleep settings and background load are this machine's state: when it is
+    // not set up for publishable runs, say which check stopped it instead of passing.
+    std::string machine_state;
+    for (const char* name : {"power", "sleep", "idle"}) {
+        const json* check = check_named(m, name);
+        if (check->at("status") == "fail")
+            machine_state +=
+                std::string(name) + ": " + check->at("summary").get<std::string>() + "; ";
+    }
+    if (!machine_state.empty()) {
+        EXPECT_EQ(r.exit_code, 1u) << describe(r);
+        EXPECT_EQ(m["status"], "aborted");
+        GTEST_SKIP() << "this machine is not set up for publishable runs: " << machine_state;
+    }
+    EXPECT_EQ(r.exit_code, 0u) << describe(r);
+    const json& run = m["runs"][0];
+    EXPECT_TRUE(run["in_flight"]["power_ready"].get<bool>());
+    EXPECT_FALSE(run["in_flight"]["load_samples"].empty());
+}
+
+TEST(SuiteNpu, SustainedLoadRunsAnNpuLeg) {
+    if (auto reason = eb::test::npu_skip_reason(eb::test::probe_qnn_npu()))
+        GTEST_SKIP() << *reason;
+    if (auto reason = skip_reason())
+        GTEST_SKIP() << *reason;
+    TempDir dir(L"suite-npu-sustained");
+    json c = cpu_suite(dir.path() / "out");
+    c["repetitions"] = 1;
+    c["configurations"] = json::array({config_entry("tiny", "cpu", "fp32")});
+    c["preflight"] =
+        short_gate({"sustained_load"}, json::array({fixture_leg(kProbeInt8, "npu", "int8")}));
+    write(dir.path() / "suite.json", c);
+    const ProcessResult r = suite({(dir.path() / "suite.json").native()}, 600000);
+    ASSERT_EQ(r.exit_code, 0u) << describe(r);
+    const json m = manifest_of(suite_dir(dir.path() / "out"));
+    const json& leg = check_named(m, "sustained_load")->at("details")["legs"][0];
+    EXPECT_NE(leg["label"].get<std::string>().find("_npu_int8"), std::string::npos);
+    EXPECT_GE(leg["p50_series_ms"].size(), 2u);
 }

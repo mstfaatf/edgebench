@@ -7,8 +7,8 @@
   "additionalProperties": false,
   "required": [
     "suite_manifest_version", "suite", "created_utc", "updated_utc", "status", "tool", "versions", "rotation",
-    "repetitions", "validator", "publishable", "not_publishable_reasons", "preflight_ever_skipped", "preflight",
-    "invocations", "estimate", "counts", "runs"
+    "repetitions", "validator", "publishable", "not_publishable_reasons", "gate_passed", "gate_lost",
+    "in_flight_wait_s", "preflight_ever_skipped", "preflight", "invocations", "estimate", "counts", "runs"
   ],
   "properties": {
     "suite_manifest_version": {"const": "1.0.0"},
@@ -59,17 +59,21 @@
     },
     "publishable": {"type": "boolean"},
     "not_publishable_reasons": {"type": "array", "items": {"type": "string"}},
+    "gate_passed": {"type": "boolean", "description": "Every gate check of the latest pre-flight that was not skipped passed."},
+    "gate_lost": {"type": ["string", "null"], "description": "Why the suite stopped when the power state was lost before a run and not restored."},
+    "in_flight_wait_s": {"type": "number", "minimum": 0, "description": "Total time waited before runs for the power state or the background load."},
     "preflight_ever_skipped": {"type": "boolean", "description": "True once any invocation ran with --skip-preflight; it never becomes false again."},
     "preflight": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["started_utc", "skipped", "passed", "checks"],
+        "required": ["started_utc", "skipped", "passed", "settings", "checks"],
         "properties": {
           "started_utc": {"$ref": "#/$defs/timestamp"},
           "skipped": {"type": "boolean"},
-          "passed": {"type": "boolean"},
+          "passed": {"type": "boolean", "description": "No check failed (the suite could start)."},
+          "settings": {"type": ["object", "null"], "description": "The effective thresholds of the gate and the in-flight check (null if skipped)."},
           "checks": {
             "type": "array",
             "items": {
@@ -108,9 +112,10 @@
     "estimate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["total_s", "configurations_from_prior_results", "configurations_from_heuristic"],
+      "required": ["total_s", "gate_s", "configurations_from_prior_results", "configurations_from_heuristic"],
       "properties": {
         "total_s": {"type": "number", "minimum": 0},
+        "gate_s": {"type": "number", "minimum": 0},
         "configurations_from_prior_results": {"type": "integer", "minimum": 0},
         "configurations_from_heuristic": {"type": "integer", "minimum": 0}
       }
@@ -141,7 +146,7 @@
         "run_id", "short_id", "configuration_id", "label", "order_index", "repetition", "configuration", "status",
         "attempts", "exit_code", "exit_code_name", "started_utc", "ended_utc", "duration_s", "cooldown_s_before",
         "estimate_s", "output_dir", "result_file", "result_sha256", "log_file", "failure", "validation",
-        "validation_issues", "warnings", "cache_build", "discarded"
+        "validation_issues", "warnings", "cache_build", "discarded", "in_flight", "retries", "history"
       ],
       "properties": {
         "run_id": {"$ref": "#/$defs/sha256", "description": "SHA256 of the resolved configuration plus the repetition."},
@@ -198,7 +203,26 @@
             }
           ]
         },
-        "discarded": {"type": "array", "items": {"type": "string"}, "description": "Output of earlier attempts, moved aside."}
+        "discarded": {"type": "array", "items": {"type": "string"}, "description": "Output of earlier attempts, moved aside."},
+        "in_flight": {
+          "type": ["object", "null"],
+          "description": "The check before the latest attempt: power_ready, power_wait_s, load_samples [{cpu_utilization_ratio, window_s, top_processes}], load_wait_s, ran_under_load, wait_s."
+        },
+        "retries": {"type": "integer", "minimum": 0, "description": "Attempts started by retry_flagged."},
+        "history": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["attempt", "status", "reason", "moved_to"],
+            "properties": {
+              "attempt": {"type": "integer", "minimum": 1},
+              "status": {"enum": ["pending", "running", "done", "failed", "skipped"]},
+              "reason": {"type": "string"},
+              "moved_to": {"type": ["string", "null"]}
+            }
+          },
+          "description": "Earlier attempts and why each was set aside (interrupted, failed, retried)."
+        }
       },
       "allOf": [
         {

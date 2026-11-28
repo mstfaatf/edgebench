@@ -3,9 +3,16 @@
   "name": "autoencoder_npu_int8_b1",
   "description": "The Conv1D autoencoder, INT8 on the NPU, batch 1, three repetitions, with the run parameters of the CPU/NPU matrix (scripts/run_matrix.py): 3 trials x 100 iterations, 20 warm-up, 1000 ms before every trial, a cached EP context built just before each run, the init breakdown and the profiled accelerator pass.",
   "output_dir": "../results/local/suites",
-  "models": ["conv1d_autoencoder"],
+  "models": [
+    "conv1d_autoencoder"
+  ],
   "configurations": [
-    {"model": "conv1d_autoencoder", "provider": "npu", "precision": "int8", "batch": 1}
+    {
+      "model": "conv1d_autoencoder",
+      "provider": "npu",
+      "precision": "int8",
+      "batch": 1
+    }
   ],
   "defaults": {
     "warmup": 20,
@@ -18,8 +25,5 @@
   },
   "repetitions": 3,
   "rotation": "rotated",
-  "cooldown_s": 10,
-  "preflight": {
-    "checks": ["doctor"]
-  }
+  "cooldown_s": 10
 }

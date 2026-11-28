@@ -18,6 +18,8 @@
 #include "edgebench/result_files.hpp"
 #include "edgebench/run_identity.hpp"
 #include "edgebench/sha256.hpp"
+#include "edgebench/stats.hpp"
+#include "edgebench/system_info.hpp"
 #include "edgebench/version.hpp"
 
 #define WIN32_LEAN_AND_MEAN
@@ -323,6 +325,91 @@ public:
     }
 };
 
+// Reads a result's per-iteration latencies (all trials in order).
+std::vector<double> read_latencies(const fs::path& result) {
+    std::vector<double> out;
+    const std::optional<json> doc = read_json(result);
+    if (!doc || !doc->contains("raw") || !(*doc)["raw"].is_object())
+        return out;
+    std::ifstream in(result.parent_path() / from_utf8((*doc)["raw"].value("latencies_file", "")),
+                     std::ios::binary);
+    std::string line;
+    std::getline(in, line);  // header
+    while (std::getline(in, line)) {
+        const std::size_t comma = line.rfind(',');
+        if (comma != std::string::npos)
+            out.push_back(std::strtod(line.c_str() + comma + 1, nullptr));
+    }
+    return out;
+}
+
+class FunctionCheck : public PreflightCheck {
+public:
+    FunctionCheck(std::string name, std::function<GateResult(const PreflightContext&)> fn)
+        : name_(std::move(name)), fn_(std::move(fn)) {}
+    std::string name() const override { return name_; }
+    GateResult run(const PreflightContext& ctx) override { return fn_(ctx); }
+
+private:
+    std::string name_;
+    std::function<GateResult(const PreflightContext&)> fn_;
+};
+
+// One continuous run per leg: a short calibration run gives the mean latency,
+// then one trial long enough for the leg's duration.
+GateResult sustained_load_check(const PreflightContext& ctx) {
+    const SuitePlan& plan = *ctx.plan;
+    std::vector<SustainedLeg> legs;
+    const fs::path dir = ctx.suite_dir / "preflight" / ("sustained-" + std::to_string(ctx.attempt));
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    for (std::size_t i = 0; i < plan.sustained.size() && !stop_requested(); ++i) {
+        const ResolvedConfiguration& c = plan.sustained[i];
+        SustainedLeg leg;
+        leg.label = c.label;
+        leg.duration_s = c.sustained_duration_s;
+        const fs::path log = dir / (c.label + ".log");
+        RunConfig cal =
+            to_run_config(c, dir / (c.label + "-calibration"), "calibration", std::nullopt);
+        cal.iterations = 200;
+        std::fprintf(stderr, "suite: pre-flight sustained_load: %s, %.0f s\n", c.label.c_str(),
+                     c.sustained_duration_s);
+        const ChildOutcome a = run_child(ctx.exe, run_arguments(cal), log, std::nullopt);
+        const std::optional<json> cal_doc =
+            read_json(dir / (c.label + "-calibration") / "calibration_latest.json");
+        double mean_ms = 0;
+        if (cal_doc && cal_doc->contains("timing") && (*cal_doc)["timing"].is_object())
+            mean_ms = (*cal_doc)["timing"]["aggregate"]["stats"].value("mean_ms", 0.0);
+        if (!a.started || a.exit_code != 0 || mean_ms <= 0) {
+            leg.failure = "the calibration run failed (exit " + std::to_string(a.exit_code) +
+                          "; see " + rel(log, ctx.suite_dir) + ")";
+            legs.push_back(std::move(leg));
+            continue;
+        }
+        const double wanted = std::ceil(c.sustained_duration_s * 1000.0 / mean_ms);
+        RunConfig run = to_run_config(c, dir / c.label, "sustained", std::nullopt);
+        run.iterations =
+            static_cast<int>(std::clamp(wanted, 100.0, static_cast<double>(kMaxIterations)));
+        const ChildOutcome b = run_child(ctx.exe, run_arguments(run), log, std::nullopt);
+        const fs::path result = dir / c.label / "sustained_latest.json";
+        leg.details = {{"calibration_mean_ms", mean_ms},
+                       {"iterations", run.iterations},
+                       {"seconds", b.seconds},
+                       {"result_file", rel(result, ctx.suite_dir)},
+                       {"log_file", rel(log, ctx.suite_dir)}};
+        if (!b.started || b.exit_code != 0) {
+            leg.failure = "the sustained run failed (exit " + std::to_string(b.exit_code) +
+                          "; see " + rel(log, ctx.suite_dir) + ")";
+        } else {
+            leg.p50_series_ms =
+                windowed_p50(read_latencies(result), plan.preflight.sustained_window_s * 1000.0);
+        }
+        legs.push_back(std::move(leg));
+    }
+    return evaluate_sustained(legs, plan.preflight.sustained_window_s,
+                              plan.preflight.sustained_max_drift_ratio);
+}
+
 // --------------------------------------------------------------------- manifest
 
 ojson gate_json(const GateResult& g) {
@@ -373,10 +460,6 @@ std::optional<RunStatus> parse_run_status(std::string_view t) {
     return std::nullopt;
 }
 
-std::string_view to_string(GateStatus s) {
-    return s == GateStatus::pass ? "pass" : s == GateStatus::warn ? "warn" : "fail";
-}
-
 std::unique_ptr<PreflightCheck> make_doctor_check() {
     return std::make_unique<DoctorCheck>();
 }
@@ -385,15 +468,58 @@ std::vector<std::unique_ptr<PreflightCheck>> make_preflight_checks(
     const std::vector<std::string>& names) {
     std::vector<std::unique_ptr<PreflightCheck>> checks;
     for (const std::string& n : names) {
-        if (n == "doctor")
+        if (n == "doctor") {
             checks.push_back(make_doctor_check());
+        } else if (n == "power") {
+            checks.push_back(std::make_unique<FunctionCheck>(
+                n, [](const PreflightContext&) { return evaluate_power(query_power_state()); }));
+        } else if (n == "sleep") {
+            checks.push_back(std::make_unique<FunctionCheck>(n, [](const PreflightContext& c) {
+                return evaluate_sleep(query_sleep_settings(),
+                                      c.estimate_s + c.plan->preflight.sleep_margin_s);
+            }));
+        } else if (n == "idle") {
+            checks.push_back(std::make_unique<FunctionCheck>(n, [](const PreflightContext& c) {
+                const auto window = std::chrono::milliseconds(
+                    std::lround(c.plan->preflight.idle_window_s * 1000.0));
+                return evaluate_idle(read_idle(window), c.plan->preflight.idle_max_cpu_ratio);
+            }));
+        } else if (n == "npu_users") {
+            checks.push_back(std::make_unique<FunctionCheck>(
+                n, [](const PreflightContext&) { return evaluate_npu_users(scan_npu_users()); }));
+        } else if (n == "sustained_load") {
+            checks.push_back(std::make_unique<FunctionCheck>(n, sustained_load_check));
+        }
     }
     return checks;
 }
 
 const std::vector<std::string>& publish_gate_checks() {
-    static const std::vector<std::string> names = {"doctor"};
-    return names;
+    return gate_check_names();
+}
+
+bool retry_worthy(const RunRecord& r) {
+    return r.status == RunStatus::done &&
+           std::any_of(r.warnings.begin(), r.warnings.end(), [](const std::string& w) {
+               return w == "background_cpu_load_high" || w == "trial_spread_high";
+           });
+}
+
+bool SuiteManifest::gate_passed() const {
+    for (auto it = preflight.rbegin(); it != preflight.rend(); ++it) {
+        if (it->skipped)
+            continue;
+        for (const std::string& required : publish_gate_checks()) {
+            const bool ok =
+                std::any_of(it->checks.begin(), it->checks.end(), [&](const GateResult& g) {
+                    return g.name == required && g.status == GateStatus::pass;
+                });
+            if (!ok)
+                return false;
+        }
+        return true;
+    }
+    return false;
 }
 
 bool gate_passed(const std::vector<GateResult>& results, bool fail_on_warn) {
@@ -413,11 +539,17 @@ std::vector<std::string> SuiteManifest::not_publishable_reasons() const {
     if (!preflight.empty() && !preflight.back().skipped) {
         for (const std::string& required : publish_gate_checks()) {
             const auto& checks = preflight.back().checks;
-            if (std::none_of(checks.begin(), checks.end(),
-                             [&](const GateResult& g) { return g.name == required; }))
+            const auto it = std::find_if(checks.begin(), checks.end(),
+                                         [&](const GateResult& g) { return g.name == required; });
+            if (it == checks.end())
                 reasons.push_back("the pre-flight gate did not include '" + required + "'");
+            else if (it->status != GateStatus::pass)
+                reasons.push_back("pre-flight check '" + required + "': " +
+                                  std::string(to_string(it->status)) + " (" + it->summary + ")");
         }
     }
+    if (gate_lost)
+        reasons.push_back("the gate was lost during the suite: " + *gate_lost);
     if (tool.is_object() && tool.contains("git_dirty") && tool["git_dirty"].is_boolean() &&
         tool["git_dirty"].get<bool>())
         reasons.push_back("built from a working tree with uncommitted changes");
@@ -462,6 +594,9 @@ ojson to_json(const SuiteManifest& m) {
             {"warnings", r.warnings},
             {"cache_build", r.cache_build},
             {"discarded", r.discarded},
+            {"in_flight", r.in_flight},
+            {"retries", r.retries},
+            {"history", r.history},
         });
     }
     ojson preflight = ojson::array();
@@ -472,6 +607,7 @@ ojson to_json(const SuiteManifest& m) {
         preflight.push_back({{"started_utc", a.started_utc},
                              {"skipped", a.skipped},
                              {"passed", a.passed},
+                             {"settings", a.settings},
                              {"checks", checks}});
     }
     ojson invocations = ojson::array();
@@ -503,11 +639,15 @@ ojson to_json(const SuiteManifest& m) {
         {"validator", {{"python", m.python}, {"script", m.validator}}},
         {"publishable", m.publishable()},
         {"not_publishable_reasons", m.not_publishable_reasons()},
+        {"gate_passed", m.gate_passed()},
+        {"gate_lost", opt(m.gate_lost)},
+        {"in_flight_wait_s", m.in_flight_wait_s},
         {"preflight_ever_skipped", m.preflight_ever_skipped},
         {"preflight", preflight},
         {"invocations", invocations},
         {"estimate",
          {{"total_s", m.estimate.total_s},
+          {"gate_s", m.estimate.gate_s},
           {"configurations_from_prior_results", m.estimate.from_prior},
           {"configurations_from_heuristic", m.estimate.from_heuristic}}},
         {"counts", count_json},
@@ -544,6 +684,7 @@ Result<SuiteManifest> manifest_from_json(const json& j) {
             p.started_utc = a.at("started_utc").get<std::string>();
             p.skipped = a.at("skipped").get<bool>();
             p.passed = a.at("passed").get<bool>();
+            p.settings = ojson::parse(a.at("settings").dump());
             for (const json& c : a.at("checks")) {
                 GateResult g;
                 g.name = c.at("name").get<std::string>();
@@ -568,6 +709,9 @@ Result<SuiteManifest> manifest_from_json(const json& j) {
             m.invocations.push_back(v);
         }
         m.estimate.total_s = j.at("estimate").at("total_s").get<double>();
+        m.estimate.gate_s = j.at("estimate").at("gate_s").get<double>();
+        m.gate_lost = get_opt<std::string>(j, "gate_lost");
+        m.in_flight_wait_s = j.at("in_flight_wait_s").get<double>();
         m.estimate.from_prior = j.at("estimate").at("configurations_from_prior_results").get<int>();
         m.estimate.from_heuristic = j.at("estimate").at("configurations_from_heuristic").get<int>();
         for (const json& r : j.at("runs")) {
@@ -600,6 +744,9 @@ Result<SuiteManifest> manifest_from_json(const json& j) {
             x.warnings = r.at("warnings").get<std::vector<std::string>>();
             x.cache_build = ojson::parse(r.at("cache_build").dump());
             x.discarded = r.at("discarded").get<std::vector<std::string>>();
+            x.in_flight = ojson::parse(r.at("in_flight").dump());
+            x.retries = r.at("retries").get<int>();
+            x.history = ojson::parse(r.at("history").dump());
             m.runs.push_back(std::move(x));
         }
         return m;
@@ -797,10 +944,39 @@ SuiteEstimate estimate_suite(const SuitePlan& plan, const PriorResults& prior) {
         (found ? e.from_prior : e.from_heuristic) += 1;
         per_config.push_back(estimate_run_s(c, found ? *found : heuristic_basis(c)));
     }
-    e.total_s = kPreflightS * kEstimateMargin;
+    // The gate: doctor, the idle sample, each sustained-load leg (a calibration
+    // run of 220 inferences, then the leg) and a second for the quick checks.
+    const auto has = [&](const char* name) {
+        return std::find(plan.preflight.checks.begin(), plan.preflight.checks.end(), name) !=
+               plan.preflight.checks.end();
+    };
+    double gate = has("doctor") ? kPreflightS : 0.0;
+    gate += 1.0;
+    if (has("idle"))
+        gate += plan.preflight.idle_window_s;
+    if (has("sustained_load")) {
+        for (const ResolvedConfiguration& c : plan.sustained) {
+            const std::optional<TimingBasis> found = prior.find(c);
+            const TimingBasis b = found ? *found : heuristic_basis(c);
+            const bool npu = c.identity.provider == ProviderKind::npu;
+            const double overhead = npu ? kNpuProcessOverheadS : kProcessOverheadS;
+            const double cold = b.cold_init_s > 0 ? b.cold_init_s : heuristic_basis(c).cold_init_s;
+            const double it_s =
+                (b.iteration_ms > 0 ? b.iteration_ms : heuristic_basis(c).iteration_ms) / 1000.0;
+            gate += 2 * (overhead + 2 * cold) + 240 * it_s + c.sustained_duration_s;
+        }
+    }
+    e.gate_s = gate * kEstimateMargin;
+    e.total_s = e.gate_s;
+    // Before every run: the load sample when it is longer than the cooldown.
+    const bool sampled = has("idle");
     for (const PlannedRun& r : plan.runs) {
-        e.run_s.push_back(per_config[r.configuration]);
-        e.total_s += per_config[r.configuration];
+        double s = per_config[r.configuration];
+        const double cooldown = plan.configurations[r.configuration].params.cooldown_s;
+        if (sampled && plan.in_flight.load_sample_s > cooldown)
+            s += (plan.in_flight.load_sample_s - cooldown) * kEstimateMargin;
+        e.run_s.push_back(s);
+        e.total_s += s;
     }
     return e;
 }
@@ -866,7 +1042,8 @@ std::string format_plan(const SuitePlan& plan, const SuiteEstimate& est) {
     o << "\nEstimate    " << duration_text(est.total_s) << " for " << plan.runs.size() << " runs ("
       << est.from_prior << " of " << plan.configurations.size()
       << " configurations estimated from earlier results, " << est.from_heuristic
-      << " from a heuristic; cooldowns, process starts, pre-flight and a "
+      << " from a heuristic; cooldowns, process starts, the pre-flight gate ("
+      << duration_text(est.gate_s) << ") and a "
       << static_cast<int>(std::lround((kEstimateMargin - 1) * 100)) << "% margin included)\n";
     return o.str();
 }
@@ -882,6 +1059,26 @@ std::string format_summary(const SuiteManifest& m, double wall_s) {
       << " running (" << m.runs.size() << " planned)\n";
     o << "Wall time   " << duration_text(wall_s) << " (estimate "
       << duration_text(m.estimate.total_s) << ")\n";
+    if (!m.preflight.empty()) {
+        const PreflightAttempt& a = m.preflight.back();
+        o << "Gate        ";
+        if (a.skipped) {
+            o << "skipped";
+        } else {
+            o << (m.gate_passed() ? "passed" : a.passed ? "not passed for publishing (a check warned or is missing)" : "failed");
+            for (const GateResult& g : a.checks)
+                o << "; " << g.name << " " << to_string(g.status);
+        }
+        o << "\n";
+    }
+    int retries = 0;
+    for (const RunRecord& r : m.runs)
+        retries += r.retries;
+    char wait_text[96];
+    std::snprintf(wait_text, sizeof(wait_text),
+                  "%.0f s before runs (power or background load), %d retries", m.in_flight_wait_s,
+                  retries);
+    o << "Waiting     " << wait_text << "\n";
     o << "Publishable " << (m.publishable() ? "yes" : "no");
     for (const std::string& r : m.not_publishable_reasons())
         o << "; " << r;
@@ -933,6 +1130,17 @@ std::optional<fs::path> find_repository(const std::vector<fs::path>& starts) {
 
 namespace {
 
+enum class Attempt { ran, interrupted, gate_lost };
+
+// Keeps the system from sleeping while the suite runs (the display may still turn
+// off). Released on destruction; Windows releases it when the process ends.
+struct KeepAwake {
+    KeepAwake() { SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED); }
+    ~KeepAwake() { SetThreadExecutionState(ES_CONTINUOUS); }
+    KeepAwake(const KeepAwake&) = delete;
+    KeepAwake& operator=(const KeepAwake&) = delete;
+};
+
 struct Runner {
     const SuiteOptions& options;
     const SuiteHooks& hooks;
@@ -963,9 +1171,18 @@ struct Runner {
 
     // Moves a run's output aside (an interrupted or failed attempt), so the next
     // attempt starts in an empty directory.
-    void discard_output(RunRecord& r) {
+    void discard_output(RunRecord& r, const std::string& reason) {
         std::error_code ec;
         const fs::path out = run_dir(r);
+        ojson entry = {{"attempt", r.attempts},
+                       {"status", to_string(r.status)},
+                       {"exit_code", opt(r.exit_code)},
+                       {"started_utc", opt(r.started_utc)},
+                       {"ended_utc", opt(r.ended_utc)},
+                       {"warnings", r.warnings},
+                       {"in_flight", r.in_flight},
+                       {"reason", reason},
+                       {"moved_to", nullptr}};
         if (fs::exists(out, ec)) {
             fs::create_directories(dir / "discarded", ec);
             for (int n = 1;; ++n) {
@@ -975,11 +1192,15 @@ struct Runner {
                 if (fs::exists(target, ec))
                     continue;
                 fs::rename(out, target, ec);
-                if (!ec)
+                if (!ec) {
                     r.discarded.push_back(rel(target, dir));
+                    entry["moved_to"] = rel(target, dir);
+                }
                 break;
             }
         }
+        if (r.attempts > 0)
+            r.history.push_back(entry);
         r.result_file.reset();
         r.result_sha256.reset();
         r.validation.reset();
@@ -1050,20 +1271,133 @@ struct Runner {
         l.order_index = r.order_index;
         l.cooldown_s_before = cooldown;
         l.preflight_skipped = manifest.preflight_ever_skipped;
+        l.attempt = r.attempts;
+        l.gate_passed = manifest.gate_passed();
+        l.publishable = manifest.publishable();
+        l.in_flight_wait_s = run_wait_s;
         return l;
     }
 
-    // One attempt of one run. Returns false if the suite was interrupted.
-    bool execute(RunRecord& r, const ResolvedConfiguration& c) {
-        std::error_code ec;
-        const double cooldown = c.params.cooldown_s;
-        if (cooldown > 0) {
-            std::fprintf(stderr, "suite: cooldown %s s before run %d of %zu (%s)\n",
-                         format_seconds(cooldown).c_str(), r.order_index + 1, manifest.runs.size(),
-                         r.label.c_str());
-            if (wait_or_stop(std::chrono::milliseconds(std::lround(cooldown * 1000))))
-                return false;
+    bool wait_s(double seconds) {  // true if interrupted
+        return seconds > 0 && wait_or_stop(std::chrono::milliseconds(std::lround(seconds * 1000)));
+    }
+
+    bool guarded(const char* check) const {
+        return !options.skip_preflight &&
+               std::find(plan.preflight.checks.begin(), plan.preflight.checks.end(), check) !=
+                   plan.preflight.checks.end();
+    }
+
+    // Before a run: AC + Best performance (waiting for it if lost), the cooldown,
+    // and a load sample (waiting with backoff while it is too high). Fills
+    // r.in_flight; returns ran (go ahead), interrupted or gate_lost.
+    Attempt in_flight_check(RunRecord& r, const ResolvedConfiguration& c) {
+        const InFlightSettings& f = plan.in_flight;
+        ojson d = {{"checked_utc", now_utc()}};
+        run_wait_s = 0;
+        if (guarded("power")) {
+            PowerState ps = query_power_state();
+            d["power_ready"] = power_ready(ps);
+            double waited = 0;
+            if (!power_ready(ps)) {
+                const std::string what = evaluate_power(ps).summary;
+                print_warning("gate_lost",
+                              "before run " + std::to_string(r.order_index + 1) + ": " + what);
+                if (f.on_gate_loss == "stop") {
+                    manifest.gate_lost = what;
+                    r.in_flight = d;
+                    return Attempt::gate_lost;
+                }
+                bool restored = false;
+                while (waited < f.power_max_wait_s) {
+                    const double step = std::min(15.0, f.power_max_wait_s - waited);
+                    if (wait_s(step))
+                        return Attempt::interrupted;
+                    waited += step;
+                    if (power_ready(query_power_state())) {
+                        restored = true;
+                        break;
+                    }
+                }
+                d["power_wait_s"] = waited;
+                run_wait_s += waited;
+                if (!restored) {
+                    manifest.gate_lost = what + " (not restored within " +
+                                         format_seconds(f.power_max_wait_s) + " s)";
+                    r.in_flight = d;
+                    return Attempt::gate_lost;
+                }
+                std::fprintf(stderr, "suite: power restored after %.0f s\n", waited);
+            }
+            d["power_wait_s"] = waited;
         }
+        const double cooldown = c.params.cooldown_s;
+        const bool sample = guarded("idle");
+        const double first = sample ? std::max(cooldown, f.load_sample_s) : cooldown;
+        if (first > 0)
+            std::fprintf(stderr, "suite: cooldown %s s before run %d of %zu (%s)\n",
+                         format_seconds(first).c_str(), r.order_index + 1, manifest.runs.size(),
+                         r.label.c_str());
+        LoadProbe probe = start_load_probe();
+        if (wait_s(first))
+            return Attempt::interrupted;
+        if (sample) {
+            const double limit = plan.preflight.idle_max_cpu_ratio;
+            ojson samples = ojson::array();
+            auto take = [&](const LoadProbe& p) {
+                const std::optional<LoadSample> l = finish_load_probe(p);
+                const double ratio = l ? l->cpu_utilization_ratio : 1.0;
+                ojson top = ojson::array();
+                if (l && l->attribution)
+                    for (const ProcessShare& s : l->attribution->top_processes)
+                        top.push_back({{"name", s.name}, {"cpu_share", s.cpu_share}});
+                samples.push_back({{"cpu_utilization_ratio", l ? ojson(ratio) : ojson(nullptr)},
+                                   {"window_s", l ? l->sample_window_s : 0.0},
+                                   {"top_processes", top}});
+                return ratio;
+            };
+            double ratio = take(probe);
+            double waited = 0;
+            for (double w : backoff_schedule(ratio > limit ? f.max_wait_s : 0)) {
+                std::fprintf(stderr,
+                             "suite: background load %.1f%% (limit %.1f%%); waiting %.0f s before "
+                             "run %d\n",
+                             ratio * 100, limit * 100, w, r.order_index + 1);
+                if (wait_s(w))
+                    return Attempt::interrupted;
+                waited += w;
+                LoadProbe again = start_load_probe();
+                if (wait_s(f.load_sample_s))
+                    return Attempt::interrupted;
+                waited += f.load_sample_s;
+                ratio = take(again);
+                if (ratio <= limit)
+                    break;
+            }
+            d["max_cpu_ratio"] = limit;
+            d["load_samples"] = samples;
+            d["load_wait_s"] = waited;
+            d["ran_under_load"] = ratio > limit;
+            run_wait_s += waited;
+            if (ratio > limit)
+                print_warning("background_cpu_load_high",
+                              "run " + std::to_string(r.order_index + 1) + " starts with " +
+                                  format_seconds(std::round(ratio * 1000) / 10) +
+                                  "% background load after waiting " + format_seconds(waited) +
+                                  " s");
+        }
+        d["wait_s"] = run_wait_s;
+        manifest.in_flight_wait_s += run_wait_s;
+        r.in_flight = d;
+        return Attempt::ran;
+    }
+
+    // One attempt of one run.
+    Attempt execute(RunRecord& r, const ResolvedConfiguration& c) {
+        std::error_code ec;
+        if (const Attempt a = in_flight_check(r, c); a != Attempt::ran)
+            return a;
+        const double cooldown = c.params.cooldown_s;
         const fs::path out = run_dir(r);
         fs::create_directories(out, ec);
         r.status = RunStatus::running;
@@ -1097,7 +1431,7 @@ struct Runner {
                 {"seconds", b.seconds},
                 {"result_file", build_result ? ojson(rel(*build_result, dir)) : ojson(nullptr)}};
             if (b.interrupted)
-                return false;
+                return Attempt::interrupted;
             if (!b.started || b.exit_code != 0) {
                 r.status = RunStatus::failed;
                 r.exit_code = b.started ? std::optional<int>(b.exit_code) : std::nullopt;
@@ -1106,7 +1440,7 @@ struct Runner {
                 r.failure = b.started ? "the cache-building run failed" : b.start_error;
                 r.ended_utc = now_utc();
                 r.duration_s = std::chrono::duration<double>(Clock::now() - t0).count();
-                return true;
+                return Attempt::ran;
             }
         }
 
@@ -1120,11 +1454,11 @@ struct Runner {
         r.duration_s = std::chrono::duration<double>(Clock::now() - t0).count();
         r.ended_utc = now_utc();
         if (child.interrupted)
-            return false;
+            return Attempt::interrupted;
         if (!child.started) {
             r.status = RunStatus::failed;
             r.failure = child.start_error;
-            return true;
+            return Attempt::ran;
         }
         r.exit_code = child.exit_code;
         r.exit_code_name = exit_name(child.exit_code);
@@ -1139,12 +1473,12 @@ struct Runner {
         if (child.exit_code != 0) {
             r.status = RunStatus::failed;
             r.failure = "edgebench run exited " + std::to_string(child.exit_code);
-            return true;
+            return Attempt::ran;
         }
         if (!result) {
             r.status = RunStatus::failed;
             r.failure = "no result file";
-            return true;
+            return Attempt::ran;
         }
         const auto [passed, issues] = validate(*result, out);
         r.validation = passed ? "passed" : "failed";
@@ -1152,10 +1486,10 @@ struct Runner {
         if (!passed) {
             r.status = RunStatus::failed;
             r.failure = "the result does not pass scripts/validate_results.py";
-            return true;
+            return Attempt::ran;
         }
         r.status = RunStatus::done;
-        return true;
+        return Attempt::ran;
     }
 
     int preflight() {
@@ -1171,7 +1505,29 @@ struct Runner {
                           "publishable");
             return save_or_fail();
         }
-        PreflightContext ctx{options.exe, dir, static_cast<int>(manifest.preflight.size()) + 1};
+        PreflightContext ctx{options.exe, dir, static_cast<int>(manifest.preflight.size()) + 1,
+                             &plan, estimate_s};
+        const PreflightSettings& ps = plan.preflight;
+        ojson legs = ojson::array();
+        for (const ResolvedConfiguration& c : plan.sustained)
+            legs.push_back({{"label", c.label},
+                            {"model_file", c.model_file_display},
+                            {"duration_s", c.sustained_duration_s}});
+        attempt.settings = {
+            {"checks", ps.checks},
+            {"fail_on_warn", ps.fail_on_warn},
+            {"idle", {{"window_s", ps.idle_window_s}, {"max_cpu_ratio", ps.idle_max_cpu_ratio}}},
+            {"sleep", {{"margin_s", ps.sleep_margin_s}, {"estimate_s", estimate_s}}},
+            {"sustained_load",
+             {{"window_s", ps.sustained_window_s},
+              {"max_drift_ratio", ps.sustained_max_drift_ratio},
+              {"legs", legs}}},
+            {"in_flight",
+             {{"load_sample_s", plan.in_flight.load_sample_s},
+              {"max_wait_s", plan.in_flight.max_wait_s},
+              {"power_max_wait_s", plan.in_flight.power_max_wait_s},
+              {"on_gate_loss", plan.in_flight.on_gate_loss}}},
+            {"retry_flagged", plan.retry_flagged}};
         for (std::unique_ptr<PreflightCheck>& check :
              make_preflight_checks(plan.preflight.checks)) {
             std::fprintf(stderr, "suite: pre-flight %s\n", check->name().c_str());
@@ -1193,17 +1549,20 @@ struct Runner {
             manifest.status = "aborted";
             if (int code = save_or_fail(); code != 0)
                 return code;
-            print_error("preflight_failed",
-                        "the pre-flight gate failed; no run was started (see " +
-                            path_to_utf8(dir / std::string(kManifestFileName)) + ")",
-                        "Fix what doctor reports, then resume with 'edgebench suite --resume " +
-                            path_to_utf8(dir) + "'.");
+            print_error(
+                "preflight_failed",
+                "the pre-flight gate failed; no run was started (see " +
+                    path_to_utf8(dir / std::string(kManifestFileName)) + ")",
+                "Fix what the failed check reports, then resume with 'edgebench suite --resume " +
+                    path_to_utf8(dir) + "'.");
             return to_int(ExitCode::internal_error);
         }
         return save_or_fail();
     }
 
     ojson attempt_versions = nullptr;
+    double estimate_s = 0;
+    double run_wait_s = 0;  // waits before the current run
 };
 
 ojson tool_json() {
@@ -1300,7 +1659,9 @@ int run_suite(const SuiteOptions& options, const SuiteHooks& hooks) {
         return to_int(ExitCode::success);
     }
 
+    const KeepAwake awake;
     Runner runner{options, hooks, std::move(plan), {}, {}, {}, {}, {}};
+    runner.estimate_s = estimate.total_s;
     SuitePlan& p = runner.plan;
     if (options.python)
         runner.python = fs::absolute(*options.python, ec);
@@ -1434,7 +1795,10 @@ int run_suite(const SuiteOptions& options, const SuiteHooks& hooks) {
             if (a == ResumeAction::keep)
                 continue;
             if (a == ResumeAction::discard || a == ResumeAction::rerun)
-                runner.discard_output(r);
+                runner.discard_output(r, a == ResumeAction::discard ? "resume: interrupted mid-run"
+                                         : r.status == RunStatus::failed
+                                             ? "resume: failed"
+                                             : "resume: result missing or no longer valid");
             r.status = RunStatus::pending;
             r.failure.reset();
         }
@@ -1442,7 +1806,38 @@ int run_suite(const SuiteOptions& options, const SuiteHooks& hooks) {
             return finish(code);
     }
 
-    bool interrupted = false, aborted = false, any_failed = false;
+    bool interrupted = false, aborted = false, any_failed = false, gate_lost = false;
+    // One attempt of a run; false: stop the suite (interrupted or gate lost).
+    auto attempt = [&](RunRecord& r) {
+        const auto conf = std::find_if(p.configurations.begin(), p.configurations.end(),
+                                       [&](const ResolvedConfiguration& c) {
+                                           return c.configuration_id == r.configuration_id;
+                                       });
+        const Attempt a = runner.execute(r, *conf);
+        if (a != Attempt::ran) {
+            // The partial attempt (if any) is set aside and the run stays pending.
+            if (r.status == RunStatus::running)
+                runner.discard_output(r, a == Attempt::interrupted ? "interrupted" : "gate lost");
+            r.status = RunStatus::pending;
+            r.failure.reset();
+            r.exit_code.reset();
+            r.exit_code_name.reset();
+            (a == Attempt::interrupted ? interrupted : gate_lost) = true;
+            runner.save_or_fail();
+            return false;
+        }
+        if (r.status == RunStatus::failed) {
+            any_failed = true;
+            std::fprintf(stderr, "suite: run %d failed: %s (log %s)\n", r.order_index + 1,
+                         r.failure.value_or("").c_str(), r.log_file.value_or("-").c_str());
+            if (options.fail_fast)
+                aborted = true;
+        }
+        runner.save_or_fail();
+        if (hooks.run_finished)
+            hooks.run_finished(r);
+        return true;
+    };
     for (RunRecord& r : m.runs) {
         if (r.status == RunStatus::done)
             continue;
@@ -1455,32 +1850,36 @@ int run_suite(const SuiteOptions& options, const SuiteHooks& hooks) {
             interrupted = true;
             break;
         }
-        const auto conf = std::find_if(p.configurations.begin(), p.configurations.end(),
-                                       [&](const ResolvedConfiguration& c) {
-                                           return c.configuration_id == r.configuration_id;
-                                       });
-        if (!runner.execute(r, *conf)) {
-            // Interrupted: the partial attempt is set aside and the run stays pending.
-            runner.discard_output(r);
-            r.status = RunStatus::pending;
-            r.failure.reset();
-            r.exit_code.reset();
-            r.exit_code_name.reset();
-            interrupted = true;
-            runner.save_or_fail();
+        if (!attempt(r))
             break;
+    }
+    // Runs flagged for background load or trial spread run again (retry_flagged).
+    for (int pass = 0; pass < p.retry_flagged && !interrupted && !gate_lost && !aborted; ++pass) {
+        for (RunRecord& r : m.runs) {
+            if (!retry_worthy(r) || r.retries >= p.retry_flagged || interrupted || gate_lost)
+                continue;
+            std::string codes;
+            for (const std::string& w : r.warnings)
+                if (w == "background_cpu_load_high" || w == "trial_spread_high")
+                    codes += (codes.empty() ? "" : ", ") + w;
+            std::fprintf(stderr, "suite: run %d again (%s)\n", r.order_index + 1, codes.c_str());
+            runner.discard_output(r, "retry_flagged: " + codes);
+            ++r.retries;
+            r.status = RunStatus::pending;
+            if (stop_requested()) {
+                interrupted = true;
+                break;
+            }
+            attempt(r);
         }
-        if (r.status == RunStatus::failed) {
-            any_failed = true;
-            std::fprintf(stderr, "suite: run %d failed: %s (log %s)\n", r.order_index + 1,
-                         r.failure.value_or("").c_str(), r.log_file.value_or("-").c_str());
-            if (options.fail_fast)
-                aborted = true;
-        }
-        if (int code = runner.save_or_fail(); code != 0)
-            return finish(code);
-        if (hooks.run_finished)
-            hooks.run_finished(r);
+    }
+    if (gate_lost) {
+        m.status = "aborted";
+        print_error("gate_lost", "the suite stopped: " + m.gate_lost.value_or("power state lost"),
+                    "Restore AC power and Best performance, then resume with 'edgebench suite "
+                    "--resume " +
+                        path_to_utf8(runner.dir) + "'.");
+        return finish(to_int(ExitCode::internal_error));
     }
     if (interrupted) {
         m.status = "interrupted";
