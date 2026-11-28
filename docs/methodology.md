@@ -159,6 +159,37 @@ Per trial and pooled over all trials (`aggregate`):
 The raw per-iteration latencies are written to a CSV file next to the result,
 linked by SHA-256, so any other statistic can be recomputed.
 
+## Spikes
+
+Some measured iterations are far slower than the rest of their trial: an
+interrupt, a context switch or a page fault lands inside the timed call. They
+are part of what the machine does, so **no sample is ever removed**: medians,
+percentiles, means and throughput keep every iteration. The spike check only
+reports how much they matter (`timing.trials[].spikes`,
+`timing.aggregate.spikes`):
+
+- A **spike** is an iteration slower than 2× its trial's median *and* at least
+  0.25 ms slower than it. The absolute floor keeps sub-millisecond jitter of
+  very fast models from counting: on the local CPU/NPU matrix, no autoencoder
+  trial (medians 0.04 to 0.25 ms) had an iteration more than 0.15 ms above its
+  median, while every isolated outlier of the image models was at least 1.3 ms
+  (up to 37 ms) above it.
+- Recorded per trial and pooled (each iteration judged against its own
+  trial's median): the count, the rate, the slowest iteration over the median,
+  the mean with and without the spikes, and how much the spikes move the mean.
+- `latency_spikes_high` is a warning when the spikes move the pooled mean by
+  more than 5 % or exceed 2 % of the iterations (more than two in a
+  100-iteration trial). On the local matrix, trials with real outliers had 1 to
+  7 % of them.
+
+The median is the number to compare; the spike statistics say when the mean
+(and so throughput) tells a different story, and why.
+
+Process scheduling is left at the Windows defaults (normal priority, no
+affinity, the default timer resolution). A comparison on the autoencoder (CPU
+FP32 and NPU INT8, batch 1) of high priority, pinning to one CPU cluster and a
+1 ms timer resolution is in [suite.md](suite.md#process-scheduling).
+
 ## System state
 
 CPU latency on the reference machine moved by about 2× between runs on the same

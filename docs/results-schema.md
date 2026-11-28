@@ -664,6 +664,26 @@ before; the validator never reports it as a missing key.
 | `repetition`, `order_index` | 0-based repetition, and position in the suite's run order |
 | `cooldown_s_before` | The suite's idle period before the run, in seconds |
 | `preflight_skipped` | `true` if the suite ran without its pre-flight gate (`--skip-preflight`). Such a result also has a `preflight_skipped` warning and is not publishable |
+| `attempt` | 1-based attempt of this run in the suite (after an interruption, a failure or a `retry_flagged` retry) |
+| `gate_passed` | Every check of the suite's pre-flight gate passed |
+| `publishable` | The suite was publishable when the run started: gate passed, never skipped, a clean build, the gate not lost. `false` makes the validator report `result_not_publishable` |
+| `in_flight_wait_s` | Time the suite waited before this run for the power state or the background load |
+
+### Spikes
+
+`timing.trials[].spikes` and `timing.aggregate.spikes` ([methodology.md](methodology.md#spikes)):
+an iteration slower than `factor` (2) × its trial's median and at least
+`floor_ms` (0.25) above it is a spike. Reported only: no statistic leaves
+spikes out.
+
+| Field | Trial | Aggregate | Meaning |
+|---|---|---|---|
+| `iterations`, `count`, `rate` | yes | yes | Iterations, spikes, `count / iterations` |
+| `threshold_ms` | yes | | `max(factor × median, median + floor_ms)` |
+| `max_to_median_ratio` | yes | yes | The slowest iteration over its trial's median |
+| `mean_ms`, `mean_without_spikes_ms`, `mean_shift_ratio` | yes | yes | The mean with and without the spikes; `mean_ms / mean_without_spikes_ms - 1` |
+| `factor`, `floor_ms`, `mean_shift_threshold_ratio`, `rate_threshold_ratio` | | yes | The definition and the thresholds (0.05, 0.02) |
+| `high` | | yes | `mean_shift_ratio` or `rate` above its threshold: the result has a `latency_spikes_high` warning |
 
 ### Verification evidence
 
@@ -759,7 +779,11 @@ fields involved are present:
 | `trial_spread_unfounded` | error | A `trial_spread_high` warning although the trial medians are within both thresholds |
 | `preflight_skipped_unflagged` | error | `suite.preflight_skipped` is `true` but there is no `preflight_skipped` warning |
 | `preflight_skipped_unfounded` | error | A `preflight_skipped` warning without `suite.preflight_skipped` `true` |
-| `result_not_publishable` | warning | `suite.preflight_skipped` is `true` (and flagged): valid, but `--strict`, which published results are checked with, rejects it |
+| `result_not_publishable` | warning | `suite.publishable` is `false` (gate not passed, skipped, a dirty build, or the gate lost): valid, but `--strict`, which published results are checked with, rejects it |
+| `suite_publishable_inconsistent` | error | `suite.publishable` is `true` although `gate_passed` is `false` or `preflight_skipped` is `true` |
+| `spikes_mismatch` | error | Spike fields differ from those the latency file gives (recomputed when it is next to the result); without it, they disagree with each other or with the trial's count, mean and slowest iteration; the aggregate disagrees with the trials; or the definition and thresholds are not the engine's |
+| `spikes_unflagged` | error | The spikes exceed a threshold but there is no `latency_spikes_high` warning |
+| `spikes_unfounded` | error | A `latency_spikes_high` warning although the spikes are within both thresholds |
 | `missing_1_2_0_key` | warning | `tool.implementation` is `cpp` and a key added in 1.2.0 is absent (except `suite`, which only suite runs have). Keys added in 1.1.0 that are absent from a 1.2.0 document are still reported as `missing_1_1_0_key` |
 
 The schema itself also requires: `mode` `off` only with `enabled` `false`;
@@ -895,9 +919,8 @@ Additive; every 1.0.0 and 1.1.0 document is valid 1.2.0 after changing
   `execution.qnn_validation.rejected_nodes[].node_index`.
 - Validator: the 1.2.0 rules above and `missing_1_2_0_key`.
 
-No latency results have been published yet. Until the first one is, 1.2.0 may
-still be amended in place (as 1.1.0 was) while the backend-reported versions and
-the profiled pass are filled in. Amendments so far:
+1.2.0 was amended in place (as 1.1.0 was) until it was frozen before the
+first published latency result. The amendments:
 
 - `execution.batch_equivalence`: `equivalent_to_b1` / `basis` became
   `bitwise_equal_to_b1` / `bitwise_basis`, and `predictions_equal_to_b1`,
@@ -924,9 +947,20 @@ the profiled pass are filled in. Amendments so far:
   `qnn_backend_build_file_version_mismatch`,
   `accelerator_exceeds_latency_unflagged` / `_unfounded`,
   `profiled_pass_count_mismatch`, `cache_compatibility_without_cache`.
-- Suite link: top-level `suite` (only in runs launched by `edgebench suite`),
-  the `preflight_skipped` warning, rules `preflight_skipped_unflagged`,
-  `preflight_skipped_unfounded`, `result_not_publishable`.
+- Suite link: top-level `suite` (only in runs launched by `edgebench suite`)
+  with the gate summary (`attempt`, `gate_passed`, `publishable`,
+  `in_flight_wait_s`), the `preflight_skipped` warning, rules
+  `preflight_skipped_unflagged`, `preflight_skipped_unfounded`,
+  `result_not_publishable`, `suite_publishable_inconsistent`.
+- Spikes: `timing.trials[].spikes`, `timing.aggregate.spikes`, the
+  `latency_spikes_high` warning, rules `spikes_mismatch`, `spikes_unflagged`,
+  `spikes_unfounded`. Examples without a latency file got spike fields derived
+  from their trial statistics.
+- `model.variant`: the file's variant from its metadata (`edgebench.variant`).
+- `config.process_priority`: `normal` or `high` (`run --process-priority`).
+
+**1.2.0 is frozen.** It was amended in place for the last time before the
+first published latency result; any further change is 1.3.0.
 
 ### 1.1.0
 

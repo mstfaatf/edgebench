@@ -151,8 +151,11 @@ Benchmark plans run through `edgebench suite`: a JSON configuration lists the
 models and configurations (or a matrix of providers, precisions and batch
 sizes), run parameters, repetitions and cooldowns. Every run is its own
 `edgebench run` process, the configurations run in a rotated order, a
-pre-flight doctor check gates the start, every result is validated, and an
-interrupted suite resumes where it stopped.
+pre-flight gate (AC power and Best performance, sleep settings, an idle
+machine, no other NPU users, doctor, and a sustained-load run that detects
+throttling) decides whether the results are publishable, the power state and
+background load are checked again before every run, every result is
+validated, and an interrupted suite resumes where it stopped.
 
 ```powershell
 .\build\arm64-release\bin\Release\edgebench.exe suite benchmarks\configs\smoke.json --dry-run

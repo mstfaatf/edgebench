@@ -101,7 +101,9 @@ are relative to the configuration file's directory. Unknown keys are errors.
 | `repetitions` | How often every configuration runs (default 1) |
 | `rotation` | `rotated` (default) or `blocked` ([Run order](#run-order)) |
 | `cooldown_s` | Default idle period before every run, in seconds (default 5) |
-| `preflight` | `{checks, fail_on_warn}` ([Pre-flight gate](#pre-flight-gate)) |
+| `preflight` | `{checks, fail_on_warn, idle {window_s, max_cpu_ratio}, sleep {margin_s}, sustained_load {legs, window_s, max_drift_ratio}}` ([Pre-flight gate](#pre-flight-gate)); a leg is `{model` or `path, provider, precision, batch, duration_s}` |
+| `in_flight` | `{load_sample_s, max_wait_s, power_max_wait_s, on_gate_loss}` ([In-flight check](#in-flight-check)) |
+| `retry_flagged` | How many times a run flagged for background load or trial spread runs again (default 1) |
 
 ### Models
 
@@ -174,6 +176,7 @@ keys above; it selects the configurations whose values equal all of them
 | `profile_accelerator` | `false` | NPU: `--profile-accelerator` (the profiled pass) |
 | `profile_iterations` | 50 | NPU: `--profile-iterations` (with `profile_accelerator`) |
 | `cooldown_s` | 5 (or the top-level `cooldown_s`) | The suite's idle period before this run, in seconds |
+| `process_priority` | `normal` | `--process-priority`: `high` is opt-in ([Process scheduling](#process-scheduling)) |
 
 `init`:
 
@@ -236,24 +239,87 @@ changes them.
 
 Before the first run (and again on every resume) the suite runs its gate: an
 ordered list of checks, each with a name, a status (`pass`, `warn`, `fail`),
-a summary and details, all recorded in the manifest. Any `fail` stops the
-suite before its first run (exit 1); with `preflight.fail_on_warn` a `warn`
-does too.
+a summary and details (the measured values), all recorded in the manifest
+together with the effective thresholds. Any `fail` stops the suite before its
+first run (exit 1); with `preflight.fail_on_warn` a `warn` does too. The suite
+is **publishable only if every check passed** (no warnings), the gate was
+never skipped, the build had no uncommitted changes, and the gate was not
+lost during the suite (see [In-flight check](#in-flight-check)).
 
-| Check | What it does |
-|---|---|
-| `doctor` | Runs `edgebench doctor --json --quick` as a child process and saves the report as `preflight/doctor-<n>.json`. `fail` if doctor exits non-zero or prints no report; `warn` if it passes with warnings (for example the power mode or background load); details hold every doctor check's status and the versions doctor reports (ONNX Runtime, QNN EP, QAIRT SDK) |
+| Check | Passes when | Details recorded |
+|---|---|---|
+| `power` | On AC power, the effective Windows power mode overlay (`PowerGetEffectiveOverlayScheme`) is Best performance, battery saver off. Anything else, or a value that cannot be read, fails | source, power mode and overlay GUID, power plan and GUID, battery saver, battery percent |
+| `sleep` | The active scheme's AC sleep and hibernate timeouts are "never" or longer than the estimated duration plus `preflight.sleep.margin_s` (default 1800 s). The failure names the command that fixes it (`powercfg /change standby-timeout-ac 0`, `powercfg /change hibernate-timeout-ac 0`) | both timeouts, the time required |
+| `npu_users` | No other process has `QnnHtp*.dll` or `onnxruntime_providers_qnn.dll` loaded. Another user is a **warning**, never a failure: processes of other users and protected processes cannot be inspected without elevation, and a loaded DLL does not mean the NPU is busy | the users found, processes scanned, processes not inspectable |
+| `idle` | The CPU load of other processes over `preflight.idle.window_s` (default 30 s; this process's own time excluded) is at most `preflight.idle.max_cpu_ratio` (default 0.05), and no known offender is busy (below) | load, window, the top processes by CPU share, every offender found |
+| `doctor` | `edgebench doctor --json --quick` (a child process; the report is saved as `preflight/doctor-<n>.json`) exits 0 without warnings; `warn` if it passes with warnings | every doctor check's status, the versions doctor reports (ONNX Runtime, QNN EP, QAIRT SDK) |
+| `sustained_load` | For each leg (default: ResNet-18 FP32 b1 on the CPU for 180 s, then ResNet-18 INT8 b1 on the NPU for 120 s), one continuous run: a short calibration run (200 inferences) gives the mean latency, then one trial long enough for the leg's duration. The p50 of each `window_s` (default 30 s) of measured time forms a series; the check fails if the last window is slower than the first by more than `max_drift_ratio` (default 0.05) | per leg: the p50 series, first and last window, drift, iterations, the result file |
 
-`preflight.checks` lists the checks to run (default `["doctor"]`). A suite is
-publishable only if its gate included every required check (currently
-`doctor`) and never was skipped.
+The checks run in the order above: the idle sample comes before the checks
+that load the machine. The sustained-load check runs once per invocation,
+also on every resume.
+
+**Known offenders** (engine `suite_gate.cpp`, `known_offenders()`; shares are
+of all CPU time during the sample):
+
+| Process | Group | Busy (at or above) | Busy | Present, not busy |
+|---|---|---|---|---|
+| `MoUsoCoreWorker.exe`, `BackgroundDownload.exe`, `TiWorker.exe`, `TrustedInstaller.exe` | Windows Update | 0.5 % | fail | warn |
+| `wuauserv` service (its host process) | Windows Update | 0.5 % | fail | warn |
+| `OfficeClickToRun.exe` | Microsoft 365 updates | 0.5 % | fail | pass |
+| `mscorsvw.exe`, `ngen.exe`, `ngentask.exe` | .NET native image generation | 0.5 % | fail | warn |
+| `MsMpEng.exe` | Defender (an active scan) | 2 % | fail | pass |
+| `SearchIndexer.exe`, `SearchProtocolHost.exe` | indexing | 1 % | warn | pass |
+| `Code.exe`, `chrome.exe`, `msedge.exe`, `Teams.exe`, `ms-teams.exe` | open interactive applications | any | warn | warn |
+
+`preflight.checks` lists the checks to run (default: all six, in this
+order); leaving one out makes the suite not publishable.
 
 `--skip-preflight` is for development. The manifest records it
 (`preflight_ever_skipped`, which never becomes false again for that suite),
-`publishable` is `false`, and every result from that suite has
-`suite.preflight_skipped: true` and a `preflight_skipped` warning; the
-validator reports `result_not_publishable` for such a result, so it fails
+`publishable` is `false`, every result from that suite has
+`suite.preflight_skipped: true` and a `preflight_skipped` warning, and the
+in-flight check is off.
+
+A result of a suite that is not publishable says so (`suite.publishable:
+false`); the validator reports `result_not_publishable` for it, so it fails
 `validate_results.py --strict`, which published results are checked with.
+
+**Keeping the machine awake.** While the suite runs it asks Windows to keep
+the system awake (`SetThreadExecutionState` with `ES_SYSTEM_REQUIRED |
+ES_CONTINUOUS`; the display may still turn off) and releases the request when
+it ends, also after Ctrl+C or an error. This does not stop the sleep that
+closing the lid causes: leave the lid open, or set its AC action to "Do
+nothing".
+
+## In-flight check
+
+Conditions change during a long suite (an update can start at night), so
+before every run, when the gate includes `power` and `idle`:
+
+- **Power**: AC and Best performance again. If not, the suite waits, polling
+  every 15 s, up to `in_flight.power_max_wait_s` (default 600 s); if the power
+  state comes back the suite continues. If it does not (or at once with
+  `in_flight.on_gate_loss: "stop"`), the suite stops (exit 1, status
+  `aborted`, resumable), the manifest records `gate_lost`, and the suite is
+  not publishable.
+- **Load**: the cooldown before the run doubles as a load sample (at least
+  `in_flight.load_sample_s`, default 5 s). Above the idle threshold the suite
+  waits 30 s, then twice as long each time, sampling again after each wait, up
+  to `in_flight.max_wait_s` (default 600 s) in all; if the load is still high
+  the run starts anyway and its manifest entry says `ran_under_load`.
+
+Each run's manifest entry holds what was checked (`in_flight`: power state,
+power wait, every load sample with its top processes, load wait), and the
+manifest and the summary hold the total time spent waiting. Results carry
+their run's wait in `suite.in_flight_wait_s`.
+
+**Retries.** After the main pass, every run whose result has a
+`background_cpu_load_high` or `trial_spread_high` warning runs again, up to
+`retry_flagged` times (default 1; 0 turns it off). The flagged attempt's
+output is moved to `discarded/` and recorded in the run's `history` with the
+reason; the new attempt has its own in-flight check, and its result
+(`suite.attempt` 2, ...) replaces the old one in the run's entry.
 
 ## The manifest
 
@@ -264,25 +330,32 @@ and by `scripts/validate_suite.py`. It holds:
 - the suite: name, configuration file path, the configuration itself and its
   SHA256 (of the canonical JSON);
 - `status`: `running`, `completed` (every run was attempted; some may have
-  failed), `interrupted` or `aborted` (pre-flight failed, or `--fail-fast`);
+  failed), `interrupted` or `aborted` (pre-flight failed, `--fail-fast`, or
+  the gate was lost);
 - the tool (version, git commit, dirty flag, build type, results schema
   version) and the versions doctor reported;
-- `publishable` and the reasons when not (pre-flight skipped or incomplete,
-  or built from a working tree with uncommitted changes);
-- every pre-flight attempt with every check, every invocation (start, end,
-  resumed, options, exit code), the estimate, counts by status;
+- `publishable` and the reasons when not; `gate_passed`; `gate_lost` (why
+  the suite stopped when the power state did not come back); the total time
+  spent waiting before runs (`in_flight_wait_s`);
+- every pre-flight attempt with its effective thresholds (`settings`) and every
+  check with its measurements, every invocation (start, end, resumed, options,
+  exit code), the estimate (with the gate's share), counts by status;
 - every planned run: run ID, configuration ID, label, order index,
   repetition, the resolved configuration, status (`pending`, `running`,
   `done`, `failed`, `skipped`), attempts, exit code and its name, start and end
   time, duration, the cooldown before it, the estimate, its output directory,
   result file and its SHA256, log file, the reason it failed, the validation
   outcome and issues, the codes of the result's warnings, the cache-building
-  run (`init: "cached"`), and the output of discarded attempts.
+  run (`init: "cached"`), the output of discarded attempts, the in-flight
+  check before the latest attempt, the number of `retry_flagged` retries, and
+  the `history` of earlier attempts (status, exit code, warnings, why it was
+  set aside, where its output went).
 
 ```text
 <suite dir>/suite-manifest.json
 <suite dir>/suite-config.json          the configuration file as read
 <suite dir>/preflight/doctor-<n>.json  one doctor report (and log) per attempt
+<suite dir>/preflight/sustained-<n>/   the sustained-load runs of attempt n
 <suite dir>/runs/<short id>/           a run: result, latencies, run.log, validation.txt
 <suite dir>/runs/<short id>/cache_build/  its cache-building run (init "cached")
 <suite dir>/qnn-context/               the suite's EP context cache
@@ -328,6 +401,10 @@ Every result of a suite run has a top-level `suite` block (results schema
 | `repetition`, `order_index` | 0-based |
 | `cooldown_s_before` | The suite's idle period before the run |
 | `preflight_skipped` | `true` if the suite ran with `--skip-preflight` |
+| `attempt` | 1-based attempt of the run (after an interruption, a failure or a retry) |
+| `gate_passed` | Every pre-flight check passed |
+| `publishable` | The suite was publishable when the run started; `false` makes `--strict` validation fail |
+| `in_flight_wait_s` | Time the suite waited before this run (power or load) |
 
 The suite passes these to `edgebench run` with hidden command-line options
 (not environment variables), so a run started by hand never has the block.
@@ -336,7 +413,7 @@ The suite passes these to `edgebench run` with hidden command-line options
 
 `--dry-run` and every real start print an estimated duration, per run and in
 total. It errs toward too long, for planning unattended runs. Per run it
-adds: the process start and fixed costs (3 s, 4 s on the NPU), per trial the
+adds: the process start and fixed costs (1 s, 1.5 s on the NPU), per trial the
 trial cooldown, one timed session creation (cold, or cached for an EP
 context) and `warmup + iterations` inferences (plus the init breakdown's
 three idles and three session creations with `init_breakdown`), the load
@@ -344,8 +421,14 @@ sample when `trial_cooldown_ms` is 0, the placement session, the cached vs
 compiled output check and context build for `build` / `cached`, the
 cache-building run for `cached`, the profiled pass (one session plus
 `warmup + profile_iterations` inferences at three times the latency, at least
-15 ms more each), 1.5 s for validating the result, and the cooldown. Then
-×1.25. The suite adds 5 s for the pre-flight gate (×1.25).
+15 ms more each), 1 s for validating the result, the cooldown, and the
+in-flight load sample where it is longer than the cooldown. Then ×1.25. The
+fixed costs are calibrated on suite runs of the autoencoder (0.16 s per CPU
+run and 0.6 s per NPU run outside the measured iterations, idle periods and
+session creations; 0.3 s per validation), with a wide margin. The gate adds
+5 s for doctor, the idle window, and per sustained-load leg its duration, two
+process starts and four session creations and 240 inferences of calibration
+and warm-up (×1.25); the output shows the gate's share.
 
 The latency and session times come from earlier results under
 `benchmarks/results/` (local and published) with the same model SHA256,
@@ -356,6 +439,37 @@ item per inference, 0.5 s + 0.05 s per MB per session; NPU: 1 ms + 0.2 ms
 per MB and batch item, 3 s + 0.1 s per MB and batch item per compiled
 session, 1.2× that to build a context, 1 s to load one). The output says how
 many configurations were estimated each way.
+
+## Process scheduling
+
+Runs keep the Windows defaults: normal priority, no CPU affinity, no timer
+resolution request. `process_priority: "high"` (`run --process-priority
+high`) is available as an opt-in and is always recorded
+(`config.process_priority`).
+
+A short comparison on the autoencoder at batch 1 (3 trials × 20,000
+iterations, 200 warm-up, 1000 ms before each trial; each condition 3 times,
+interleaved; the machine had background load in most runs, from Office and
+update activity): medians over the 3 runs of p50, p99 and max, and the mean
+spike count per run (60,000 iterations) and spike effect on the mean.
+
+| Model | Condition | p50 ms | p99 ms | max ms | spikes / run | mean shift |
+|---|---|---|---|---|---|---|
+| CPU FP32 | default | 0.0350 | 0.0470 | 0.44 | 2.0 | +0.04 % |
+| CPU FP32 | high priority | 0.0352 | 0.0430 | 0.24 | 0.3 | +0.00 % |
+| CPU FP32 | pinned to one cluster (4 cores) | 0.0295 | 0.0438 | 3.37 | 30.0 | +1.44 % |
+| CPU FP32 | timer resolution 1 ms | 0.0353 | 0.0466 | 0.41 | 3.3 | +0.12 % |
+| NPU INT8 | default | 0.0499 | 0.0786 | 1.35 | 10.0 | +0.35 % |
+| NPU INT8 | high priority | 0.0498 | 0.0773 | 0.31 | 1.7 | +0.03 % |
+| NPU INT8 | pinned to one cluster (4 cores) | 0.0500 | 0.0750 | 2.74 | 19.3 | +0.55 % |
+| NPU INT8 | timer resolution 1 ms | 0.0497 | 0.0769 | 1.93 | 6.7 | +0.16 % |
+
+High priority had the fewest spikes in every repetition of both models, with
+the same medians; on this model even the default's spikes move the mean by
+less than 0.4 %. Pinning the CPU run's 4 threads to one cluster of the
+Snapdragon X Plus (cores 0 to 3, which share an L2 cache) made its median 16 %
+faster but brought many more spikes; it changes what is measured, so it is
+not an option. A 1 ms timer resolution showed no clear effect.
 
 ## Exit codes
 

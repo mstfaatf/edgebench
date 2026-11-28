@@ -33,6 +33,7 @@ one inference without measuring or writing anything.
 | `--model PATH` | (required) | Must exist, be a regular file that can be opened for reading, and end in `.onnx` (any case) |
 | `--provider NAME` | `cpu` | `cpu` (ONNX Runtime's CPU EP) or `npu` (the QNN EP on the NPU; ARM64 builds only, see [NPU runs](#npu-runs)) |
 | `--threads N` | `4` | CPU intra-op threads, 1 to 256. Always set explicitly and recorded; there is no "ONNX Runtime default" setting, because CPU latency depends strongly on it. More threads than logical processors is allowed, with a `threads_exceed_logical_processors` warning |
+| `--process-priority CLASS` | `normal` | Windows priority class of the run's process: `normal` (as started) or `high` (`HIGH_PRIORITY_CLASS`; opt-in, fewer latency spikes on a loaded machine, [suite.md](suite.md#process-scheduling)). Recorded as `config.process_priority` |
 | `--binding MODE` | `iobinding` | `run`: `Session::Run` with input and output values created per call. `iobinding`: IoBinding with buffers allocated once. Recorded as `config.run_binding` = `run` / `iobinding_preallocated` |
 | `--warmup N` | `20` | Unmeasured iterations before each trial, 0 to 100,000 |
 | `--iterations N` | `200` | Measured iterations per trial, 1 to 1,000,000 |
@@ -874,10 +875,12 @@ the pre-flight gate, the manifest, resuming and the duration estimate are in
 
 `run` has hidden options that only `suite` passes (`--suite-name`,
 `--suite-config-hash`, `--suite-run-id`, `--suite-repetition`,
-`--suite-order-index`, `--suite-cooldown-s-before`, `--suite-preflight-skipped`):
-they put the result's `suite` block ([results-schema.md](results-schema.md#suite-link)).
-They are all given together or not at all (otherwise a usage error), and they
-do not change what is measured.
+`--suite-order-index`, `--suite-cooldown-s-before`, `--suite-attempt`,
+`--suite-in-flight-wait-s`, and the flags `--suite-preflight-skipped`,
+`--suite-gate-passed`, `--suite-publishable`): they put the result's `suite`
+block ([results-schema.md](results-schema.md#suite-link)). The options are all
+given together or not at all, and the flags need them (otherwise a usage
+error); none of them changes what is measured.
 
 ## Exit codes
 
