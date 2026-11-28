@@ -66,4 +66,45 @@ inline constexpr std::string_view kTrialSpreadStatistic = "trial_p50";
 /// False for a single trial.
 bool trial_spread_high(const TrialVariation& medians);
 
+// ---------------------------------------------------------------- spikes
+//
+// A spike is a measured iteration slower than kSpikeFactor times its trial's
+// median, and at least kSpikeFloorMs slower than the median. The floor keeps
+// sub-millisecond jitter of very fast models (an interrupt or a cache miss adds
+// up to about 0.15 ms to a 0.05 ms inference) from counting as a spike: on the
+// local CPU/NPU matrix, no autoencoder trial (medians 0.04 to 0.25 ms) had an
+// iteration more than 0.15 ms above its median, while every isolated outlier of
+// the image models was 1.3 ms or more above it. The spike statistics only
+// report: medians, percentiles and means keep every sample.
+
+inline constexpr double kSpikeFactor = 2.0;
+inline constexpr double kSpikeFloorMs = 0.25;
+/// latency_spikes_high: the spikes move the mean by more than this fraction ...
+inline constexpr double kHighSpikeMeanShift = 0.05;
+/// ... or more than this fraction of the iterations are spikes. On the local
+/// matrix, trials with real outliers had 1 to 7 % of them; 2 % needs more than
+/// two spikes in a 100-iteration trial.
+inline constexpr double kHighSpikeRate = 0.02;
+
+/// timing.trials[].spikes (one trial) or timing.aggregate.spikes (pooled).
+struct SpikeStats {
+    std::size_t iterations = 0;
+    std::size_t count = 0;
+    std::optional<double> threshold_ms;  // one trial only: max(k x median, median + floor)
+    double rate = 0;                     // count / iterations
+    double max_to_median_ratio = 0;      // slowest iteration over its trial's median
+    double mean_ms = 0;
+    double mean_without_spikes_ms = 0;
+    double mean_shift_ratio = 0;  // mean / mean_without_spikes - 1
+};
+
+/// The spikes of one trial's latencies (non-empty, in any order).
+SpikeStats compute_spikes(std::span<const double> latencies_ms);
+
+/// The spikes of several trials pooled, each judged against its own median.
+SpikeStats combine_spikes(std::span<const std::vector<double>> trials_latencies_ms);
+
+/// True if `aggregate` exceeds kHighSpikeMeanShift or kHighSpikeRate (strictly).
+bool spikes_high(const SpikeStats& aggregate);
+
 }  // namespace edgebench

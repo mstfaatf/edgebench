@@ -80,6 +80,72 @@ TrialVariation compute_trial_variation(std::span<const double> trial_values_ms) 
     return v;
 }
 
+namespace {
+
+struct SpikeSums {
+    std::size_t iterations = 0, count = 0;
+    double sum = 0, sum_without = 0, max_ratio = 0;
+};
+
+// Adds one trial: the sum over the sorted values (as compute_stats() sums them).
+double add_trial(SpikeSums& s, std::span<const double> latencies_ms) {
+    if (latencies_ms.empty())
+        throw std::invalid_argument("compute_spikes: no latencies");
+    std::vector<double> sorted(latencies_ms.begin(), latencies_ms.end());
+    std::sort(sorted.begin(), sorted.end());
+    const double median = nearest_rank(sorted, 50);
+    const double threshold = std::max(kSpikeFactor * median, median + kSpikeFloorMs);
+    for (double x : sorted) {
+        s.sum += x;
+        if (x > threshold)
+            ++s.count;
+        else
+            s.sum_without += x;
+    }
+    s.iterations += sorted.size();
+    if (median > 0)
+        s.max_ratio = std::max(s.max_ratio, sorted.back() / median);
+    return threshold;
+}
+
+SpikeStats finish(const SpikeSums& s) {
+    SpikeStats r;
+    r.iterations = s.iterations;
+    r.count = s.count;
+    r.rate =
+        s.iterations > 0 ? static_cast<double>(s.count) / static_cast<double>(s.iterations) : 0.0;
+    r.max_to_median_ratio = s.max_ratio;
+    r.mean_ms = s.sum / static_cast<double>(s.iterations);
+    // At least half of a trial is at or below its median, so never empty.
+    r.mean_without_spikes_ms = s.sum_without / static_cast<double>(s.iterations - s.count);
+    r.mean_shift_ratio =
+        r.mean_without_spikes_ms > 0 ? r.mean_ms / r.mean_without_spikes_ms - 1.0 : 0.0;
+    return r;
+}
+
+}  // namespace
+
+SpikeStats compute_spikes(std::span<const double> latencies_ms) {
+    SpikeSums s;
+    const double threshold = add_trial(s, latencies_ms);
+    SpikeStats r = finish(s);
+    r.threshold_ms = threshold;
+    return r;
+}
+
+SpikeStats combine_spikes(std::span<const std::vector<double>> trials) {
+    if (trials.empty())
+        throw std::invalid_argument("combine_spikes: no trials");
+    SpikeSums s;
+    for (const std::vector<double>& t : trials)
+        add_trial(s, t);
+    return finish(s);
+}
+
+bool spikes_high(const SpikeStats& a) {
+    return a.mean_shift_ratio > kHighSpikeMeanShift || a.rate > kHighSpikeRate;
+}
+
 bool trial_spread_high(const TrialVariation& v) {
     if (v.trial_mean_cv_ratio && *v.trial_mean_cv_ratio > kHighTrialMedianCv)
         return true;

@@ -334,8 +334,8 @@ namespace {
 
 // Protobuf length-delimited field (lengths < 128 only).
 std::string pb_bytes(int field, const std::string& payload) {
-    return std::string(1, static_cast<char>((field << 3) | 2)) +
-           static_cast<char>(payload.size()) + payload;
+    return std::string(1, static_cast<char>((field << 3) | 2)) + static_cast<char>(payload.size()) +
+           payload;
 }
 
 // A minimal ModelProto: ir_version 8, a graph with only a name, and metadata_props.
@@ -372,8 +372,8 @@ TEST(OnnxInspect, NormalizationOnlyFromKnownValues) {
     EXPECT_FALSE(eb::normalization_from_metadata(
                      inspect_string(model_with_metadata({{"edgebench.normalization", "yes"}})))
                      .has_value());
-    EXPECT_FALSE(eb::normalization_from_metadata(inspect_string(model_with_metadata({})))
-                     .has_value());
+    EXPECT_FALSE(
+        eb::normalization_from_metadata(inspect_string(model_with_metadata({}))).has_value());
     // The fixture has no metadata at all.
     const auto f = eb::inspect_onnx_file(kFixtures / "fixed_float32.onnx");
     ASSERT_TRUE(f.ok());
@@ -392,10 +392,12 @@ TEST(OnnxInspect, QuantizationRecordFromMetadata) {
     EXPECT_EQ(q.tool, "onnxruntime.quantization 1.32.0");
 
     for (const std::string bad : {"", "0", "-3", "20x", "x"}) {
-        const auto b = inspect_string(model_with_metadata({{"edgebench.quant.calibration_count", bad}}));
+        const auto b =
+            inspect_string(model_with_metadata({{"edgebench.quant.calibration_count", bad}}));
         EXPECT_FALSE(eb::quantization_from_metadata(b).calibration_count.has_value()) << bad;
     }
-    const eb::QuantizationRecord none = eb::quantization_from_metadata(inspect_string(model_with_metadata({})));
+    const eb::QuantizationRecord none =
+        eb::quantization_from_metadata(inspect_string(model_with_metadata({})));
     EXPECT_FALSE(none.calibration_dataset || none.calibration_count || none.tool);
 }
 
@@ -405,4 +407,86 @@ TEST(OnnxInspect, RejectsNonOnnxBytes) {
     ASSERT_FALSE(r.ok());
     EXPECT_EQ(r.error().kind, "invalid_onnx");
     EXPECT_FALSE(eb::inspect_onnx({}).ok());
+}
+
+// ------------------------------------------------------------------- spikes
+
+TEST(Spikes, AllEqualHasNone) {
+    const std::vector<double> v(100, 2.0);
+    const eb::SpikeStats s = eb::compute_spikes(v);
+    EXPECT_EQ(s.iterations, 100u);
+    EXPECT_EQ(s.count, 0u);
+    EXPECT_DOUBLE_EQ(*s.threshold_ms, 4.0);  // 2 x median beats median + 0.25
+    EXPECT_DOUBLE_EQ(s.mean_ms, 2.0);
+    EXPECT_DOUBLE_EQ(s.mean_without_spikes_ms, 2.0);
+    EXPECT_DOUBLE_EQ(s.mean_shift_ratio, 0.0);
+    EXPECT_DOUBLE_EQ(s.max_to_median_ratio, 1.0);
+    EXPECT_FALSE(eb::spikes_high(s));
+}
+
+TEST(Spikes, OneSpikeIsCountedAndItsEffectOnTheMeanReported) {
+    std::vector<double> v(99, 4.0);
+    v.push_back(40.0);  // 10 x the median
+    const eb::SpikeStats s = eb::compute_spikes(v);
+    EXPECT_EQ(s.count, 1u);
+    EXPECT_DOUBLE_EQ(s.rate, 0.01);
+    EXPECT_DOUBLE_EQ(s.max_to_median_ratio, 10.0);
+    EXPECT_DOUBLE_EQ(s.mean_without_spikes_ms, 4.0);
+    EXPECT_NEAR(s.mean_ms, 4.36, 1e-12);
+    EXPECT_NEAR(s.mean_shift_ratio, 0.09, 1e-12);
+    EXPECT_TRUE(eb::spikes_high(s));  // the mean moves 9 % although the rate is 1 %
+}
+
+TEST(Spikes, ExactlyAtTheThresholdIsNotASpike) {
+    std::vector<double> v(10, 1.0);
+    v.back() = 2.0;  // 2 x median, not above it
+    EXPECT_EQ(eb::compute_spikes(v).count, 0u);
+    v.back() = 2.0000001;
+    EXPECT_EQ(eb::compute_spikes(v).count, 1u);
+}
+
+TEST(Spikes, TheFloorKeepsJitterOfTinyModelsOut) {
+    // A 0.05 ms model: 0.2 ms slower is 5 x the median but within the 0.25 ms floor.
+    std::vector<double> v(100, 0.05);
+    v[10] = 0.25;
+    v[20] = 0.29;
+    eb::SpikeStats s = eb::compute_spikes(v);
+    EXPECT_DOUBLE_EQ(*s.threshold_ms, 0.30);
+    EXPECT_EQ(s.count, 0u);
+    v[30] = 0.31;  // above median + floor
+    s = eb::compute_spikes(v);
+    EXPECT_EQ(s.count, 1u);
+}
+
+TEST(Spikes, PooledTrialsAreEachJudgedAgainstTheirOwnMedian) {
+    // 3 ms is a spike in a 1 ms trial but normal in a 3 ms trial.
+    std::vector<std::vector<double>> trials = {std::vector<double>(50, 1.0),
+                                               std::vector<double>(50, 3.0)};
+    trials[0][0] = 3.0;
+    const eb::SpikeStats s = eb::combine_spikes(trials);
+    EXPECT_EQ(s.iterations, 100u);
+    EXPECT_EQ(s.count, 1u);
+    EXPECT_FALSE(s.threshold_ms.has_value());
+    EXPECT_DOUBLE_EQ(s.max_to_median_ratio, 3.0);
+    EXPECT_NEAR(s.mean_ms, (49 * 1.0 + 3.0 + 50 * 3.0) / 100, 1e-12);
+    EXPECT_NEAR(s.mean_without_spikes_ms, (49 * 1.0 + 50 * 3.0) / 99, 1e-12);
+}
+
+TEST(Spikes, RateAloneCanFlag) {
+    std::vector<double> v(100, 1.0);
+    for (int i = 0; i < 3; ++i)
+        v[i] = 2.01;  // 3 % spikes, each barely above the threshold
+    const eb::SpikeStats s = eb::compute_spikes(v);
+    EXPECT_EQ(s.count, 3u);
+    EXPECT_LT(s.mean_shift_ratio, eb::kHighSpikeMeanShift);
+    EXPECT_TRUE(eb::spikes_high(s));
+    v[2] = 1.0;  // 2 %: not above the rate threshold
+    EXPECT_FALSE(eb::spikes_high(eb::compute_spikes(v)));
+}
+
+TEST(Spikes, SingleIterationAndErrors) {
+    const std::vector<double> one = {5.0};
+    EXPECT_EQ(eb::compute_spikes(one).count, 0u);
+    EXPECT_THROW(eb::compute_spikes(std::vector<double>{}), std::invalid_argument);
+    EXPECT_THROW(eb::combine_spikes(std::span<const std::vector<double>>{}), std::invalid_argument);
 }
